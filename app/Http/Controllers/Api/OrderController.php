@@ -1,0 +1,691 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Domain\Audit\AuditEventKeys;
+use App\Domain\Audit\AuditTrailService;
+use App\Domain\Billing\QuotaExceededException;
+use App\Domain\Billing\QuotaService;
+use App\Domain\Messaging\WaDispatchService;
+use App\Domain\Orders\OrderStatusTransitionValidator;
+use App\Http\Controllers\Controller;
+use App\Models\Customer;
+use App\Models\Order;
+use App\Models\OrderItem;
+use App\Models\OutletService;
+use App\Models\Payment;
+use App\Models\Service;
+use App\Models\User;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+
+class OrderController extends Controller
+{
+    public function __construct(
+        private readonly QuotaService $quotaService,
+        private readonly WaDispatchService $waDispatchService,
+        private readonly AuditTrailService $auditTrail,
+    ) {
+    }
+
+    public function index(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner', 'admin', 'cashier', 'worker', 'courier']);
+
+        $validated = $request->validate([
+            'outlet_id' => ['required', 'uuid'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $query = Order::query()
+            ->with(['customer:id,name,phone_normalized', 'courier:id,name'])
+            ->where('tenant_id', $user->tenant_id)
+            ->where('outlet_id', $validated['outlet_id'])
+            ->latest('created_at');
+
+        $limit = $validated['limit'] ?? 30;
+
+        return response()->json([
+            'data' => $query->limit($limit)->get(),
+        ]);
+    }
+
+    public function show(Request $request, Order $order): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureOrderAccess($user, $order);
+
+        return response()->json([
+            'data' => $order->load([
+                'customer:id,name,phone_normalized,notes',
+                'items',
+                'payments',
+                'courier:id,name,phone',
+            ]),
+        ]);
+    }
+
+    public function store(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner', 'admin', 'cashier']);
+        $sourceChannel = $this->resolveSourceChannel($request, 'web');
+        $actorUserId = $user->id;
+
+        $validated = $request->validate([
+            'outlet_id' => ['required', 'uuid'],
+            'order_code' => ['nullable', 'string', 'max:32'],
+            'invoice_no' => ['nullable', 'string', 'max:50'],
+            'is_pickup_delivery' => ['nullable', 'boolean'],
+            'shipping_fee_amount' => ['nullable', 'integer', 'min:0'],
+            'discount_amount' => ['nullable', 'integer', 'min:0'],
+            'notes' => ['nullable', 'string'],
+            'pickup' => ['nullable', 'array'],
+            'delivery' => ['nullable', 'array'],
+            'customer' => ['required', 'array'],
+            'customer.name' => ['required', 'string', 'max:150'],
+            'customer.phone' => ['required', 'string', 'max:30'],
+            'customer.notes' => ['nullable', 'string'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.service_id' => ['required', 'uuid'],
+            'items.*.qty' => ['nullable', 'numeric', 'min:0.01'],
+            'items.*.weight_kg' => ['nullable', 'numeric', 'min:0.01'],
+        ]);
+
+        $outletId = $validated['outlet_id'];
+        $tenantId = $user->tenant_id;
+        $isPickup = (bool) ($validated['is_pickup_delivery'] ?? false);
+        $shippingFee = (int) ($validated['shipping_fee_amount'] ?? 0);
+        $discount = (int) ($validated['discount_amount'] ?? 0);
+
+        if (Order::query()->where('tenant_id', $tenantId)->where('order_code', $validated['order_code'] ?? '')->exists()) {
+            throw ValidationException::withMessages([
+                'order_code' => ['The order_code has already been used in this tenant.'],
+            ]);
+        }
+
+        try {
+            $order = DB::transaction(function () use ($validated, $tenantId, $outletId, $isPickup, $shippingFee, $discount, $actorUserId, $sourceChannel): Order {
+                $this->quotaService->consumeOrderSlot($tenantId);
+
+                $phone = $this->normalizePhone($validated['customer']['phone']);
+
+                if (! $phone) {
+                    throw ValidationException::withMessages([
+                        'customer.phone' => ['Invalid phone number format.'],
+                    ]);
+                }
+
+                $customer = Customer::query()->updateOrCreate(
+                    ['tenant_id' => $tenantId, 'phone_normalized' => $phone],
+                    [
+                        'name' => $validated['customer']['name'],
+                        'notes' => $validated['customer']['notes'] ?? null,
+                    ]
+                );
+
+                $order = Order::query()->create([
+                    'tenant_id' => $tenantId,
+                    'outlet_id' => $outletId,
+                    'customer_id' => $customer->id,
+                    'invoice_no' => $validated['invoice_no'] ?? null,
+                    'order_code' => $validated['order_code'] ?? $this->generateOrderCode(),
+                    'is_pickup_delivery' => $isPickup,
+                    'laundry_status' => 'received',
+                    'courier_status' => $isPickup ? 'pickup_pending' : null,
+                    'shipping_fee_amount' => $shippingFee,
+                    'discount_amount' => $discount,
+                    'total_amount' => 0,
+                    'paid_amount' => 0,
+                    'due_amount' => 0,
+                    'pickup' => $validated['pickup'] ?? null,
+                    'delivery' => $validated['delivery'] ?? null,
+                    'notes' => $validated['notes'] ?? null,
+                    'created_by' => $actorUserId,
+                    'updated_by' => $actorUserId,
+                    'source_channel' => $sourceChannel,
+                ]);
+
+                $subTotal = 0;
+                $items = $validated['items'];
+
+                foreach ($items as $item) {
+                    $service = Service::query()
+                        ->where('id', $item['service_id'])
+                        ->where('tenant_id', $tenantId)
+                        ->where('active', true)
+                        ->first();
+
+                    if (! $service) {
+                        throw ValidationException::withMessages([
+                            'items' => ["Service {$item['service_id']} is invalid for this tenant."],
+                        ]);
+                    }
+
+                    $outletService = OutletService::query()
+                        ->where('outlet_id', $outletId)
+                        ->where('service_id', $service->id)
+                        ->where('active', true)
+                        ->first();
+
+                    $unitPrice = (int) ($outletService?->price_override_amount ?? $service->base_price_amount);
+
+                    $qty = isset($item['qty']) ? (float) $item['qty'] : null;
+                    $weight = isset($item['weight_kg']) ? (float) $item['weight_kg'] : null;
+
+                    if ($service->unit_type === 'kg' && ! $weight) {
+                        throw ValidationException::withMessages([
+                            'items' => ['weight_kg is required for unit_type kg.'],
+                        ]);
+                    }
+
+                    if ($service->unit_type === 'pcs' && ! $qty) {
+                        throw ValidationException::withMessages([
+                            'items' => ['qty is required for unit_type pcs.'],
+                        ]);
+                    }
+
+                    $metric = $service->unit_type === 'kg' ? (float) $weight : (float) $qty;
+                    $lineSubTotal = (int) round($metric * $unitPrice);
+                    $subTotal += $lineSubTotal;
+
+                    OrderItem::query()->create([
+                        'order_id' => $order->id,
+                        'service_id' => $service->id,
+                        'service_name_snapshot' => $service->name,
+                        'unit_type_snapshot' => $service->unit_type,
+                        'qty' => $qty,
+                        'weight_kg' => $weight,
+                        'unit_price_amount' => $unitPrice,
+                        'subtotal_amount' => $lineSubTotal,
+                    ]);
+                }
+
+                $total = max($subTotal + $shippingFee - $discount, 0);
+
+                $order->forceFill([
+                    'total_amount' => $total,
+                    'paid_amount' => 0,
+                    'due_amount' => $total,
+                    'updated_by' => $actorUserId,
+                    'source_channel' => $sourceChannel,
+                ])->save();
+
+                return $order;
+            });
+        } catch (QuotaExceededException $e) {
+            return response()->json([
+                'reason_code' => 'QUOTA_EXCEEDED',
+                'message' => 'Order quota for the current period has been reached.',
+                'period' => $e->period,
+                'orders_limit' => $e->ordersLimit,
+                'orders_used' => $e->ordersUsed,
+            ], 422);
+        }
+
+        if ($order->is_pickup_delivery) {
+            $this->waDispatchService->enqueueOrderEvent($order, 'WA_PICKUP_CONFIRM', metadata: [
+                'event' => 'order_created',
+                'source' => 'api',
+                'actor_user_id' => $user->id,
+                'source_channel' => $sourceChannel,
+            ]);
+        }
+
+        $this->auditTrail->record(
+            eventKey: AuditEventKeys::ORDER_CREATED,
+            actor: $user,
+            tenantId: $user->tenant_id,
+            outletId: $order->outlet_id,
+            entityType: 'order',
+            entityId: $order->id,
+            metadata: [
+                'order_code' => $order->order_code,
+                'invoice_no' => $order->invoice_no,
+                'total_amount' => $order->total_amount,
+                'is_pickup_delivery' => $order->is_pickup_delivery,
+            ],
+            channel: 'api',
+            request: $request,
+        );
+
+        return response()->json([
+            'data' => $order->load(['customer:id,name,phone_normalized', 'items']),
+        ], 201);
+    }
+
+    public function addPayment(Request $request, Order $order): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner', 'admin', 'cashier']);
+        $this->ensureOrderAccess($user, $order);
+        $sourceChannel = $this->resolveSourceChannel($request, 'web');
+        $actorUserId = $user->id;
+
+        $validated = $request->validate([
+            'amount' => ['required', 'integer', 'min:1'],
+            'method' => ['required', 'string', 'max:30'],
+            'paid_at' => ['nullable', 'date'],
+            'notes' => ['nullable', 'string'],
+        ]);
+
+        $payment = DB::transaction(function () use ($validated, $order, $actorUserId, $sourceChannel): Payment {
+            $payment = Payment::query()->create([
+                'order_id' => $order->id,
+                'amount' => (int) $validated['amount'],
+                'method' => $validated['method'],
+                'paid_at' => $validated['paid_at'] ?? now(),
+                'notes' => $validated['notes'] ?? null,
+                'created_by' => $actorUserId,
+                'updated_by' => $actorUserId,
+                'source_channel' => $sourceChannel,
+            ]);
+
+            $paidAmount = (int) Payment::query()->where('order_id', $order->id)->sum('amount');
+            $dueAmount = max($order->total_amount - $paidAmount, 0);
+
+            $order->forceFill([
+                'paid_amount' => $paidAmount,
+                'due_amount' => $dueAmount,
+                'updated_by' => $actorUserId,
+                'source_channel' => $sourceChannel,
+            ])->save();
+
+            return $payment;
+        });
+
+        $this->auditTrail->record(
+            eventKey: AuditEventKeys::PAYMENT_ADDED,
+            actor: $user,
+            tenantId: $user->tenant_id,
+            outletId: $order->outlet_id,
+            entityType: 'payment',
+            entityId: $payment->id,
+            metadata: [
+                'order_id' => $order->id,
+                'amount' => $payment->amount,
+                'method' => $payment->method,
+            ],
+            channel: 'api',
+            request: $request,
+        );
+
+        return response()->json([
+            'data' => $payment,
+            'order' => $order->fresh(['payments']),
+        ], 201);
+    }
+
+    public function updateLaundryStatus(Request $request, Order $order, OrderStatusTransitionValidator $validator): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner', 'admin', 'worker']);
+        $this->ensureOrderAccess($user, $order);
+        $sourceChannel = $this->resolveSourceChannel($request, 'web');
+
+        $validated = $request->validate([
+            'status' => ['required', 'string', 'max:32'],
+        ]);
+
+        $result = $validator->validateLaundry($order->laundry_status, $validated['status']);
+
+        if (! $result['ok']) {
+            return response()->json([
+                'reason_code' => $result['reason_code'],
+                'message' => $result['message'],
+            ], 422);
+        }
+
+        $previousStatus = $order->laundry_status;
+        $order->forceFill([
+            'laundry_status' => $validated['status'],
+            'updated_by' => $user->id,
+            'source_channel' => $sourceChannel,
+        ])->save();
+
+        if ($validated['status'] === 'ready') {
+            $this->waDispatchService->enqueueOrderEvent($order, 'WA_LAUNDRY_READY', metadata: [
+                'event' => 'laundry_ready',
+                'source' => 'api',
+                'actor_user_id' => $user->id,
+                'source_channel' => $sourceChannel,
+            ]);
+        }
+
+        if ($validated['status'] === 'completed' && ! $order->is_pickup_delivery) {
+            $this->waDispatchService->enqueueOrderEvent($order, 'WA_ORDER_DONE', metadata: [
+                'event' => 'order_done',
+                'source' => 'api',
+                'actor_user_id' => $user->id,
+                'source_channel' => $sourceChannel,
+            ]);
+        }
+
+        $this->auditTrail->record(
+            eventKey: AuditEventKeys::ORDER_LAUNDRY_STATUS_UPDATED,
+            actor: $user,
+            tenantId: $user->tenant_id,
+            outletId: $order->outlet_id,
+            entityType: 'order',
+            entityId: $order->id,
+            metadata: [
+                'from' => $previousStatus,
+                'to' => $validated['status'],
+            ],
+            channel: 'api',
+            request: $request,
+        );
+
+        return response()->json([
+            'data' => $order->fresh(),
+        ]);
+    }
+
+    public function updateCourierStatus(Request $request, Order $order, OrderStatusTransitionValidator $validator): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner', 'admin', 'courier']);
+        $this->ensureOrderAccess($user, $order);
+        $sourceChannel = $this->resolveSourceChannel($request, 'web');
+
+        if (! $order->is_pickup_delivery) {
+            return response()->json([
+                'reason_code' => 'INVALID_TRANSITION',
+                'message' => 'Courier status is only available for pickup-delivery orders.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'status' => ['required', 'string', 'max:32'],
+        ]);
+
+        $current = $order->courier_status ?? 'pickup_pending';
+        $next = $validated['status'];
+        $result = $validator->validateCourier($current, $next);
+
+        if (! $result['ok']) {
+            return response()->json([
+                'reason_code' => $result['reason_code'],
+                'message' => $result['message'],
+            ], 422);
+        }
+
+        if ($next === 'delivery_pending' && ! in_array($order->laundry_status, ['ready', 'completed'], true)) {
+            return response()->json([
+                'reason_code' => 'INVALID_TRANSITION',
+                'message' => 'laundry_status must be ready before setting delivery_pending.',
+            ], 422);
+        }
+
+        $previousStatus = $current;
+        $order->forceFill([
+            'courier_status' => $next,
+            'updated_by' => $user->id,
+            'source_channel' => $sourceChannel,
+        ])->save();
+
+        if ($next === 'pickup_on_the_way') {
+            $this->waDispatchService->enqueueOrderEvent($order, 'WA_PICKUP_OTW', metadata: [
+                'event' => 'courier_pickup_otw',
+                'source' => 'api',
+                'actor_user_id' => $user->id,
+                'source_channel' => $sourceChannel,
+            ]);
+        }
+
+        if ($next === 'delivery_on_the_way') {
+            $this->waDispatchService->enqueueOrderEvent($order, 'WA_DELIVERY_OTW', metadata: [
+                'event' => 'courier_delivery_otw',
+                'source' => 'api',
+                'actor_user_id' => $user->id,
+                'source_channel' => $sourceChannel,
+            ]);
+        }
+
+        if ($next === 'delivered') {
+            $this->waDispatchService->enqueueOrderEvent($order, 'WA_ORDER_DONE', metadata: [
+                'event' => 'order_done',
+                'source' => 'api',
+                'actor_user_id' => $user->id,
+                'source_channel' => $sourceChannel,
+            ]);
+        }
+
+        $this->auditTrail->record(
+            eventKey: AuditEventKeys::ORDER_COURIER_STATUS_UPDATED,
+            actor: $user,
+            tenantId: $user->tenant_id,
+            outletId: $order->outlet_id,
+            entityType: 'order',
+            entityId: $order->id,
+            metadata: [
+                'from' => $previousStatus,
+                'to' => $next,
+            ],
+            channel: 'api',
+            request: $request,
+        );
+
+        return response()->json([
+            'data' => $order->fresh(),
+        ]);
+    }
+
+    public function assignCourier(Request $request, Order $order): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner', 'admin']);
+        $this->ensureOrderAccess($user, $order);
+        $sourceChannel = $this->resolveSourceChannel($request, 'web');
+
+        if (! $order->is_pickup_delivery) {
+            return response()->json([
+                'reason_code' => 'VALIDATION_FAILED',
+                'message' => 'Courier can only be assigned for pickup-delivery orders.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'courier_user_id' => ['required', 'integer'],
+        ]);
+
+        $courier = User::query()
+            ->with('roles:id,key')
+            ->where('id', $validated['courier_user_id'])
+            ->where('tenant_id', $user->tenant_id)
+            ->first();
+
+        if (! $courier || ! $courier->hasRole('courier')) {
+            return response()->json([
+                'reason_code' => 'VALIDATION_FAILED',
+                'message' => 'Assigned user must be an active courier in the same tenant.',
+            ], 422);
+        }
+
+        $order->forceFill([
+            'courier_user_id' => $courier->id,
+            'updated_by' => $user->id,
+            'source_channel' => $sourceChannel,
+        ])->save();
+
+        $this->auditTrail->record(
+            eventKey: AuditEventKeys::ORDER_COURIER_ASSIGNED,
+            actor: $user,
+            tenantId: $user->tenant_id,
+            outletId: $order->outlet_id,
+            entityType: 'order',
+            entityId: $order->id,
+            metadata: [
+                'courier_user_id' => $courier->id,
+            ],
+            channel: 'api',
+            request: $request,
+        );
+
+        return response()->json([
+            'data' => $order->fresh(['courier:id,name,phone']),
+        ]);
+    }
+
+    public function updateSchedule(Request $request, Order $order): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner', 'admin', 'cashier']);
+        $this->ensureOrderAccess($user, $order);
+        $sourceChannel = $this->resolveSourceChannel($request, 'web');
+
+        if ($user->hasRole('cashier') && in_array((string) $order->courier_status, ['pickup_on_the_way', 'picked_up', 'at_outlet', 'delivery_pending', 'delivery_on_the_way', 'delivered'], true)) {
+            return response()->json([
+                'reason_code' => 'SCHEDULE_LOCKED',
+                'message' => 'Cashier can only edit schedule before pickup_on_the_way.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'shipping_fee_amount' => ['nullable', 'integer', 'min:0'],
+            'pickup' => ['nullable', 'array'],
+            'delivery' => ['nullable', 'array'],
+            'notes' => ['nullable', 'string'],
+        ]);
+
+        $newShippingFee = array_key_exists('shipping_fee_amount', $validated)
+            ? (int) $validated['shipping_fee_amount']
+            : $order->shipping_fee_amount;
+
+        $newTotal = max(
+            ($order->total_amount - $order->shipping_fee_amount) + $newShippingFee,
+            0
+        );
+
+        $newDue = max($newTotal - $order->paid_amount, 0);
+
+        $order->forceFill([
+            'shipping_fee_amount' => $newShippingFee,
+            'pickup' => $validated['pickup'] ?? $order->pickup,
+            'delivery' => $validated['delivery'] ?? $order->delivery,
+            'notes' => $validated['notes'] ?? $order->notes,
+            'total_amount' => $newTotal,
+            'due_amount' => $newDue,
+            'updated_by' => $user->id,
+            'source_channel' => $sourceChannel,
+        ])->save();
+
+        $this->auditTrail->record(
+            eventKey: AuditEventKeys::ORDER_SCHEDULE_UPDATED,
+            actor: $user,
+            tenantId: $user->tenant_id,
+            outletId: $order->outlet_id,
+            entityType: 'order',
+            entityId: $order->id,
+            metadata: [
+                'shipping_fee_amount' => $newShippingFee,
+                'total_amount' => $newTotal,
+                'due_amount' => $newDue,
+            ],
+            channel: 'api',
+            request: $request,
+        );
+
+        return response()->json([
+            'data' => $order->fresh(),
+        ]);
+    }
+
+    private function ensureOrderAccess(User $user, Order $order): void
+    {
+        if ($order->tenant_id !== $user->tenant_id) {
+            abort(response()->json([
+                'reason_code' => 'OUTLET_ACCESS_DENIED',
+                'message' => 'You do not have access to the requested order.',
+            ], 403));
+        }
+
+        $isOwner = $user->roles()->where('key', 'owner')->exists();
+
+        if ($isOwner) {
+            return;
+        }
+
+        $hasOutlet = DB::table('user_outlets')
+            ->where('user_id', $user->id)
+            ->where('outlet_id', $order->outlet_id)
+            ->exists();
+
+        if (! $hasOutlet) {
+            abort(response()->json([
+                'reason_code' => 'OUTLET_ACCESS_DENIED',
+                'message' => 'You do not have access to the requested order.',
+            ], 403));
+        }
+    }
+
+    /**
+     * @param array<int, string> $roles
+     */
+    private function ensureRole(User $user, array $roles): void
+    {
+        $hasRole = $user->roles()->whereIn('key', $roles)->exists();
+
+        if ($hasRole) {
+            return;
+        }
+
+        abort(response()->json([
+            'reason_code' => 'ROLE_ACCESS_DENIED',
+            'message' => 'You are not allowed to perform this action.',
+        ], 403));
+    }
+
+    private function resolveSourceChannel(Request $request, string $fallback = 'web'): string
+    {
+        $raw = strtolower((string) $request->header('X-Source-Channel', $fallback));
+
+        return in_array($raw, ['mobile', 'web', 'system'], true) ? $raw : $fallback;
+    }
+
+    private function normalizePhone(string $phone): ?string
+    {
+        $digits = preg_replace('/\D+/', '', $phone) ?? '';
+
+        if ($digits === '') {
+            return null;
+        }
+
+        if (Str::startsWith($digits, '00')) {
+            $digits = substr($digits, 2);
+        }
+
+        if (Str::startsWith($digits, '0')) {
+            $digits = '62'.substr($digits, 1);
+        } elseif (Str::startsWith($digits, '8')) {
+            $digits = '62'.$digits;
+        }
+
+        if (! Str::startsWith($digits, '62')) {
+            return null;
+        }
+
+        if (strlen($digits) < 9 || strlen($digits) > 16) {
+            return null;
+        }
+
+        return $digits;
+    }
+
+    private function generateOrderCode(): string
+    {
+        return 'ORD-'.strtoupper(Str::random(8));
+    }
+}

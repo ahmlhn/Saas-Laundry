@@ -1,0 +1,158 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\AuditEvent;
+use App\Models\Outlet;
+use App\Models\Plan;
+use App\Models\Role;
+use App\Models\Tenant;
+use App\Models\User;
+use Database\Seeders\RolesAndPlansSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
+use Tests\TestCase;
+
+class AuthApiTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private Tenant $tenant;
+
+    private Outlet $allowedOutlet;
+
+    private Outlet $blockedOutlet;
+
+    private User $user;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->seed(RolesAndPlansSeeder::class);
+
+        $plan = Plan::query()->where('key', 'standard')->firstOrFail();
+        $adminRole = Role::query()->where('key', 'admin')->firstOrFail();
+
+        $this->tenant = Tenant::query()->create([
+            'name' => 'Tenant Test',
+            'current_plan_id' => $plan->id,
+            'status' => 'active',
+        ]);
+
+        $this->allowedOutlet = Outlet::query()->create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Outlet Allowed',
+            'code' => 'ALW',
+            'timezone' => 'Asia/Jakarta',
+            'address' => 'Address A',
+        ]);
+
+        $this->blockedOutlet = Outlet::query()->create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Outlet Blocked',
+            'code' => 'BLK',
+            'timezone' => 'Asia/Jakarta',
+            'address' => 'Address B',
+        ]);
+
+        $this->user = User::factory()->create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Admin User',
+            'email' => 'admin@example.com',
+            'status' => 'active',
+            'password' => Hash::make('password'),
+        ]);
+
+        $this->user->roles()->syncWithoutDetaching([$adminRole->id]);
+        $this->user->outlets()->syncWithoutDetaching([$this->allowedOutlet->id]);
+    }
+
+    public function test_login_returns_token_and_context(): void
+    {
+        $response = $this->postJson('/api/auth/login', [
+            'email' => 'admin@example.com',
+            'password' => 'password',
+            'device_name' => 'test-device',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertHeader('X-Request-Id')
+            ->assertJsonPath('data.user.email', 'admin@example.com')
+            ->assertJsonPath('data.plan.key', 'standard');
+
+        $this->assertNotEmpty($response->json('access_token'));
+
+        $this->assertDatabaseHas('audit_events', [
+            'tenant_id' => $this->tenant->id,
+            'user_id' => $this->user->id,
+            'event_key' => 'AUTH_LOGIN_SUCCESS',
+            'channel' => 'api',
+        ]);
+    }
+
+    public function test_me_requires_authentication(): void
+    {
+        $this->getJson('/api/me')->assertUnauthorized();
+    }
+
+    public function test_outlet_scope_rejects_unassigned_outlet(): void
+    {
+        $token = $this->postJson('/api/auth/login', [
+            'email' => 'admin@example.com',
+            'password' => 'password',
+        ])->json('access_token');
+
+        $this->withToken($token)
+            ->getJson('/api/me?outlet_id='.$this->blockedOutlet->id)
+            ->assertForbidden()
+            ->assertJsonPath('reason_code', 'OUTLET_ACCESS_DENIED');
+    }
+
+    public function test_outlet_scope_allows_assigned_outlet(): void
+    {
+        $token = $this->postJson('/api/auth/login', [
+            'email' => 'admin@example.com',
+            'password' => 'password',
+        ])->json('access_token');
+
+        $this->withToken($token)
+            ->getJson('/api/me?outlet_id='.$this->allowedOutlet->id)
+            ->assertOk()
+            ->assertJsonPath('data.user.email', 'admin@example.com');
+    }
+
+    public function test_login_rate_limit_blocks_excessive_attempts(): void
+    {
+        for ($i = 0; $i < 10; $i++) {
+            $this->postJson('/api/auth/login', [
+                'email' => 'throttle@example.com',
+                'password' => 'wrong-password',
+            ])->assertStatus(422);
+        }
+
+        $this->postJson('/api/auth/login', [
+            'email' => 'throttle@example.com',
+            'password' => 'wrong-password',
+        ])->assertStatus(429)->assertJsonPath('reason_code', 'TOO_MANY_REQUESTS');
+    }
+
+    public function test_failed_login_is_audited(): void
+    {
+        $this->postJson('/api/auth/login', [
+            'email' => 'admin@example.com',
+            'password' => 'wrong-password',
+        ])->assertStatus(422);
+
+        $event = AuditEvent::query()
+            ->where('event_key', 'AUTH_LOGIN_FAILED')
+            ->latest('created_at')
+            ->first();
+
+        $this->assertNotNull($event);
+        $this->assertSame($this->tenant->id, $event->tenant_id);
+        $this->assertSame($this->user->id, $event->user_id);
+        $this->assertSame('api', $event->channel);
+    }
+}
