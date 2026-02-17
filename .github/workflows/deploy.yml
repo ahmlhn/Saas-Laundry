@@ -83,13 +83,17 @@ jobs:
           script: |
             set -euo pipefail
 
-            APP_PATH="${APP_PATH:-$HOME/saas-laundry}"
+            APP_PATH="${APP_PATH:-$HOME/domains/daratlaut.com/public_html/laundry}"
             PHP_BIN="${PHP_BIN:-php}"
             COMPOSER_BIN="${COMPOSER_BIN:-composer}"
             REPO_URL="${REPO_URL:-https://github.com/${GIT_REPOSITORY}.git}"
             DEPLOY_REF="${DEPLOY_REF:-main}"
             RUN_MIGRATIONS="$(echo "${RUN_MIGRATIONS:-true}" | tr '[:upper:]' '[:lower:]')"
             MAINTENANCE_MODE="$(echo "${MAINTENANCE_MODE:-true}" | tr '[:upper:]' '[:lower:]')"
+
+            if [[ "$APP_PATH" == ~* ]]; then
+              APP_PATH="${APP_PATH/#\~/$HOME}"
+            fi
 
             echo "Deploy path: ${APP_PATH}"
             echo "Deploy ref : ${DEPLOY_REF}"
