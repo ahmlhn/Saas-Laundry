@@ -105,6 +105,30 @@ php artisan ops:uat:run --seed-demo
 ## CI
 Workflow tersedia di:
 - `.github/workflows/ci.yml`
+- `.github/workflows/deploy.yml` (deploy ke server via SSH)
+
+## Deploy via GitHub Actions
+Workflow deploy akan jalan saat:
+- push ke branch `main`, atau
+- manual `Run workflow` pada tab Actions.
+
+### Secrets (Settings > Secrets and variables > Actions > Secrets)
+- `DEPLOY_HOST` -> contoh: `153.92.9.198`
+- `DEPLOY_PORT` -> contoh: `65002`
+- `DEPLOY_USER` -> contoh: `u429122506`
+- `DEPLOY_SSH_KEY` -> private key SSH (recommended)
+- `DEPLOY_PASSWORD` -> opsional jika tidak pakai key
+
+### Variables (Settings > Secrets and variables > Actions > Variables)
+- `DEPLOY_PATH` -> path project di server, contoh: `/home/u429122506/saas-laundry`
+- `DEPLOY_PHP_BIN` -> default `php` (opsional)
+- `DEPLOY_COMPOSER_BIN` -> default `composer` (opsional)
+- `DEPLOY_REPO_URL` -> default repo saat ini (opsional)
+
+### Catatan
+- Pastikan file `.env` sudah dibuat di server sebelum workflow deploy pertama.
+- Workflow deploy meng-upload hasil build frontend (`public/build`) dari GitHub Actions.
+- Jika `run_migrations=true`, migration akan dijalankan otomatis.
 
 ## Dokumentasi
 - `docs/IMPLEMENTATION_SPECS.md`

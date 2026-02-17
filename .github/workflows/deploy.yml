@@ -1,0 +1,158 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref/branch yang akan di-deploy
+        required: true
+        default: main
+      run_migrations:
+        description: Jalankan migration saat deploy
+        required: true
+        type: boolean
+        default: true
+      maintenance_mode:
+        description: Aktifkan maintenance mode saat deploy
+        required: true
+        type: boolean
+        default: true
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref_name }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Build frontend assets
+        run: |
+          npm ci
+          npm run build
+          tar -czf build-artifacts.tar.gz public/build
+
+      - name: Upload built assets to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          source: build-artifacts.tar.gz
+          target: /tmp
+          overwrite: true
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_PATH: ${{ vars.DEPLOY_PATH }}
+          PHP_BIN: ${{ vars.DEPLOY_PHP_BIN }}
+          COMPOSER_BIN: ${{ vars.DEPLOY_COMPOSER_BIN }}
+          REPO_URL: ${{ vars.DEPLOY_REPO_URL }}
+          DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref_name }}
+          RUN_MIGRATIONS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_migrations || 'true' }}
+          MAINTENANCE_MODE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.maintenance_mode || 'true' }}
+          GIT_REPOSITORY: ${{ github.repository }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          envs: APP_PATH,PHP_BIN,COMPOSER_BIN,REPO_URL,DEPLOY_REF,RUN_MIGRATIONS,MAINTENANCE_MODE,GIT_REPOSITORY
+          command_timeout: 45m
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            APP_PATH="${APP_PATH:-$HOME/saas-laundry}"
+            PHP_BIN="${PHP_BIN:-php}"
+            COMPOSER_BIN="${COMPOSER_BIN:-composer}"
+            REPO_URL="${REPO_URL:-https://github.com/${GIT_REPOSITORY}.git}"
+            DEPLOY_REF="${DEPLOY_REF:-main}"
+            RUN_MIGRATIONS="$(echo "${RUN_MIGRATIONS:-true}" | tr '[:upper:]' '[:lower:]')"
+            MAINTENANCE_MODE="$(echo "${MAINTENANCE_MODE:-true}" | tr '[:upper:]' '[:lower:]')"
+
+            echo "Deploy path: ${APP_PATH}"
+            echo "Deploy ref : ${DEPLOY_REF}"
+
+            if [ ! -d "$APP_PATH/.git" ]; then
+              echo "Initial clone..."
+              git clone "$REPO_URL" "$APP_PATH"
+            fi
+
+            cd "$APP_PATH"
+            git fetch --all --prune
+            git checkout "$DEPLOY_REF"
+            git pull --ff-only origin "$DEPLOY_REF"
+
+            if ! command -v "$COMPOSER_BIN" >/dev/null 2>&1; then
+              echo "Composer tidak ditemukan. Set DEPLOY_COMPOSER_BIN di GitHub Variables."
+              exit 1
+            fi
+
+            if ! command -v "$PHP_BIN" >/dev/null 2>&1; then
+              echo "PHP binary tidak ditemukan. Set DEPLOY_PHP_BIN di GitHub Variables."
+              exit 1
+            fi
+
+            NEED_UP=0
+            cleanup() {
+              if [ "$NEED_UP" -eq 1 ]; then
+                "$PHP_BIN" artisan up || true
+              fi
+            }
+            trap cleanup EXIT
+
+            if [ "$MAINTENANCE_MODE" = "true" ]; then
+              "$PHP_BIN" artisan down || true
+              NEED_UP=1
+            fi
+
+            "$COMPOSER_BIN" install --no-dev --optimize-autoloader --no-interaction --prefer-dist
+
+            if [ -f /tmp/build-artifacts.tar.gz ]; then
+              tar -xzf /tmp/build-artifacts.tar.gz -C "$APP_PATH"
+              rm -f /tmp/build-artifacts.tar.gz
+            fi
+
+            if [ -f "$APP_PATH/.env" ]; then
+              "$PHP_BIN" artisan storage:link || true
+
+              if [ "$RUN_MIGRATIONS" = "true" ]; then
+                "$PHP_BIN" artisan migrate --force
+              fi
+
+              "$PHP_BIN" artisan optimize:clear
+              "$PHP_BIN" artisan config:cache
+              "$PHP_BIN" artisan route:cache
+              "$PHP_BIN" artisan view:cache
+              "$PHP_BIN" artisan queue:restart || true
+            else
+              echo "File .env belum ada di server. Deploy kode selesai, konfigurasi aplikasi belum dijalankan."
+            fi
+
+            if [ "$MAINTENANCE_MODE" = "true" ]; then
+              "$PHP_BIN" artisan up || true
+              NEED_UP=0
+            fi
+
+            echo "Deploy selesai."
