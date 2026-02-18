@@ -31,6 +31,20 @@ jobs:
     environment: production
 
     steps:
+      - name: Validate deploy credentials (password mode)
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          [ -n "${DEPLOY_HOST:-}" ] || { echo "Secret DEPLOY_HOST belum diisi."; exit 1; }
+          [ -n "${DEPLOY_PORT:-}" ] || { echo "Secret DEPLOY_PORT belum diisi."; exit 1; }
+          [ -n "${DEPLOY_USER:-}" ] || { echo "Secret DEPLOY_USER belum diisi."; exit 1; }
+          [ -n "${DEPLOY_PASSWORD:-}" ] || { echo "Secret DEPLOY_PASSWORD belum diisi (mode password)."; exit 1; }
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -54,7 +68,6 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           port: ${{ secrets.DEPLOY_PORT }}
           username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
           source: build-artifacts.tar.gz
           target: /tmp
@@ -75,7 +88,6 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           port: ${{ secrets.DEPLOY_PORT }}
           username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
           envs: APP_PATH,PHP_BIN,COMPOSER_BIN,REPO_URL,DEPLOY_REF,RUN_MIGRATIONS,MAINTENANCE_MODE,GIT_REPOSITORY
           command_timeout: 45m
