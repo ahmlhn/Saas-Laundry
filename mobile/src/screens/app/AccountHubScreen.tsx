@@ -1,9 +1,12 @@
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { StatusPill } from "../../components/ui/StatusPill";
+import type { AccountStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
@@ -32,6 +35,7 @@ const ACCOUNT_MENU_ITEMS: AccountMenuItem[] = [
 export function AccountHubScreen() {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const navigation = useNavigation<NativeStackNavigationProp<AccountStackParamList, "AccountHub">>();
   const { session, selectedOutlet, selectOutlet, logout } = useSession();
 
   if (!session) {
@@ -64,7 +68,16 @@ export function AccountHubScreen() {
 
       <AppPanel style={styles.menuPanel}>
         {ACCOUNT_MENU_ITEMS.map((item) => (
-          <Pressable disabled key={item.title} style={styles.menuItem}>
+          <Pressable
+            disabled={item.title !== "Pelanggan Saya"}
+            key={item.title}
+            onPress={() => {
+              if (item.title === "Pelanggan Saya") {
+                navigation.navigate("Customers");
+              }
+            }}
+            style={styles.menuItem}
+          >
             <View style={styles.menuTextWrap}>
               <View style={styles.menuTitleRow}>
                 <Text style={styles.menuTitle}>{item.title}</Text>

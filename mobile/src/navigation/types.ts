@@ -16,12 +16,17 @@ export type OrdersStackParamList = {
   };
 };
 
+export type AccountStackParamList = {
+  AccountHub: undefined;
+  Customers: undefined;
+};
+
 export type AppTabParamList = {
   HomeTab: undefined;
   OrdersTab: NavigatorScreenParams<OrdersStackParamList> | undefined;
   QuickActionTab: undefined;
   ReportsTab: undefined;
-  AccountTab: undefined;
+  AccountTab: NavigatorScreenParams<AccountStackParamList> | undefined;
 };
 
 export type AppRootStackParamList = {

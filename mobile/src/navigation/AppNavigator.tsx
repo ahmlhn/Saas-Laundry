@@ -7,14 +7,16 @@ import { OrdersTodayScreen } from "../screens/app/OrdersTodayScreen";
 import { OutletSelectScreen } from "../screens/app/OutletSelectScreen";
 import { useSession } from "../state/SessionContext";
 import { useAppTheme } from "../theme/useAppTheme";
-import type { AppRootStackParamList, AppTabParamList, OrdersStackParamList } from "./types";
+import type { AccountStackParamList, AppRootStackParamList, AppTabParamList, OrdersStackParamList } from "./types";
 import { QuickActionScreen } from "../screens/app/QuickActionScreen";
 import { ReportsScreen } from "../screens/app/ReportsScreen";
 import { AccountHubScreen } from "../screens/app/AccountHubScreen";
+import { CustomersScreen } from "../screens/app/CustomersScreen";
 
 const RootStack = createNativeStackNavigator<AppRootStackParamList>();
 const Tab = createBottomTabNavigator<AppTabParamList>();
 const OrdersStack = createNativeStackNavigator<OrdersStackParamList>();
+const AccountStack = createNativeStackNavigator<AccountStackParamList>();
 
 function OrdersTabNavigator() {
   return (
@@ -22,6 +24,15 @@ function OrdersTabNavigator() {
       <OrdersStack.Screen name="OrdersToday" component={OrdersTodayScreen} />
       <OrdersStack.Screen name="OrderDetail" component={OrderDetailScreen} />
     </OrdersStack.Navigator>
+  );
+}
+
+function AccountTabNavigator() {
+  return (
+    <AccountStack.Navigator screenOptions={{ headerShown: false }}>
+      <AccountStack.Screen name="AccountHub" component={AccountHubScreen} />
+      <AccountStack.Screen name="Customers" component={CustomersScreen} />
+    </AccountStack.Navigator>
   );
 }
 
@@ -106,7 +117,7 @@ function MainTabsNavigator() {
       />
       <Tab.Screen
         name="AccountTab"
-        component={AccountHubScreen}
+        component={AccountTabNavigator}
         options={{
           tabBarLabel: "Akun",
           tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>A</Text>,

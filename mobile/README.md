@@ -50,6 +50,7 @@ npm run web
   - Tabs: `Beranda`, `Pesanan`, `+`, `Laporan`, `Akun`
 - Fetch order read-only via `/api/orders` dengan context outlet aktif
 - Order detail + quick update status laundry/kurir
+- Modul pelanggan dari tab Akun (`Pelanggan Saya`) untuk list + upsert + arsip/restore (role-based)
 - Logout via `/api/auth/logout`
 
 ## 5) Validasi
