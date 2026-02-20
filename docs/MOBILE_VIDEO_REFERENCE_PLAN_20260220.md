@@ -282,6 +282,21 @@ Catatan:
   - State lengkap: loading, empty, error, success.
   - Role-limited actions harus disabled/hidden dengan pesan jelas.
 
+### 7.1) Catatan Responsif Layar
+- Target device:
+  - HP kecil, HP besar, dan tablet portrait/landscape.
+- Aturan layout:
+  - Hindari hard-coded width/height untuk komponen utama.
+  - Utamakan `flex`, `gap`, `%`, dan `maxWidth` untuk konten inti.
+  - Pastikan card/form tetap readable saat lebar layar bertambah (khusus tablet).
+- Aturan interaksi:
+  - Input aktif wajib tetap terlihat saat keyboard muncul.
+  - Saat keyboard hide, posisi scroll dikembalikan ke konteks sebelumnya.
+  - Tombol utama tetap mudah dijangkau jempol pada HP (posisi bawah tidak tertutup keyboard/gesture bar).
+- Quality gate UI:
+  - Verifikasi manual minimal pada 3 kelas viewport: compact phone, large phone, tablet.
+  - Tidak boleh ada komponen overlap/terpotong/overflow horizontal.
+
 ## 8) Prioritas Implementasi Minggu Ini
 1. Refactor navigation ke bottom tab 5 menu.
 2. Samakan struktur `Beranda` + `Pesanan` dengan referensi.

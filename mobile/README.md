@@ -84,3 +84,19 @@ npm run web
 ```bash
 npm run typecheck
 ```
+
+## 6) Catatan UI/UX Responsif
+
+- UI mobile wajib adaptif untuk layar kecil-besar (HP compact, HP large, foldable, tablet) tanpa memotong konten utama.
+- Prioritaskan layout berbasis `flex` + `%` + `maxWidth`, hindari ukuran fixed yang kaku untuk card/form/action penting.
+- Gunakan `SafeAreaView` dan padding dinamis agar konten tidak tabrakan dengan notch, status bar, home indicator, dan gesture area.
+- Saat keyboard muncul:
+  - field aktif harus tetap terlihat (auto scroll/focus handling),
+  - saat keyboard ditutup, posisi scroll dipulihkan agar navigasi terasa natural.
+- Untuk layar tablet, maksimalkan keterbacaan:
+  - batasi lebar konten utama (`maxWidth`) agar tidak terlalu melebar,
+  - jaga hierarki visual (headline, section title, action button) tetap jelas.
+- Semua screen baru wajib diuji minimal pada:
+  - HP kecil (sekitar 360x640),
+  - HP besar (sekitar 412x915),
+  - tablet portrait (sekitar 768x1024).
