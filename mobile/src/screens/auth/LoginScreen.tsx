@@ -283,10 +283,16 @@ export function LoginScreen() {
                 style={({ pressed }) => [styles.passwordToggle, pressed ? styles.passwordTogglePressed : null]}
               >
                 <View style={styles.passwordEyeIcon}>
-                  <View style={styles.passwordEyeOuter}>
-                    <View style={styles.passwordEyePupil} />
+                  <View style={styles.passwordEyeContour} />
+                  <View style={styles.passwordEyeIris}>
+                    <View style={styles.passwordEyeDot} />
                   </View>
-                  {!showPassword ? <View style={styles.passwordEyeSlash} /> : null}
+                  {!showPassword ? (
+                    <>
+                      <View style={styles.passwordEyeSlashBack} />
+                      <View style={styles.passwordEyeSlashFront} />
+                    </>
+                  ) : null}
                 </View>
               </Pressable>
             </View>
@@ -623,35 +629,52 @@ function createStyles(theme: AppTheme) {
       opacity: 0.8,
     },
     passwordEyeIcon: {
-      width: 18,
-      height: 18,
+      width: 21,
+      height: 15,
       alignItems: "center",
       justifyContent: "center",
       position: "relative",
     },
-    passwordEyeOuter: {
-      width: 16,
-      height: 10,
-      borderWidth: 1.5,
+    passwordEyeContour: {
+      position: "absolute",
+      width: 20,
+      height: 12,
+      borderWidth: 1.6,
       borderColor: theme.colors.textSecondary,
-      borderRadius: 8,
+      borderRadius: 11,
+      backgroundColor: "transparent",
+    },
+    passwordEyeIris: {
+      width: 7,
+      height: 7,
+      borderRadius: 4,
+      borderWidth: 1.4,
+      borderColor: theme.colors.textSecondary,
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: "transparent",
     },
-    passwordEyePupil: {
-      width: 4,
-      height: 4,
+    passwordEyeDot: {
+      width: 2.5,
+      height: 2.5,
       borderRadius: 2,
       backgroundColor: theme.colors.textSecondary,
     },
-    passwordEyeSlash: {
+    passwordEyeSlashBack: {
       position: "absolute",
-      width: 18,
-      height: 2,
+      width: 23,
+      height: 2.6,
+      borderRadius: 2,
+      backgroundColor: theme.colors.surface,
+      transform: [{ rotate: "-34deg" }],
+    },
+    passwordEyeSlashFront: {
+      position: "absolute",
+      width: 23,
+      height: 1.7,
       borderRadius: 2,
       backgroundColor: theme.colors.textSecondary,
-      transform: [{ rotate: "-33deg" }],
+      transform: [{ rotate: "-34deg" }],
     },
     forgotHint: {
       color: "#20b6cf",
