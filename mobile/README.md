@@ -39,6 +39,9 @@ npm run ios
 npm run web
 ```
 
+Catatan orientasi:
+- App Expo dikonfigurasi `orientation: default` sehingga mendukung mode portrait dan landscape.
+
 ## 4) Scope kickoff ini
 
 - Login via `/api/auth/login` (Sanctum token)

@@ -9,6 +9,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
   type ScrollView,
 } from "react-native";
@@ -22,9 +23,17 @@ import { useAppTheme } from "../../theme/useAppTheme";
 type FocusedField = "email" | "password" | null;
 type LoginViewRole = "owner" | "staff";
 
+interface LoginLayoutMode {
+  isLandscape: boolean;
+  isTablet: boolean;
+}
+
 export function LoginScreen() {
   const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
+  const isLandscape = viewportWidth > viewportHeight;
+  const isTablet = Math.min(viewportWidth, viewportHeight) >= 600;
+  const styles = useMemo(() => createStyles(theme, { isLandscape, isTablet }), [theme, isLandscape, isTablet]);
   const { login, biometricLogin, hasStoredSession, biometricAvailable, biometricEnabled, biometricLabel } = useSession();
   const [email, setEmail] = useState("cashier@demo.local");
   const [password, setPassword] = useState("password");
@@ -184,37 +193,38 @@ export function LoginScreen() {
       scrollEventThrottle={16}
       scrollRef={screenScrollRef}
     >
-      <Animated.View style={[styles.heroShell, heroAnimatedStyle, focusMode ? styles.heroShellFocused : null]}>
-        <View pointerEvents="none" style={styles.heroBlueBase} />
-        <View pointerEvents="none" style={styles.heroBlueLayer} />
-        <View pointerEvents="none" style={styles.heroAccentRing} />
-        <View pointerEvents="none" style={styles.heroAccentDot} />
-        <View pointerEvents="none" style={styles.heroWavePrimary} />
-        <View pointerEvents="none" style={styles.heroWaveSecondary} />
+      <View style={styles.responsiveWrap}>
+        <Animated.View style={[styles.heroShell, heroAnimatedStyle, focusMode ? styles.heroShellFocused : null]}>
+          <View pointerEvents="none" style={styles.heroBlueBase} />
+          <View pointerEvents="none" style={styles.heroBlueLayer} />
+          <View pointerEvents="none" style={styles.heroAccentRing} />
+          <View pointerEvents="none" style={styles.heroAccentDot} />
+          <View pointerEvents="none" style={styles.heroWavePrimary} />
+          <View pointerEvents="none" style={styles.heroWaveSecondary} />
 
-        <View style={styles.heroContent}>
-          <View style={styles.brandRow}>
-            <View style={styles.brandMarkWrap}>
-              <View style={styles.brandMarkBubble} />
-              <Text style={styles.brandMarkText}>CL</Text>
+          <View style={styles.heroContent}>
+            <View style={styles.brandRow}>
+              <View style={styles.brandMarkWrap}>
+                <View style={styles.brandMarkBubble} />
+                <Text style={styles.brandMarkText}>CL</Text>
+              </View>
+              <View style={styles.brandTextWrap}>
+                <Text style={styles.brandTitle}>Cuci Laundry</Text>
+                <Text style={styles.brandSubtitle}>Operasional Mobile</Text>
+              </View>
             </View>
-            <View style={styles.brandTextWrap}>
-              <Text style={styles.brandTitle}>Cuci Laundry</Text>
-              <Text style={styles.brandSubtitle}>Operasional Mobile</Text>
-            </View>
+            <Text style={styles.heroTitle}>Masuk untuk kendalikan workflow outlet setiap hari.</Text>
+            <Text style={styles.heroSubtitle}>Satu aplikasi untuk kasir, progress laundry, kurir, dan rekap cepat operasional.</Text>
           </View>
-          <Text style={styles.heroTitle}>Masuk untuk kendalikan workflow outlet setiap hari.</Text>
-          <Text style={styles.heroSubtitle}>Satu aplikasi untuk kasir, progress laundry, kurir, dan rekap cepat operasional.</Text>
-        </View>
-      </Animated.View>
+        </Animated.View>
 
-      <Animated.View
-        onLayout={(event) => {
-          panelTopRef.current = event.nativeEvent.layout.y;
-        }}
-        style={[styles.panelWrap, focusMode ? styles.panelWrapFocused : null, panelAnimatedStyle]}
-      >
-        <AppPanel style={styles.panel}>
+        <Animated.View
+          onLayout={(event) => {
+            panelTopRef.current = event.nativeEvent.layout.y;
+          }}
+          style={[styles.panelWrap, focusMode ? styles.panelWrapFocused : null, panelAnimatedStyle]}
+        >
+          <AppPanel style={styles.panel}>
           <Text style={styles.loginAsLabel}>Login sebagai</Text>
           <View style={styles.roleSwitchRow}>
             <Pressable
@@ -394,29 +404,35 @@ export function LoginScreen() {
               <Text style={styles.biometricHint}>Sesi tersimpan terdeteksi. Aktifkan login biometrik dari menu Akun untuk akses instan.</Text>
             </View>
           ) : null}
-        </AppPanel>
-      </Animated.View>
+          </AppPanel>
+        </Animated.View>
+      </View>
     </AppScreen>
   );
 }
 
-function createStyles(theme: AppTheme) {
+function createStyles(theme: AppTheme, layout: LoginLayoutMode) {
   return StyleSheet.create({
     scrollContainer: {
       flexGrow: 1,
       paddingHorizontal: theme.spacing.lg,
-      paddingTop: theme.spacing.md,
+      paddingTop: layout.isLandscape ? theme.spacing.sm : theme.spacing.md,
       paddingBottom: theme.spacing.xxl,
       gap: theme.spacing.md,
+      alignItems: "center",
+    },
+    responsiveWrap: {
+      width: "100%",
+      maxWidth: layout.isTablet ? 760 : layout.isLandscape ? 640 : 520,
     },
     heroShell: {
-      height: 306,
+      height: layout.isLandscape ? (layout.isTablet ? 224 : 192) : layout.isTablet ? 356 : 306,
       borderRadius: 32,
       overflow: "hidden",
       position: "relative",
     },
     heroShellFocused: {
-      height: 220,
+      height: layout.isLandscape ? 176 : 220,
     },
     heroBlueBase: {
       ...StyleSheet.absoluteFillObject,
@@ -470,7 +486,7 @@ function createStyles(theme: AppTheme) {
     },
     heroContent: {
       paddingHorizontal: theme.spacing.lg,
-      paddingTop: theme.spacing.xl,
+      paddingTop: layout.isLandscape ? theme.spacing.md : theme.spacing.xl,
       gap: theme.spacing.sm,
     },
     brandRow: {
@@ -511,8 +527,8 @@ function createStyles(theme: AppTheme) {
     brandTitle: {
       color: "#ffffff",
       fontFamily: theme.fonts.heavy,
-      fontSize: 30,
-      lineHeight: 34,
+      fontSize: layout.isLandscape ? 25 : 30,
+      lineHeight: layout.isLandscape ? 30 : 34,
       letterSpacing: 0.2,
     },
     brandSubtitle: {
@@ -525,23 +541,23 @@ function createStyles(theme: AppTheme) {
     heroTitle: {
       color: "#ffffff",
       fontFamily: theme.fonts.bold,
-      fontSize: 19,
-      lineHeight: 25,
-      maxWidth: 320,
+      fontSize: layout.isLandscape ? 17 : 19,
+      lineHeight: layout.isLandscape ? 22 : 25,
+      maxWidth: layout.isLandscape ? 500 : 320,
     },
     heroSubtitle: {
       color: "rgba(255,255,255,0.86)",
       fontFamily: theme.fonts.medium,
-      fontSize: 12,
+      fontSize: layout.isLandscape ? 11 : 12,
       lineHeight: 18,
-      maxWidth: 340,
+      maxWidth: layout.isLandscape ? 520 : 340,
     },
     panelWrap: {
-      marginTop: -72,
+      marginTop: layout.isLandscape ? -34 : -72,
       paddingHorizontal: 2,
     },
     panelWrapFocused: {
-      marginTop: -92,
+      marginTop: layout.isLandscape ? -16 : -92,
     },
     panel: {
       gap: theme.spacing.sm,
