@@ -16,6 +16,10 @@ import { FinanceToolsScreen } from "../screens/app/FinanceToolsScreen";
 import { PrinterNoteScreen } from "../screens/app/PrinterNoteScreen";
 import { HelpInfoScreen } from "../screens/app/HelpInfoScreen";
 import { WhatsAppToolsScreen } from "../screens/app/WhatsAppToolsScreen";
+import { ServicesScreen } from "../screens/app/ServicesScreen";
+import { StaffScreen } from "../screens/app/StaffScreen";
+import { OutletsScreen } from "../screens/app/OutletsScreen";
+import { ShippingZonesScreen } from "../screens/app/ShippingZonesScreen";
 import { canSeeQuickActionTab, canSeeReportsTab } from "../lib/accessControl";
 
 const RootStack = createNativeStackNavigator<AppRootStackParamList>();
@@ -37,6 +41,10 @@ function AccountTabNavigator() {
     <AccountStack.Navigator screenOptions={{ headerShown: false }}>
       <AccountStack.Screen name="AccountHub" component={AccountHubScreen} />
       <AccountStack.Screen name="Customers" component={CustomersScreen} />
+      <AccountStack.Screen name="Services" component={ServicesScreen} />
+      <AccountStack.Screen name="Staff" component={StaffScreen} />
+      <AccountStack.Screen name="Outlets" component={OutletsScreen} />
+      <AccountStack.Screen name="ShippingZones" component={ShippingZonesScreen} />
       <AccountStack.Screen name="FinanceTools" component={FinanceToolsScreen} />
       <AccountStack.Screen name="PrinterNote" component={PrinterNoteScreen} />
       <AccountStack.Screen name="HelpInfo" component={HelpInfoScreen} />

@@ -48,9 +48,11 @@ Route::middleware(['auth:sanctum', 'outlet.access'])->group(function (): void {
     Route::delete('/services/{service}', [ServiceCatalogController::class, 'destroy']);
     Route::post('/services/{service}/restore', [ServiceCatalogController::class, 'restore']);
 
+    Route::get('/outlets', [OutletManagementController::class, 'index']);
     Route::delete('/outlets/{outlet}', [OutletManagementController::class, 'destroy']);
     Route::post('/outlets/{outlet}/restore', [OutletManagementController::class, 'restore']);
 
+    Route::get('/users', [UserManagementController::class, 'index']);
     Route::delete('/users/{user}', [UserManagementController::class, 'destroy']);
     Route::post('/users/{user}/restore', [UserManagementController::class, 'restore']);
 

@@ -100,6 +100,55 @@ Referensi frame yang dianalisis:
 - Target outcome:
   - UX matang, cepat, dan sesuai batasan role/plan.
 
+### Fase 5 (Master Data Services)
+- Kelola Layanan/Produk:
+  - List layanan dengan harga dasar dan harga efektif per outlet.
+  - Search cepat berdasarkan nama/unit layanan.
+  - Arsip/restore layanan (owner/admin).
+- Target outcome:
+  - Katalog layanan dapat dipantau dan dirapikan langsung dari mobile.
+
+### Fase 6 (Master Data Staff)
+- Kelola Pegawai:
+  - List akun pegawai + role + outlet assignment.
+  - Search cepat berdasarkan nama/email/HP.
+  - Arsip/restore akun pegawai (owner-only, mengikuti policy backend saat ini).
+- Target outcome:
+  - Monitoring dan housekeeping akun tim bisa dilakukan dari mobile.
+
+### Fase 7 (Master Data Outlet)
+- Kelola Outlet:
+  - List outlet sesuai scope akses role.
+  - Search outlet berdasarkan nama/kode.
+  - Pilih outlet aktif dari tab Akun.
+  - Arsip/restore outlet (owner-only, mengikuti policy backend saat ini).
+- Target outcome:
+  - Kontrol outlet aktif dan housekeeping outlet tersedia langsung dari mobile.
+
+### Fase 8 (Operasional Pengantaran)
+- Zona Antar:
+  - List zona antar per outlet.
+  - Create zona antar (nama, radius jarak, biaya, ETA, catatan).
+  - Filter zona aktif/nonaktif.
+- Target outcome:
+  - Pengaturan ongkir antar dasar bisa dilakukan langsung dari mobile.
+
+### Fase 9 (Quick Action Order Entry)
+- Quick Action:
+  - Form `Buat Order Baru` minimal langsung dari tab `+`.
+  - Pilih layanan aktif outlet dan input metrik (qty/kg) sesuai unit.
+  - Simpan order ke `POST /api/orders` dan shortcut ke detail order.
+- Target outcome:
+  - Kasir/owner/admin bisa entry order cepat tanpa keluar dari quick action tab.
+
+### Fase 10 (Quick Action Multi-Item)
+- Quick Action:
+  - Form order mendukung banyak item layanan dalam satu transaksi.
+  - Tambah/hapus item dinamis sebelum submit.
+  - Validasi metrik per item mengikuti unit layanan (`kg`/`pcs`).
+- Target outcome:
+  - Entry order mobile lebih fleksibel untuk transaksi campuran layanan.
+
 ## 5.1) Status Implementasi (Update 2026-02-21 - Fase 4)
 - Fase 1: selesai.
   - Bottom tab 5 menu aktif.
@@ -125,6 +174,35 @@ Referensi frame yang dianalisis:
     - Cache list API (orders/customers) untuk mengurangi request berulang.
     - Pagination incremental sampai limit 100 item.
     - Skeleton loading untuk list pesanan dan pelanggan.
+- Fase 5: selesai (MOB-007).
+  - Menu `Kelola Layanan/Produk` di tab Akun sudah membuka screen aktif.
+  - Data layanan memuat harga dasar + harga efektif outlet aktif.
+  - Search lokal layanan aktif.
+  - Arsip/restore layanan tersedia untuk role owner/admin.
+- Fase 6: selesai (MOB-008).
+  - Menu `Kelola Pegawai` di tab Akun sudah membuka screen aktif.
+  - Data pegawai memuat role, outlet assignment, dan status akun.
+  - Search pegawai tersedia (nama/email/HP).
+  - Arsip/restore pegawai tersedia untuk role owner (sesuai guard backend).
+- Fase 7: selesai (MOB-009).
+  - Menu `Kelola Outlet` di tab Akun sudah membuka screen aktif.
+  - Data outlet memuat kode, timezone, alamat, dan status outlet.
+  - User owner/admin bisa memilih outlet aktif dari modul Akun.
+  - Arsip/restore outlet tersedia untuk role owner (sesuai guard backend).
+- Fase 8: selesai (MOB-010).
+  - Menu `Zona Antar` di tab Akun sudah membuka screen aktif.
+  - User owner/admin dapat melihat daftar zona antar per outlet.
+  - Tambah zona antar dari mobile sudah aktif (nama, biaya, jarak, ETA, catatan).
+  - Akses cepat `Zona Antar` juga tersedia dari screen `Kelola Outlet`.
+- Fase 9: selesai (MOB-011).
+  - Tombol `Buat Order Baru` di tab `+` sudah aktif (tidak lagi placeholder).
+  - Form order minimal mendukung input pelanggan + layanan + metrik qty/kg.
+  - Submit order tersambung ke endpoint `POST /api/orders`.
+  - Setelah submit, user bisa buka detail order terbaru atau daftar pesanan.
+- Fase 10: selesai (MOB-012).
+  - Quick Action mendukung create order multi-item dalam satu submit.
+  - User bisa menambah dan menghapus item layanan sebelum simpan.
+  - Payload create order menggunakan array `items` ke `POST /api/orders`.
 
 ## 6) Mapping Fitur Ke API Existing
 - Auth:
@@ -146,10 +224,14 @@ Referensi frame yang dianalisis:
   - `GET /api/services`
   - `DELETE /api/services/{id}`
   - `POST /api/services/{id}/restore`
+  - `GET /api/users`
   - `DELETE /api/users/{id}`
   - `POST /api/users/{id}/restore`
+  - `GET /api/outlets`
   - `DELETE /api/outlets/{id}`
   - `POST /api/outlets/{id}/restore`
+  - `GET /api/shipping-zones`
+  - `POST /api/shipping-zones`
 - Billing/WA:
   - `GET /api/billing/quota`
   - `GET /api/wa/providers`

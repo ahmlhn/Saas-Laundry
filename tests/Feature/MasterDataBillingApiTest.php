@@ -239,7 +239,8 @@ class MasterDataBillingApiTest extends TestCase
             ->getJson('/api/services?include_deleted=1')
             ->assertOk()
             ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.id', $this->serviceKg->id);
+            ->assertJsonPath('data.0.id', $this->serviceKg->id)
+            ->assertJsonPath('data.0.deleted_at', Service::withTrashed()->findOrFail($this->serviceKg->id)->deleted_at?->toIso8601String());
 
         $this->apiAs($this->admin)
             ->postJson('/api/services/'.$this->serviceKg->id.'/restore')
@@ -281,6 +282,50 @@ class MasterDataBillingApiTest extends TestCase
             ->assertJsonPath('data.id', $this->outletB->id);
     }
 
+    public function test_outlet_list_endpoint_supports_scope_and_include_deleted_policy(): void
+    {
+        $this->apiAs($this->cashier)
+            ->getJson('/api/outlets')
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'ROLE_ACCESS_DENIED');
+
+        $this->apiAs($this->admin)
+            ->getJson('/api/outlets')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $this->outletA->id);
+
+        $this->apiAs($this->owner)
+            ->getJson('/api/outlets?q=Outlet')
+            ->assertOk()
+            ->assertJsonCount(2, 'data');
+
+        $this->apiAs($this->owner)
+            ->deleteJson('/api/outlets/'.$this->outletB->id)
+            ->assertOk()
+            ->assertJsonPath('data.id', $this->outletB->id);
+
+        $this->apiAs($this->admin)
+            ->getJson('/api/outlets')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $this->outletA->id);
+
+        $this->apiAs($this->admin)
+            ->getJson('/api/outlets?include_deleted=1')
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'ROLE_ACCESS_DENIED');
+
+        $includeDeletedResponse = $this->apiAs($this->owner)
+            ->getJson('/api/outlets?include_deleted=1')
+            ->assertOk()
+            ->assertJsonCount(2, 'data');
+
+        $archivedOutlet = collect($includeDeletedResponse->json('data'))->firstWhere('id', $this->outletB->id);
+        $this->assertNotNull($archivedOutlet);
+        $this->assertNotNull($archivedOutlet['deleted_at']);
+    }
+
     public function test_user_lifecycle_owner_only_with_self_archive_guard(): void
     {
         $this->apiAs($this->admin)
@@ -313,6 +358,41 @@ class MasterDataBillingApiTest extends TestCase
             'tenant_id' => $this->tenant->id,
             'deleted_at' => null,
         ]);
+    }
+
+    public function test_user_list_endpoint_supports_search_and_include_deleted(): void
+    {
+        $this->apiAs($this->cashier)
+            ->getJson('/api/users')
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'ROLE_ACCESS_DENIED');
+
+        $searchResponse = $this->apiAs($this->admin)
+            ->getJson('/api/users?q=owner')
+            ->assertOk();
+
+        $this->assertNotNull(collect($searchResponse->json('data'))->firstWhere('email', 'owner@master.local'));
+        $this->assertNotNull(collect($searchResponse->json('data'))->firstWhere('email', 'owner2@master.local'));
+
+        $this->apiAs($this->owner)
+            ->deleteJson('/api/users/'.$this->cashier->id)
+            ->assertOk()
+            ->assertJsonPath('data.id', $this->cashier->id);
+
+        $this->apiAs($this->admin)
+            ->getJson('/api/users')
+            ->assertOk()
+            ->assertJsonCount(4, 'data');
+
+        $includeDeletedResponse = $this->apiAs($this->admin)
+            ->getJson('/api/users?include_deleted=1')
+            ->assertOk()
+            ->assertJsonCount(5, 'data');
+
+        $archivedCashier = collect($includeDeletedResponse->json('data'))->firstWhere('id', $this->cashier->id);
+
+        $this->assertNotNull($archivedCashier);
+        $this->assertNotNull($archivedCashier['deleted_at']);
     }
 
     public function test_shipping_zone_endpoints_support_create_and_list(): void

@@ -48,9 +48,10 @@ export function AccountHubScreen() {
 
   const rawMenuItems: AccountMenuItem[] = [
     { title: "Pelanggan Saya", subtitle: "Daftar pelanggan yang terdaftar di outlet", route: "Customers", allowedRoles: ["owner", "admin", "cashier"] },
-    { title: "Kelola Outlet", subtitle: "Edit outlet, jam operasional, tarif ongkir", allowedRoles: ["owner", "admin"] },
-    { title: "Kelola Layanan/Produk", subtitle: "Edit layanan, paket, dan promo", allowedRoles: ["owner", "admin"] },
-    { title: "Kelola Pegawai", subtitle: "Atur akses, presensi, gaji, komisi", allowedRoles: ["owner", "admin"] },
+    { title: "Kelola Outlet", subtitle: "Daftar outlet, outlet aktif, dan status arsip", route: "Outlets", allowedRoles: ["owner", "admin"] },
+    { title: "Zona Antar", subtitle: "Atur radius, biaya, dan ETA antar per outlet", route: "ShippingZones", allowedRoles: ["owner", "admin"] },
+    { title: "Kelola Layanan/Produk", subtitle: "Lihat layanan, harga dasar, dan arsip", route: "Services", allowedRoles: ["owner", "admin"] },
+    { title: "Kelola Pegawai", subtitle: "Daftar akun tim, role, dan status arsip", route: "Staff", allowedRoles: ["owner", "admin"] },
     {
       title: "Kelola Keuangan",
       subtitle: "Cashbox, pendapatan, pengeluaran, koreksi",

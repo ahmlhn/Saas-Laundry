@@ -53,6 +53,11 @@ npm run web
 - Fetch order read-only via `/api/orders` dengan context outlet aktif
 - Order detail + quick update status laundry/kurir
 - Modul pelanggan dari tab Akun (`Pelanggan Saya`) untuk list + upsert + arsip/restore (role-based)
+- Modul layanan/produk dari tab Akun (`Kelola Layanan/Produk`) untuk list + search + arsip/restore (owner/admin)
+- Modul pegawai dari tab Akun (`Kelola Pegawai`) untuk list + search + arsip/restore (owner-only untuk arsip)
+- Modul outlet dari tab Akun (`Kelola Outlet`) untuk list + search + pilih outlet aktif + arsip/restore (owner-only untuk arsip)
+- Modul zona antar dari tab Akun (`Zona Antar`) untuk list + create per outlet (owner/admin)
+- Quick Action tab (`+`) mendukung create order multi-item via `POST /api/orders` (owner/admin/cashier)
 - Modul `Kelola Keuangan` dari tab Akun:
   - Snapshot billing quota via `/api/billing/quota` (owner/admin)
   - Snapshot kas operasional dari data `/api/orders` outlet aktif

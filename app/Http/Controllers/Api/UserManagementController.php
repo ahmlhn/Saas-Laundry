@@ -19,6 +19,46 @@ class UserManagementController extends Controller
     ) {
     }
 
+    public function index(Request $request): JsonResponse
+    {
+        /** @var User $actor */
+        $actor = $request->user();
+        $this->ensureRole($actor, ['owner', 'admin']);
+
+        $validated = $request->validate([
+            'q' => ['nullable', 'string', 'max:100'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'include_deleted' => ['nullable', 'boolean'],
+        ]);
+
+        $query = User::query()
+            ->with(['roles:id,key,name', 'outlets:id,name,code'])
+            ->where('tenant_id', $actor->tenant_id)
+            ->orderBy('name');
+
+        if (! empty($validated['include_deleted'])) {
+            $query->withTrashed();
+        }
+
+        $search = trim((string) ($validated['q'] ?? ''));
+
+        if ($search !== '') {
+            $query->where(function ($innerQuery) use ($search): void {
+                $innerQuery
+                    ->where('name', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%")
+                    ->orWhere('phone', 'like', "%{$search}%");
+            });
+        }
+
+        $limit = (int) ($validated['limit'] ?? 50);
+        $users = $query->limit($limit)->get();
+
+        return response()->json([
+            'data' => $users->map(fn (User $user): array => $this->formatUserPayload($user))->values(),
+        ]);
+    }
+
     public function destroy(Request $request, string $managedUser): JsonResponse
     {
         /** @var User $actor */
@@ -138,5 +178,28 @@ class UserManagementController extends Controller
         return response()->json([
             'data' => $target->fresh(['roles:id,key,name', 'outlets:id,name,code']),
         ]);
+    }
+
+    private function formatUserPayload(User $user): array
+    {
+        return [
+            'id' => (string) $user->id,
+            'tenant_id' => (string) $user->tenant_id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'phone' => $user->phone,
+            'status' => $user->status,
+            'deleted_at' => $user->deleted_at?->toIso8601String(),
+            'roles' => $user->roles->map(fn ($role): array => [
+                'id' => (string) $role->id,
+                'key' => (string) $role->key,
+                'name' => (string) $role->name,
+            ])->values(),
+            'outlets' => $user->outlets->map(fn ($outlet): array => [
+                'id' => (string) $outlet->id,
+                'name' => (string) $outlet->name,
+                'code' => (string) $outlet->code,
+            ])->values(),
+        ];
     }
 }

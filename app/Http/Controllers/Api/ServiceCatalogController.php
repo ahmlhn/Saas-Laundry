@@ -79,6 +79,7 @@ class ServiceCatalogController extends Controller
                     'unit_type' => $service->unit_type,
                     'base_price_amount' => $service->base_price_amount,
                     'active' => (bool) $service->active,
+                    'deleted_at' => $service->deleted_at?->toIso8601String(),
                     'effective_price_amount' => (int) ($override?->price_override_amount ?? $service->base_price_amount),
                     'outlet_override' => $override ? [
                         'id' => $override->id,

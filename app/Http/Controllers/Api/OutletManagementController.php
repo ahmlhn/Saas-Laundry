@@ -20,6 +20,67 @@ class OutletManagementController extends Controller
     ) {
     }
 
+    public function index(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner', 'admin']);
+
+        $validated = $request->validate([
+            'q' => ['nullable', 'string', 'max:100'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'include_deleted' => ['nullable', 'boolean'],
+        ]);
+
+        $isOwner = $user->roles()->where('key', 'owner')->exists();
+
+        $query = Outlet::query()
+            ->where('tenant_id', $user->tenant_id)
+            ->orderBy('name');
+
+        if (! $isOwner) {
+            $allowedOutletIds = $this->allowedOutletIds($user);
+            $query->whereIn('id', $allowedOutletIds);
+        }
+
+        if (! empty($validated['include_deleted'])) {
+            if (! $isOwner) {
+                return response()->json([
+                    'reason_code' => 'ROLE_ACCESS_DENIED',
+                    'message' => 'Only owner can include archived outlets.',
+                ], 403);
+            }
+
+            $query->withTrashed();
+        }
+
+        $search = trim((string) ($validated['q'] ?? ''));
+
+        if ($search !== '') {
+            $query->where(function ($innerQuery) use ($search): void {
+                $innerQuery
+                    ->where('name', 'like', "%{$search}%")
+                    ->orWhere('code', 'like', "%{$search}%")
+                    ->orWhere('timezone', 'like', "%{$search}%");
+            });
+        }
+
+        $limit = (int) ($validated['limit'] ?? 50);
+        $outlets = $query->limit($limit)->get();
+
+        return response()->json([
+            'data' => $outlets->map(fn (Outlet $outlet): array => [
+                'id' => $outlet->id,
+                'tenant_id' => $outlet->tenant_id,
+                'name' => $outlet->name,
+                'code' => $outlet->code,
+                'timezone' => $outlet->timezone,
+                'address' => $outlet->address,
+                'deleted_at' => $outlet->deleted_at?->toIso8601String(),
+            ])->values(),
+        ]);
+    }
+
     public function destroy(Request $request, string $outletId): JsonResponse
     {
         /** @var User $user */

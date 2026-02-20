@@ -10,6 +10,10 @@ interface OrderDetailResponse {
   data: OrderDetail;
 }
 
+interface CreateOrderResponse {
+  data: OrderDetail;
+}
+
 interface ListOrdersParams {
   outletId: string;
   limit?: number;
@@ -19,6 +23,24 @@ interface ListOrdersParams {
 interface StatusUpdateParams {
   orderId: string;
   status: string;
+}
+
+interface CreateOrderPayload {
+  outletId: string;
+  customer: {
+    name: string;
+    phone: string;
+    notes?: string;
+  };
+  items: Array<{
+    serviceId: string;
+    qty?: number;
+    weightKg?: number;
+  }>;
+  notes?: string;
+  isPickupDelivery?: boolean;
+  shippingFeeAmount?: number;
+  discountAmount?: number;
 }
 
 export async function listOrders(params: ListOrdersParams): Promise<OrderSummary[]> {
@@ -45,6 +67,29 @@ export async function listOrders(params: ListOrdersParams): Promise<OrderSummary
 
 export async function getOrderDetail(orderId: string): Promise<OrderDetail> {
   const response = await httpClient.get<OrderDetailResponse>(`/orders/${orderId}`);
+  return response.data.data;
+}
+
+export async function createOrder(payload: CreateOrderPayload): Promise<OrderDetail> {
+  const response = await httpClient.post<CreateOrderResponse>("/orders", {
+    outlet_id: payload.outletId,
+    is_pickup_delivery: payload.isPickupDelivery ?? false,
+    shipping_fee_amount: payload.shippingFeeAmount ?? 0,
+    discount_amount: payload.discountAmount ?? 0,
+    notes: payload.notes?.trim() || undefined,
+    customer: {
+      name: payload.customer.name,
+      phone: payload.customer.phone,
+      notes: payload.customer.notes?.trim() || undefined,
+    },
+    items: payload.items.map((item) => ({
+      service_id: item.serviceId,
+      qty: item.qty,
+      weight_kg: item.weightKg,
+    })),
+  });
+
+  invalidateCache("orders:list:");
   return response.data.data;
 }
 

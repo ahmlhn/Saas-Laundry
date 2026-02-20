@@ -19,6 +19,15 @@ export type OrdersStackParamList = {
 export type AccountStackParamList = {
   AccountHub: undefined;
   Customers: undefined;
+  Services: undefined;
+  Staff: undefined;
+  Outlets: undefined;
+  ShippingZones:
+    | {
+        outletId?: string;
+        outletLabel?: string;
+      }
+    | undefined;
   FinanceTools: undefined;
   PrinterNote: undefined;
   HelpInfo: undefined;
