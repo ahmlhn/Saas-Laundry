@@ -2,9 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppPanel } from "../../components/ui/AppPanel";
-import { API_BASE_URL } from "../../config/env";
-import { checkApiHealth } from "../../features/auth/authApi";
-import { getActiveApiBaseUrl, getApiBaseCandidates, getApiErrorMessage, getApiSetupChecklist } from "../../lib/httpClient";
+import { getApiErrorMessage } from "../../lib/httpClient";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
@@ -21,16 +19,10 @@ export function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [biometricSubmitting, setBiometricSubmitting] = useState(false);
-  const [checkingConnection, setCheckingConnection] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
   const [focusedField, setFocusedField] = useState<FocusedField>(null);
-  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [viewRole, setViewRole] = useState<LoginViewRole>("owner");
   const passwordInputRef = useRef<TextInput | null>(null);
-  const setupChecklist = useMemo(() => getApiSetupChecklist(), []);
-  const apiCandidates = useMemo(() => getApiBaseCandidates(), []);
-  const activeApiBaseUrl = getActiveApiBaseUrl();
   const entranceProgress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -78,13 +70,6 @@ export function LoginScreen() {
   const canSubmit = !submitting && email.trim().length > 0 && password.length > 0;
   const canBiometricLogin = hasStoredSession && biometricAvailable && biometricEnabled && !biometricSubmitting && !submitting;
   const inputDisabled = submitting || biometricSubmitting;
-  const diagnosticsToggleLabel = showDiagnostics ? "Sembunyikan Diagnostik API" : "Lihat Diagnostik API";
-  const biometricButtonLabel = biometricLabel
-    .split(" ")
-    .map((chunk) => chunk.slice(0, 1))
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
   const roleHint =
     viewRole === "owner"
       ? "Mode pemilik untuk monitoring KPI, billing, dan kontrol lintas outlet."
@@ -97,7 +82,6 @@ export function LoginScreen() {
 
     setSubmitting(true);
     setErrorMessage(null);
-    setConnectionMessage(null);
 
     try {
       await login({ email, password });
@@ -115,7 +99,6 @@ export function LoginScreen() {
 
     setBiometricSubmitting(true);
     setErrorMessage(null);
-    setConnectionMessage(null);
 
     try {
       await biometricLogin();
@@ -126,36 +109,15 @@ export function LoginScreen() {
     }
   }
 
-  async function handleCheckConnection(): Promise<void> {
-    if (checkingConnection) {
-      return;
-    }
-
-    setCheckingConnection(true);
-    setConnectionMessage("Mengecek koneksi API...");
-
-    try {
-      const health = await checkApiHealth();
-      const timeInfo = health.time ? ` (${health.time})` : "";
-      setConnectionMessage(`API terhubung: ok=${String(health.ok)}${timeInfo}`);
-    } catch (error) {
-      setConnectionMessage(getApiErrorMessage(error));
-    } finally {
-      setCheckingConnection(false);
-    }
-  }
-
-  const isConnectionError = connectionMessage ? !connectionMessage.toLowerCase().includes("ok=true") : false;
-
   return (
     <AppScreen contentContainerStyle={styles.scrollContainer} scroll>
       <Animated.View style={[styles.heroShell, heroAnimatedStyle]}>
-        <View style={styles.heroBlueBase} />
-        <View style={styles.heroBlueLayer} />
-        <View style={styles.heroAccentRing} />
-        <View style={styles.heroAccentDot} />
-        <View style={styles.heroWavePrimary} />
-        <View style={styles.heroWaveSecondary} />
+        <View pointerEvents="none" style={styles.heroBlueBase} />
+        <View pointerEvents="none" style={styles.heroBlueLayer} />
+        <View pointerEvents="none" style={styles.heroAccentRing} />
+        <View pointerEvents="none" style={styles.heroAccentDot} />
+        <View pointerEvents="none" style={styles.heroWavePrimary} />
+        <View pointerEvents="none" style={styles.heroWaveSecondary} />
 
         <View style={styles.heroContent}>
           <View style={styles.brandRow}>
@@ -223,7 +185,7 @@ export function LoginScreen() {
           </View>
 
           <View style={styles.fieldGroup}>
-            <View style={[styles.passwordWrap, focusedField === "password" ? styles.inputFocused : null]}>
+            <View style={styles.passwordFieldContainer}>
               <TextInput
                 editable={!inputDisabled}
                 onBlur={() => setFocusedField((field) => (field === "password" ? null : field))}
@@ -239,7 +201,7 @@ export function LoginScreen() {
                 ref={passwordInputRef}
                 returnKeyType="go"
                 secureTextEntry={!showPassword}
-                style={styles.passwordInput}
+                style={[styles.passwordInputField, focusedField === "password" ? styles.inputFocused : null]}
                 textContentType="password"
                 value={password}
               />
@@ -274,8 +236,8 @@ export function LoginScreen() {
                 pressed && canSubmit ? styles.submitPrimaryButtonPressed : null,
               ]}
             >
-              <View style={styles.submitPrimaryLayerLeft} pointerEvents="none" />
-              <View style={styles.submitPrimaryLayerRight} pointerEvents="none" />
+              <View pointerEvents="none" style={styles.submitPrimaryLayerLeft} />
+              <View pointerEvents="none" style={styles.submitPrimaryLayerRight} />
               {submitting ? (
                 <ActivityIndicator color="#ffffff" size="small" />
               ) : (
@@ -298,7 +260,19 @@ export function LoginScreen() {
                   <ActivityIndicator color="#ffffff" size="small" />
                 ) : (
                   <>
-                    <Text style={styles.submitBiometricLabel}>{biometricButtonLabel || "BIO"}</Text>
+                    <View style={styles.faceIconFrame}>
+                      <View style={[styles.faceIconCorner, styles.faceIconCornerTl]} />
+                      <View style={[styles.faceIconCorner, styles.faceIconCornerTr]} />
+                      <View style={[styles.faceIconCorner, styles.faceIconCornerBl]} />
+                      <View style={[styles.faceIconCorner, styles.faceIconCornerBr]} />
+                      <View style={styles.faceIconCore}>
+                        <View style={styles.faceIconEyes}>
+                          <View style={styles.faceIconEye} />
+                          <View style={styles.faceIconEye} />
+                        </View>
+                        <View style={styles.faceIconMouth} />
+                      </View>
+                    </View>
                     <Text style={styles.submitBiometricSubLabel}>{biometricLabel}</Text>
                   </>
                 )}
@@ -309,49 +283,6 @@ export function LoginScreen() {
           {hasStoredSession && (!biometricAvailable || !biometricEnabled) ? (
             <View style={styles.biometricHintWrap}>
               <Text style={styles.biometricHint}>Sesi tersimpan terdeteksi. Aktifkan login biometrik dari menu Akun untuk akses instan.</Text>
-            </View>
-          ) : null}
-
-          <View style={styles.utilityRow}>
-            <Pressable
-              accessibilityRole="button"
-              disabled={checkingConnection}
-              onPress={() => void handleCheckConnection()}
-              style={({ pressed }) => [
-                styles.utilityButton,
-                checkingConnection ? styles.utilityButtonDisabled : null,
-                pressed && !checkingConnection ? styles.utilityButtonPressed : null,
-              ]}
-            >
-              <Text style={styles.utilityButtonText}>{checkingConnection ? "Mengecek API..." : "Tes Koneksi API"}</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setShowDiagnostics((value) => !value)}
-              style={({ pressed }) => [styles.utilityButton, pressed ? styles.utilityButtonPressed : null]}
-            >
-              <Text style={styles.utilityButtonText}>{diagnosticsToggleLabel}</Text>
-            </Pressable>
-          </View>
-
-          {connectionMessage ? (
-            <View style={[styles.connectionInfo, isConnectionError ? styles.connectionError : styles.connectionOk]}>
-              <Text style={styles.connectionText}>{connectionMessage}</Text>
-            </View>
-          ) : null}
-
-          {showDiagnostics ? (
-            <View style={styles.diagnosticsPanel}>
-              <Text style={styles.diagnosticsTitle}>Diagnostik API</Text>
-              <Text style={styles.diagnosticsText}>API dari env: {API_BASE_URL}</Text>
-              <Text style={styles.diagnosticsText}>API aktif runtime: {activeApiBaseUrl}</Text>
-              <Text style={styles.diagnosticsText}>Kandidat fallback: {apiCandidates.join(", ")}</Text>
-              <Text style={styles.diagnosticsText}>Pastikan `EXPO_PUBLIC_API_URL` sesuai emulator/device fisik.</Text>
-              {setupChecklist.map((tip, index) => (
-                <Text key={`${index}-${tip}`} style={styles.diagnosticsText}>
-                  {index + 1}. {tip}
-                </Text>
-              ))}
             </View>
           ) : null}
         </AppPanel>
@@ -577,25 +508,26 @@ function createStyles(theme: AppTheme) {
       shadowRadius: 9,
       shadowOffset: { width: 0, height: 1 },
     },
-    passwordWrap: {
+    passwordFieldContainer: {
+      position: "relative",
+      justifyContent: "center",
+    },
+    passwordInputField: {
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
       borderRadius: theme.radii.pill,
       backgroundColor: theme.colors.inputBg,
-      flexDirection: "row",
-      alignItems: "center",
-      minHeight: 50,
-      paddingRight: 8,
-    },
-    passwordInput: {
-      flex: 1,
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.medium,
-      paddingHorizontal: 16,
-      paddingVertical: 12,
+      minHeight: 50,
       fontSize: 15,
+      paddingVertical: 12,
+      paddingLeft: 16,
+      paddingRight: 84,
     },
     passwordToggle: {
+      position: "absolute",
+      right: 8,
       borderRadius: theme.radii.pill,
       backgroundColor: theme.colors.surface,
       borderWidth: 1,
@@ -678,7 +610,7 @@ function createStyles(theme: AppTheme) {
       letterSpacing: 2.4,
     },
     submitBiometricButton: {
-      width: 90,
+      width: 88,
       minHeight: 52,
       borderRadius: theme.radii.pill,
       borderWidth: 1,
@@ -686,8 +618,8 @@ function createStyles(theme: AppTheme) {
       backgroundColor: "#23bde4",
       alignItems: "center",
       justifyContent: "center",
-      paddingHorizontal: 8,
-      gap: 1,
+      paddingHorizontal: 6,
+      gap: 3,
     },
     submitBiometricButtonDisabled: {
       opacity: 0.52,
@@ -695,18 +627,80 @@ function createStyles(theme: AppTheme) {
     submitBiometricButtonPressed: {
       opacity: 0.85,
     },
-    submitBiometricLabel: {
-      color: "#ffffff",
-      fontFamily: theme.fonts.heavy,
-      fontSize: 14,
-      letterSpacing: 0.8,
-      textTransform: "uppercase",
+    faceIconFrame: {
+      width: 24,
+      height: 24,
+      position: "relative",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    faceIconCorner: {
+      position: "absolute",
+      width: 8,
+      height: 8,
+      borderColor: "#ffffff",
+    },
+    faceIconCornerTl: {
+      top: 0,
+      left: 0,
+      borderTopWidth: 1.6,
+      borderLeftWidth: 1.6,
+      borderTopLeftRadius: 2,
+    },
+    faceIconCornerTr: {
+      top: 0,
+      right: 0,
+      borderTopWidth: 1.6,
+      borderRightWidth: 1.6,
+      borderTopRightRadius: 2,
+    },
+    faceIconCornerBl: {
+      bottom: 0,
+      left: 0,
+      borderBottomWidth: 1.6,
+      borderLeftWidth: 1.6,
+      borderBottomLeftRadius: 2,
+    },
+    faceIconCornerBr: {
+      bottom: 0,
+      right: 0,
+      borderBottomWidth: 1.6,
+      borderRightWidth: 1.6,
+      borderBottomRightRadius: 2,
+    },
+    faceIconCore: {
+      width: 13,
+      height: 13,
+      borderRadius: 7,
+      borderWidth: 1.3,
+      borderColor: "#ffffff",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 2,
+    },
+    faceIconEyes: {
+      flexDirection: "row",
+      gap: 2,
+    },
+    faceIconEye: {
+      width: 1.8,
+      height: 1.8,
+      borderRadius: 1,
+      backgroundColor: "#ffffff",
+    },
+    faceIconMouth: {
+      width: 5,
+      height: 2,
+      borderRadius: 2,
+      backgroundColor: "#ffffff",
+      opacity: 0.95,
     },
     submitBiometricSubLabel: {
-      color: "rgba(255,255,255,0.85)",
+      color: "rgba(255,255,255,0.9)",
       fontFamily: theme.fonts.semibold,
       fontSize: 9,
       textAlign: "center",
+      lineHeight: 11,
     },
     biometricHintWrap: {
       borderWidth: 1,
@@ -721,72 +715,6 @@ function createStyles(theme: AppTheme) {
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 18,
-    },
-    utilityRow: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: theme.spacing.xs,
-      marginTop: 2,
-    },
-    utilityButton: {
-      borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surfaceSoft,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-    },
-    utilityButtonDisabled: {
-      opacity: 0.58,
-    },
-    utilityButtonPressed: {
-      opacity: 0.82,
-    },
-    utilityButtonText: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 11,
-      letterSpacing: 0.2,
-    },
-    connectionInfo: {
-      borderRadius: theme.radii.md,
-      borderWidth: 1,
-      paddingHorizontal: 12,
-      paddingVertical: 9,
-    },
-    connectionOk: {
-      borderColor: theme.mode === "dark" ? "#1f5b3f" : "#bde7cc",
-      backgroundColor: theme.mode === "dark" ? "#173926" : "#ebf9f0",
-    },
-    connectionError: {
-      borderColor: theme.mode === "dark" ? "#703040" : "#f5bec8",
-      backgroundColor: theme.mode === "dark" ? "#4a2330" : "#fff0f3",
-    },
-    connectionText: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.medium,
-      fontSize: 12,
-      lineHeight: 18,
-    },
-    diagnosticsPanel: {
-      borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.lg,
-      backgroundColor: theme.colors.surfaceSoft,
-      paddingHorizontal: 11,
-      paddingVertical: 10,
-      gap: 6,
-    },
-    diagnosticsTitle: {
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.bold,
-      fontSize: 13,
-    },
-    diagnosticsText: {
-      color: theme.colors.textMuted,
-      fontFamily: theme.fonts.medium,
-      fontSize: 11,
-      lineHeight: 16,
     },
   });
 }
