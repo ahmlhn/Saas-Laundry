@@ -45,8 +45,11 @@ npm run web
 - Persist token via `expo-secure-store`
 - Persist outlet aktif via `expo-secure-store`
 - Restore sesi via `/api/me`
-- Flow navigation: `Login -> Outlet Select -> Orders Today`
+- Flow navigation:
+  - `Login -> Outlet Select -> Bottom Tabs`
+  - Tabs: `Beranda`, `Pesanan`, `+`, `Laporan`, `Akun`
 - Fetch order read-only via `/api/orders` dengan context outlet aktif
+- Order detail + quick update status laundry/kurir
 - Logout via `/api/auth/logout`
 
 ## 5) Validasi

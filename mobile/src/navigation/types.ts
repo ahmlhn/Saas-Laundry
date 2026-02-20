@@ -1,12 +1,30 @@
+import type { NavigatorScreenParams } from "@react-navigation/native";
+import type { OrderBucket } from "../features/orders/orderBuckets";
+
 export type AuthStackParamList = {
   Login: undefined;
 };
 
-export type AppStackParamList = {
-  OutletSelect: undefined;
-  HomeDashboard: undefined;
-  OrdersToday: undefined;
+export type OrdersStackParamList = {
+  OrdersToday:
+    | {
+        initialBucket?: OrderBucket;
+      }
+    | undefined;
   OrderDetail: {
     orderId: string;
   };
+};
+
+export type AppTabParamList = {
+  HomeTab: undefined;
+  OrdersTab: NavigatorScreenParams<OrdersStackParamList> | undefined;
+  QuickActionTab: undefined;
+  ReportsTab: undefined;
+  AccountTab: undefined;
+};
+
+export type AppRootStackParamList = {
+  OutletSelect: undefined;
+  MainTabs: undefined;
 };

@@ -1,49 +1,53 @@
 import { useNavigation } from "@react-navigation/native";
-import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { StatusPill } from "../../components/ui/StatusPill";
+import { countOrdersByBucket, ORDER_BUCKETS } from "../../features/orders/orderBuckets";
 import { listOrders } from "../../features/orders/orderApi";
 import { getApiErrorMessage } from "../../lib/httpClient";
-import type { AppStackParamList } from "../../navigation/types";
+import type { AppTabParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
 import type { OrderSummary } from "../../types/order";
 
-type Navigation = NativeStackNavigationProp<AppStackParamList, "HomeDashboard">;
+type Navigation = BottomTabNavigationProp<AppTabParamList, "HomeTab">;
 
-function sumDueOrders(orders: OrderSummary[]): number {
-  return orders.filter((order) => order.due_amount > 0).length;
+interface ShortcutConfig {
+  key: (typeof ORDER_BUCKETS)[number]["key"];
+  label: string;
 }
 
-function sumCompletedOrders(orders: OrderSummary[]): number {
-  return orders.filter((order) => order.laundry_status === "completed").length;
-}
+const SHORTCUTS: ShortcutConfig[] = [
+  { key: "validasi", label: "Konfirmasi" },
+  { key: "antrian", label: "Penjemputan" },
+  { key: "proses", label: "Antrian" },
+  { key: "proses", label: "Proses" },
+  { key: "siap_ambil", label: "Siap Ambil" },
+  { key: "siap_antar", label: "Siap Antar" },
+];
 
 export function HomeDashboardScreen() {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const navigation = useNavigation<Navigation>();
-  const { selectedOutlet, session, logout, refreshSession } = useSession();
+  const { selectedOutlet, session, logout, refreshSession, selectOutlet } = useSession();
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!selectedOutlet) {
-      navigation.replace("OutletSelect");
-      return;
-    }
-
     void loadDashboard();
   }, [selectedOutlet?.id]);
 
   async function loadDashboard(): Promise<void> {
     if (!selectedOutlet) {
+      setOrders([]);
+      setLoading(false);
       return;
     }
 
@@ -54,7 +58,7 @@ export function HomeDashboardScreen() {
       await refreshSession();
       const data = await listOrders({
         outletId: selectedOutlet.id,
-        limit: 40,
+        limit: 60,
       });
       setOrders(data);
     } catch (error) {
@@ -64,69 +68,105 @@ export function HomeDashboardScreen() {
     }
   }
 
-  const summary = useMemo(() => {
-    const total = orders.length;
-    const due = sumDueOrders(orders);
-    const completed = sumCompletedOrders(orders);
-    return { total, due, completed };
-  }, [orders]);
+  const bucketCounts = useMemo(() => countOrdersByBucket(orders), [orders]);
+  const dueCount = useMemo(() => orders.filter((order) => order.due_amount > 0).length, [orders]);
+  const pendingCount = useMemo(() => bucketCounts.validasi + bucketCounts.antrian + bucketCounts.proses, [bucketCounts]);
 
-  const quotaLabel =
-    session?.quota.orders_remaining === null
-      ? "Tanpa batas kuota order bulan ini."
-      : `${session?.quota.orders_remaining ?? 0} sisa dari ${session?.quota.orders_limit ?? 0} kuota order bulan ini.`;
+  const summary = useMemo(
+    () => ({
+      total: orders.length,
+      pending: pendingCount,
+      overdue: dueCount,
+    }),
+    [orders.length, pendingCount, dueCount]
+  );
 
   return (
     <AppScreen contentContainerStyle={styles.content} scroll>
-      <View style={styles.hero}>
-        <Text style={styles.pageTitle}>Dashboard Operasional</Text>
-        <Text style={styles.pageSubtitle}>{selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "-"}</Text>
+      <View style={styles.header}>
+        <Text style={styles.brand}>bilas</Text>
+        <Text style={styles.greeting}>Hai, {session?.user.name ?? "-"}</Text>
+        <Text style={styles.welcome}>Selamat datang kembali</Text>
       </View>
 
-      <AppPanel style={styles.infoPanel}>
-        <View style={styles.infoTop}>
-          <Text style={styles.infoTitle}>{session?.user.name ?? "-"}</Text>
-          <StatusPill label={`${session?.roles.length ?? 0} role`} tone="info" />
+      <AppPanel style={styles.statsPanel}>
+        <View style={styles.statsTopTabs}>
+          <Text style={styles.statsTab}>KEUANGAN</Text>
+          <Text style={[styles.statsTab, styles.statsTabActive]}>TRANSAKSI</Text>
         </View>
-        <Text style={styles.infoText}>Role aktif: {(session?.roles ?? []).join(", ") || "-"}</Text>
-        <Text style={styles.infoText}>{quotaLabel}</Text>
-      </AppPanel>
-
-      <AppPanel style={styles.metricPanel}>
-        <Text style={styles.sectionTitle}>Ringkasan Order Hari Ini</Text>
         {loading ? (
           <View style={styles.loadingWrap}>
-            <ActivityIndicator color={theme.colors.primaryStrong} />
+            <ActivityIndicator color={theme.colors.primaryContrast} />
             <Text style={styles.loadingText}>Memuat ringkasan...</Text>
           </View>
         ) : (
-          <View style={styles.metricGrid}>
-            <View style={styles.metricItem}>
-              <Text style={styles.metricValue}>{summary.total}</Text>
-              <Text style={styles.metricLabel}>Total Order</Text>
+          <View style={styles.statsGrid}>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{summary.total}</Text>
+              <Text style={styles.statLabel}>Masuk</Text>
             </View>
-            <View style={styles.metricItem}>
-              <Text style={styles.metricValue}>{summary.completed}</Text>
-              <Text style={styles.metricLabel}>Selesai</Text>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{summary.pending}</Text>
+              <Text style={styles.statLabel}>Harus Selesai</Text>
             </View>
-            <View style={styles.metricItem}>
-              <Text style={styles.metricValue}>{summary.due}</Text>
-              <Text style={styles.metricLabel}>Belum Lunas</Text>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{summary.overdue}</Text>
+              <Text style={styles.statLabel}>Terlambat</Text>
             </View>
           </View>
         )}
-        {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
       </AppPanel>
 
-      <AppPanel style={styles.menuPanel}>
-        <Text style={styles.sectionTitle}>Aksi Cepat</Text>
-        <View style={styles.menuActions}>
-          <AppButton onPress={() => navigation.navigate("OrdersToday")} title="Lihat Orders Hari Ini" />
-          <AppButton onPress={() => navigation.replace("OutletSelect")} title="Ganti Outlet Aktif" variant="secondary" />
-          <AppButton onPress={() => void loadDashboard()} title="Refresh Dashboard" variant="ghost" />
-          <AppButton onPress={() => void logout()} title="Logout" variant="ghost" />
-        </View>
+      <View style={styles.shortcutGrid}>
+        {SHORTCUTS.map((item, index) => (
+          <Pressable
+            key={`${item.key}-${index}`}
+            onPress={() =>
+              navigation.navigate("OrdersTab", {
+                screen: "OrdersToday",
+                params: { initialBucket: item.key },
+              })
+            }
+            style={({ pressed }) => [styles.shortcutItem, pressed ? styles.shortcutPressed : null]}
+          >
+            <View style={styles.shortcutIconWrap}>
+              <Text style={styles.shortcutIconText}>{bucketCounts[item.key]}</Text>
+            </View>
+            <Text style={styles.shortcutLabel}>{item.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      <AppPanel style={styles.pintasanPanel}>
+        <Text style={styles.sectionTitle}>Pintasan</Text>
+        <Pressable style={styles.pintasanItem}>
+          <Text style={styles.pintasanTitle}>Top Pelanggan</Text>
+          <Text style={styles.pintasanSubtitle}>Pelanggan dengan transaksi terbanyak</Text>
+        </Pressable>
+        <Pressable style={styles.pintasanItem}>
+          <Text style={styles.pintasanTitle}>Top Layanan</Text>
+          <Text style={styles.pintasanSubtitle}>Layanan paling sering dipesan</Text>
+        </Pressable>
       </AppPanel>
+
+      <View style={styles.actions}>
+        <AppButton onPress={() => void loadDashboard()} title="Refresh" variant="secondary" />
+        <AppButton
+          onPress={() => {
+            selectOutlet(null);
+          }}
+          title="Ganti Outlet"
+          variant="ghost"
+        />
+        <AppButton onPress={() => void logout()} title="Logout" variant="ghost" />
+      </View>
+
+      {errorMessage ? (
+        <View style={styles.errorWrap}>
+          <StatusPill label="Error API" tone="danger" />
+          <Text style={styles.errorText}>{errorMessage}</Text>
+        </View>
+      ) : null}
     </AppScreen>
   );
 }
@@ -136,102 +176,165 @@ function createStyles(theme: AppTheme) {
     content: {
       flexGrow: 1,
       paddingHorizontal: theme.spacing.lg,
-      paddingTop: theme.spacing.lg,
+      paddingTop: theme.spacing.md,
       paddingBottom: theme.spacing.xxl,
       gap: theme.spacing.md,
     },
-    hero: {
+    header: {
       gap: 2,
     },
-    pageTitle: {
-      color: theme.colors.textPrimary,
+    brand: {
+      color: theme.colors.info,
       fontFamily: theme.fonts.heavy,
-      fontSize: 29,
-      lineHeight: 36,
+      fontSize: 24,
+      letterSpacing: 0.4,
+      textTransform: "lowercase",
     },
-    pageSubtitle: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.medium,
-      fontSize: 13,
-      lineHeight: 19,
-    },
-    infoPanel: {
-      gap: theme.spacing.xs,
-      backgroundColor: theme.colors.surfaceSoft,
-      borderColor: theme.colors.borderStrong,
-    },
-    infoTop: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: theme.spacing.sm,
-    },
-    infoTitle: {
-      flex: 1,
+    greeting: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
-      fontSize: 18,
+      fontSize: 20,
+      lineHeight: 25,
     },
-    infoText: {
+    welcome: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
-      lineHeight: 18,
     },
-    metricPanel: {
+    statsPanel: {
+      backgroundColor: "#1f71df",
+      borderColor: "#1f71df",
       gap: theme.spacing.sm,
     },
-    sectionTitle: {
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.bold,
-      fontSize: 15,
+    statsTopTabs: {
+      flexDirection: "row",
+      justifyContent: "space-around",
+      alignItems: "center",
+      borderBottomWidth: 1,
+      borderBottomColor: "rgba(255,255,255,0.35)",
+      paddingBottom: 7,
+    },
+    statsTab: {
+      color: "rgba(255,255,255,0.76)",
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
+      letterSpacing: 0.3,
+    },
+    statsTabActive: {
+      color: "#ffffff",
     },
     loadingWrap: {
       flexDirection: "row",
       alignItems: "center",
       gap: theme.spacing.sm,
+      paddingVertical: 4,
     },
     loadingText: {
-      color: theme.colors.textSecondary,
+      color: "#eaf5ff",
       fontFamily: theme.fonts.medium,
       fontSize: 12,
     },
-    metricGrid: {
+    statsGrid: {
       flexDirection: "row",
-      gap: theme.spacing.xs,
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
     },
-    metricItem: {
+    statItem: {
       flex: 1,
+      alignItems: "center",
+      gap: 2,
+    },
+    statValue: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.heavy,
+      fontSize: 21,
+    },
+    statLabel: {
+      color: "rgba(255,255,255,0.9)",
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      textAlign: "center",
+    },
+    shortcutGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: theme.spacing.sm,
+      justifyContent: "space-between",
+    },
+    shortcutItem: {
+      width: "30.5%",
+      alignItems: "center",
+      gap: 7,
+    },
+    shortcutPressed: {
+      opacity: 0.82,
+    },
+    shortcutIconWrap: {
+      width: 52,
+      height: 52,
+      borderRadius: 999,
+      backgroundColor: theme.colors.primarySoft,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    shortcutIconText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.heavy,
+      fontSize: 16,
+    },
+    shortcutLabel: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+      textAlign: "center",
+      lineHeight: 16,
+    },
+    pintasanPanel: {
+      gap: theme.spacing.sm,
+    },
+    sectionTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 17,
+    },
+    pintasanItem: {
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.md,
       backgroundColor: theme.colors.surfaceSoft,
-      paddingVertical: 9,
-      paddingHorizontal: 10,
-      alignItems: "center",
-      gap: 1,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+      gap: 2,
     },
-    metricValue: {
+    pintasanTitle: {
       color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.heavy,
-      fontSize: 21,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 14,
     },
-    metricLabel: {
+    pintasanSubtitle: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
-      fontSize: 11,
+      fontSize: 12,
+    },
+    actions: {
+      gap: theme.spacing.xs,
+    },
+    errorWrap: {
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? "#693447" : "#f0bec8",
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.mode === "dark" ? "#492736" : "#fff3f6",
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      gap: 6,
     },
     errorText: {
       color: theme.colors.danger,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 18,
-    },
-    menuPanel: {
-      gap: theme.spacing.sm,
-    },
-    menuActions: {
-      gap: theme.spacing.xs,
     },
   });
 }

@@ -1,22 +1,16 @@
-import { useNavigation } from "@react-navigation/native";
-import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { StatusPill } from "../../components/ui/StatusPill";
-import type { AppStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
 
-type Navigation = NativeStackNavigationProp<AppStackParamList, "OutletSelect">;
-
 export function OutletSelectScreen() {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const navigation = useNavigation<Navigation>();
   const { session, selectedOutlet, selectOutlet, logout } = useSession();
 
   if (!session) {
@@ -60,7 +54,6 @@ export function OutletSelectScreen() {
                 key={outlet.id}
                 onPress={() => {
                   selectOutlet(outlet);
-                  navigation.replace("HomeDashboard");
                 }}
                 style={({ pressed }) => [styles.outletCard, active ? styles.outletCardActive : null, pressed ? styles.outletCardPressed : null]}
               >

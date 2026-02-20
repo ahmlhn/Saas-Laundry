@@ -10,14 +10,14 @@ import { StatusPill } from "../../components/ui/StatusPill";
 import { getOrderDetail, updateCourierStatus, updateLaundryStatus } from "../../features/orders/orderApi";
 import { formatStatusLabel, getNextCourierStatus, getNextLaundryStatus, resolveCourierTone, resolveLaundryTone } from "../../features/orders/orderStatus";
 import { getApiErrorMessage } from "../../lib/httpClient";
-import type { AppStackParamList } from "../../navigation/types";
+import type { OrdersStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
 import type { OrderDetail } from "../../types/order";
 
-type Navigation = NativeStackNavigationProp<AppStackParamList, "OrderDetail">;
-type DetailRoute = RouteProp<AppStackParamList, "OrderDetail">;
+type Navigation = NativeStackNavigationProp<OrdersStackParamList, "OrderDetail">;
+type DetailRoute = RouteProp<OrdersStackParamList, "OrderDetail">;
 
 const currencyFormatter = new Intl.NumberFormat("id-ID");
 
@@ -71,11 +71,6 @@ export function OrderDetailScreen() {
   const canUpdateCourier = hasAnyRole(roles, ["owner", "admin", "courier"]);
 
   useEffect(() => {
-    if (!selectedOutlet) {
-      navigation.replace("OutletSelect");
-      return;
-    }
-
     void loadDetail();
   }, [route.params.orderId, selectedOutlet?.id]);
 

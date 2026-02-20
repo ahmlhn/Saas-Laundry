@@ -1,4 +1,5 @@
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
+import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
@@ -6,16 +7,18 @@ import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { StatusPill } from "../../components/ui/StatusPill";
+import { ORDER_BUCKETS, type OrderBucket, resolveOrderBucket } from "../../features/orders/orderBuckets";
 import { listOrders } from "../../features/orders/orderApi";
 import { formatStatusLabel, resolveLaundryTone } from "../../features/orders/orderStatus";
 import { getApiErrorMessage } from "../../lib/httpClient";
-import type { AppStackParamList } from "../../navigation/types";
+import type { OrdersStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
 import type { OrderSummary } from "../../types/order";
 
-type Navigation = NativeStackNavigationProp<AppStackParamList, "OrdersToday">;
+type Navigation = NativeStackNavigationProp<OrdersStackParamList, "OrdersToday">;
+type OrdersRoute = RouteProp<OrdersStackParamList, "OrdersToday">;
 
 const currencyFormatter = new Intl.NumberFormat("id-ID");
 
@@ -41,19 +44,22 @@ export function OrdersTodayScreen() {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const navigation = useNavigation<Navigation>();
-  const { selectedOutlet } = useSession();
+  const route = useRoute<OrdersRoute>();
+  const { selectedOutlet, selectOutlet } = useSession();
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [activeBucket, setActiveBucket] = useState<OrderBucket>(route.params?.initialBucket ?? "validasi");
 
   useEffect(() => {
-    if (!selectedOutlet) {
-      navigation.replace("OutletSelect");
-      return;
+    if (route.params?.initialBucket) {
+      setActiveBucket(route.params.initialBucket);
     }
+  }, [route.params?.initialBucket]);
 
+  useEffect(() => {
     void loadOrders(false);
   }, [selectedOutlet?.id]);
 
@@ -67,27 +73,43 @@ export function OrdersTodayScreen() {
 
   const filteredOrders = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    if (!keyword) {
-      return orders;
-    }
 
     return orders.filter((order) => {
+      if (resolveOrderBucket(order) !== activeBucket) {
+        return false;
+      }
+
+      if (!keyword) {
+        return true;
+      }
+
       const values = [order.invoice_no, order.order_code, order.customer?.name, order.laundry_status, order.courier_status]
         .filter((value): value is string => Boolean(value))
         .map((value) => value.toLowerCase());
       return values.some((value) => value.includes(keyword));
     });
-  }, [orders, query]);
+  }, [orders, query, activeBucket]);
 
-  const summary = useMemo(() => {
-    const total = orders.length;
-    const due = orders.filter((order) => order.due_amount > 0).length;
-    const done = orders.filter((order) => order.laundry_status === "completed").length;
-    return { total, due, done };
+  const bucketCounts = useMemo(() => {
+    const counts: Record<OrderBucket, number> = {
+      validasi: 0,
+      antrian: 0,
+      proses: 0,
+      siap_ambil: 0,
+      siap_antar: 0,
+    };
+
+    for (const order of orders) {
+      counts[resolveOrderBucket(order)] += 1;
+    }
+
+    return counts;
   }, [orders]);
 
   async function loadOrders(isRefresh: boolean): Promise<void> {
     if (!selectedOutlet) {
+      setOrders([]);
+      setLoading(false);
       return;
     }
 
@@ -102,7 +124,7 @@ export function OrdersTodayScreen() {
     try {
       const data = await listOrders({
         outletId: selectedOutlet.id,
-        limit: 30,
+        limit: 60,
       });
       setOrders(data);
     } catch (error) {
@@ -147,33 +169,34 @@ export function OrdersTodayScreen() {
   return (
     <AppScreen contentContainerStyle={styles.screenContent}>
       <View style={styles.headerBlock}>
-        <Text style={styles.headerTitle}>Orders Hari Ini</Text>
+        <Text style={styles.headerTitle}>Pesanan</Text>
         <Text style={styles.headerSubtitle}>{titleLine}</Text>
       </View>
 
-      <AppPanel style={styles.summaryPanel}>
-        <View style={styles.summaryGrid}>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryValue}>{summary.total}</Text>
-            <Text style={styles.summaryLabel}>Total Order</Text>
-          </View>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryValue}>{summary.done}</Text>
-            <Text style={styles.summaryLabel}>Selesai</Text>
-          </View>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryValue}>{summary.due}</Text>
-            <Text style={styles.summaryLabel}>Belum Lunas</Text>
-          </View>
-        </View>
-      </AppPanel>
+      <View style={styles.filterTabs}>
+        {ORDER_BUCKETS.map((bucket) => {
+          const isActive = bucket.key === activeBucket;
+          return (
+            <Pressable key={bucket.key} onPress={() => setActiveBucket(bucket.key)} style={[styles.filterTab, isActive ? styles.filterTabActive : null]}>
+              <Text style={[styles.filterTabText, isActive ? styles.filterTabTextActive : null]}>{bucket.label}</Text>
+              <Text style={[styles.filterCount, isActive ? styles.filterCountActive : null]}>{bucketCounts[bucket.key]}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
 
       <View style={styles.actionRow}>
         <View style={styles.actionItem}>
-          <AppButton onPress={() => navigation.navigate("HomeDashboard")} title="Dashboard" variant="secondary" />
+          <AppButton onPress={() => void loadOrders(false)} title="Refresh" variant="secondary" />
         </View>
         <View style={styles.actionItem}>
-          <AppButton onPress={() => navigation.replace("OutletSelect")} title="Ganti Outlet" variant="ghost" />
+          <AppButton
+            onPress={() => {
+              selectOutlet(null);
+            }}
+            title="Ganti Outlet"
+            variant="ghost"
+          />
         </View>
       </View>
 
@@ -199,7 +222,12 @@ export function OrdersTodayScreen() {
           refreshing={refreshing}
           renderItem={renderOrderCard}
           style={styles.list}
-          ListEmptyComponent={<Text style={styles.emptyText}>Tidak ada order yang cocok dengan filter saat ini.</Text>}
+          ListEmptyComponent={
+            <AppPanel style={styles.emptyPanel}>
+              <Text style={styles.emptyTitle}>Belum ada data</Text>
+              <Text style={styles.emptyText}>Tidak ada pesanan pada kategori {ORDER_BUCKETS.find((item) => item.key === activeBucket)?.label ?? "-"}.</Text>
+            </AppPanel>
+          }
           ListHeaderComponent={
             errorMessage ? (
               <View style={styles.errorWrap}>
@@ -237,35 +265,48 @@ function createStyles(theme: AppTheme) {
       fontFamily: theme.fonts.medium,
       fontSize: 13,
     },
-    summaryPanel: {
-      backgroundColor: theme.colors.surfaceSoft,
-      borderColor: theme.colors.borderStrong,
-    },
-    summaryGrid: {
+    filterTabs: {
       flexDirection: "row",
-      justifyContent: "space-between",
-      gap: theme.spacing.xs,
+      flexWrap: "wrap",
+      gap: 6,
     },
-    summaryItem: {
-      flex: 1,
-      borderRadius: theme.radii.md,
-      backgroundColor: theme.colors.surface,
-      paddingVertical: 9,
+    filterTab: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
       paddingHorizontal: 10,
+      paddingVertical: 8,
+      borderRadius: theme.radii.pill,
       borderWidth: 1,
       borderColor: theme.colors.border,
-      alignItems: "center",
-      gap: 2,
+      backgroundColor: theme.colors.surface,
     },
-    summaryValue: {
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.heavy,
-      fontSize: 19,
+    filterTabActive: {
+      borderColor: theme.colors.info,
+      backgroundColor: theme.colors.primarySoft,
     },
-    summaryLabel: {
+    filterTabText: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+    },
+    filterTabTextActive: {
+      color: theme.colors.info,
+    },
+    filterCount: {
+      minWidth: 18,
+      paddingHorizontal: 4,
+      paddingVertical: 1,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surfaceSoft,
       color: theme.colors.textMuted,
-      fontFamily: theme.fonts.medium,
+      fontFamily: theme.fonts.bold,
       fontSize: 11,
+      textAlign: "center",
+    },
+    filterCountActive: {
+      color: theme.colors.info,
+      backgroundColor: theme.colors.surface,
     },
     actionRow: {
       flexDirection: "row",
@@ -363,8 +404,19 @@ function createStyles(theme: AppTheme) {
       fontSize: 11,
       textAlign: "right",
     },
-    emptyText: {
+    emptyPanel: {
+      gap: theme.spacing.xs,
+      alignItems: "center",
+      backgroundColor: theme.colors.surfaceSoft,
+      borderColor: theme.colors.borderStrong,
       marginTop: theme.spacing.md,
+    },
+    emptyTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 14,
+    },
+    emptyText: {
       textAlign: "center",
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
