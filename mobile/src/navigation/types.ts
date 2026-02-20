@@ -19,6 +19,10 @@ export type OrdersStackParamList = {
 export type AccountStackParamList = {
   AccountHub: undefined;
   Customers: undefined;
+  FinanceTools: undefined;
+  PrinterNote: undefined;
+  HelpInfo: undefined;
+  WhatsAppTools: undefined;
 };
 
 export type AppTabParamList = {

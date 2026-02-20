@@ -47,10 +47,31 @@ npm run web
 - Restore sesi via `/api/me`
 - Flow navigation:
   - `Login -> Outlet Select -> Bottom Tabs`
-  - Tabs: `Beranda`, `Pesanan`, `+`, `Laporan`, `Akun`
+  - Tabs role-based:
+    - Owner/Admin/Cashier: `Beranda`, `Pesanan`, `+`, `Laporan`, `Akun`
+    - Worker/Courier: `Beranda`, `Pesanan`, `Akun`
 - Fetch order read-only via `/api/orders` dengan context outlet aktif
 - Order detail + quick update status laundry/kurir
 - Modul pelanggan dari tab Akun (`Pelanggan Saya`) untuk list + upsert + arsip/restore (role-based)
+- Modul `Kelola Keuangan` dari tab Akun:
+  - Snapshot billing quota via `/api/billing/quota` (owner/admin)
+  - Snapshot kas operasional dari data `/api/orders` outlet aktif
+  - Daftar aksi finance sesuai referensi UI (siap disambung endpoint detail)
+- Modul `Printer & Nota` dari tab Akun:
+  - Pengaturan profil nota, format nomor, dan toggle tampilan
+  - Persist lokal perangkat via `expo-secure-store`
+- Modul `Bantuan & Informasi` dari tab Akun sebagai utility hub (entry point konten support)
+- Modul `Kirim WA`:
+  - Tampil untuk role owner/admin
+  - Gate plan: hanya plan `Premium`/`Pro`
+  - Ringkasan provider + status pesan via `/api/wa/providers` dan `/api/wa/messages`
+- Biometric re-login:
+  - Aktivasi dari tab Akun
+  - Login screen mendukung `Masuk dengan Biometrik` saat sesi token tersimpan
+- Performance pass:
+  - Cache in-memory untuk list order/pelanggan
+  - Pagination incremental hingga 100 data
+  - Skeleton loading untuk list utama
 - Logout via `/api/auth/logout`
 
 ## 5) Validasi

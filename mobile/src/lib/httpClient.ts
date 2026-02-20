@@ -106,6 +106,10 @@ export function getApiBaseCandidates(): string[] {
 
 export function getApiErrorMessage(error: unknown): string {
   if (!axios.isAxiosError(error)) {
+    if (error instanceof Error && error.message.trim().length > 0) {
+      return error.message;
+    }
+
     return "Terjadi kesalahan yang tidak diketahui.";
   }
 

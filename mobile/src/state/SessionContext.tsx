@@ -1,13 +1,16 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { MOBILE_DEVICE_NAME } from "../config/env";
 import { fetchMeContext, loginWithEmailPassword, logoutCurrentSession } from "../features/auth/authApi";
+import { authenticateWithBiometric, getBiometricAvailability } from "../lib/biometricAuth";
 import { setAuthBearerToken } from "../lib/httpClient";
 import {
   clearStoredAccessToken,
   clearStoredSelectedOutletId,
   getStoredAccessToken,
+  getStoredBiometricEnabled,
   getStoredSelectedOutletId,
   setStoredAccessToken,
+  setStoredBiometricEnabled,
   setStoredSelectedOutletId,
 } from "../lib/secureTokenStorage";
 import type { AllowedOutlet, UserContext } from "../types/auth";
@@ -21,10 +24,16 @@ interface SessionContextValue {
   booting: boolean;
   session: UserContext | null;
   selectedOutlet: AllowedOutlet | null;
+  hasStoredSession: boolean;
+  biometricAvailable: boolean;
+  biometricEnabled: boolean;
+  biometricLabel: string;
   login: (input: LoginInput) => Promise<void>;
+  biometricLogin: () => Promise<void>;
   logout: () => Promise<void>;
   selectOutlet: (outlet: AllowedOutlet | null) => void;
   refreshSession: () => Promise<void>;
+  setBiometricEnabled: (enabled: boolean) => Promise<void>;
 }
 
 const SessionContext = createContext<SessionContextValue | undefined>(undefined);
@@ -72,6 +81,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [booting, setBooting] = useState(true);
   const [session, setSession] = useState<UserContext | null>(null);
   const [selectedOutlet, setSelectedOutlet] = useState<AllowedOutlet | null>(null);
+  const [hasStoredSession, setHasStoredSession] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricEnabled, setBiometricEnabledState] = useState(false);
+  const [biometricLabel, setBiometricLabel] = useState("Biometrik");
 
   useEffect(() => {
     void bootstrapSession();
@@ -80,12 +93,33 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   async function bootstrapSession(): Promise<void> {
     setBooting(true);
 
-    const token = await getStoredAccessToken();
+    const [token, preferredOutletId, storedBiometricEnabled, biometricAvailability] = await Promise.all([
+      getStoredAccessToken(),
+      getStoredSelectedOutletId(),
+      getStoredBiometricEnabled(),
+      getBiometricAvailability(),
+    ]);
+
+    setBiometricAvailable(biometricAvailability.isSupported);
+    setBiometricLabel(biometricAvailability.label);
+    setBiometricEnabledState(storedBiometricEnabled && biometricAvailability.isSupported);
+
     if (!token) {
       setAuthBearerToken(null);
       setSession(null);
       setSelectedOutlet(null);
+      setHasStoredSession(false);
       await clearStoredSelectedOutletId();
+      setBooting(false);
+      return;
+    }
+
+    setHasStoredSession(true);
+
+    if (storedBiometricEnabled && biometricAvailability.isSupported) {
+      setAuthBearerToken(null);
+      setSession(null);
+      setSelectedOutlet(null);
       setBooting(false);
       return;
     }
@@ -94,7 +128,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     try {
       const response = await fetchMeContext();
-      const preferredOutletId = await getStoredSelectedOutletId();
       const nextSelectedOutlet = reconcileSelectedOutlet(response.data, {
         preferredOutletId,
         previousOutlet: selectedOutlet,
@@ -108,6 +141,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setAuthBearerToken(null);
       setSession(null);
       setSelectedOutlet(null);
+      setHasStoredSession(false);
     } finally {
       setBooting(false);
     }
@@ -118,8 +152,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const response = await fetchMeContext();
-    const preferredOutletId = await getStoredSelectedOutletId();
+    const [response, preferredOutletId] = await Promise.all([fetchMeContext(), getStoredSelectedOutletId()]);
     const nextSelectedOutlet = reconcileSelectedOutlet(response.data, {
       preferredOutletId,
       previousOutlet: selectedOutlet,
@@ -139,6 +172,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     await setStoredAccessToken(response.access_token);
     setAuthBearerToken(response.access_token);
+    setHasStoredSession(true);
 
     const preferredOutletId = await getStoredSelectedOutletId();
     const nextSelectedOutlet = reconcileSelectedOutlet(response.data, {
@@ -151,6 +185,50 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await persistSelectedOutlet(nextSelectedOutlet);
   }
 
+  async function biometricLogin(): Promise<void> {
+    if (!biometricAvailable || !biometricEnabled) {
+      throw new Error("Biometrik belum aktif di perangkat ini.");
+    }
+
+    const token = await getStoredAccessToken();
+    if (!token) {
+      throw new Error("Sesi login tidak ditemukan. Silakan login email/password.");
+    }
+
+    await authenticateWithBiometric(`Verifikasi ${biometricLabel} untuk masuk`);
+    setAuthBearerToken(token);
+
+    const [response, preferredOutletId] = await Promise.all([fetchMeContext(), getStoredSelectedOutletId()]);
+    const nextSelectedOutlet = reconcileSelectedOutlet(response.data, {
+      preferredOutletId,
+      previousOutlet: selectedOutlet,
+    });
+
+    setSession(response.data);
+    setSelectedOutlet(nextSelectedOutlet);
+    setHasStoredSession(true);
+    await persistSelectedOutlet(nextSelectedOutlet);
+  }
+
+  async function setBiometricEnabled(enabled: boolean): Promise<void> {
+    if (enabled) {
+      const availability = await getBiometricAvailability();
+      if (!availability.isSupported) {
+        throw new Error("Perangkat tidak mendukung autentikasi biometrik.");
+      }
+
+      await authenticateWithBiometric("Konfirmasi aktivasi login biometrik");
+      await setStoredBiometricEnabled(true);
+      setBiometricAvailable(true);
+      setBiometricLabel(availability.label);
+      setBiometricEnabledState(true);
+      return;
+    }
+
+    await setStoredBiometricEnabled(false);
+    setBiometricEnabledState(false);
+  }
+
   async function logout(): Promise<void> {
     try {
       await logoutCurrentSession();
@@ -161,6 +239,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setAuthBearerToken(null);
       setSession(null);
       setSelectedOutlet(null);
+      setHasStoredSession(false);
     }
   }
 
@@ -174,12 +253,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       booting,
       session,
       selectedOutlet,
+      hasStoredSession,
+      biometricAvailable,
+      biometricEnabled,
+      biometricLabel,
       login,
+      biometricLogin,
       logout,
       selectOutlet,
       refreshSession,
+      setBiometricEnabled,
     }),
-    [booting, session, selectedOutlet]
+    [booting, session, selectedOutlet, hasStoredSession, biometricAvailable, biometricEnabled, biometricLabel]
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

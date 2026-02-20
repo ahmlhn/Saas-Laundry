@@ -1,12 +1,14 @@
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
+import { AppSkeletonBlock } from "../../components/ui/AppSkeletonBlock";
 import { StatusPill } from "../../components/ui/StatusPill";
 import { archiveCustomer, createCustomer, listCustomers, restoreCustomer, updateCustomer } from "../../features/customers/customerApi";
+import { hasAnyRole } from "../../lib/accessControl";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AccountStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
@@ -14,9 +16,9 @@ import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
 import type { Customer } from "../../types/customer";
 
-function hasAnyRole(roles: string[], allowed: string[]): boolean {
-  return roles.some((role) => allowed.includes(role));
-}
+const INITIAL_LIMIT = 30;
+const PAGE_SIZE = 20;
+const MAX_LIMIT = 100;
 
 export function CustomersScreen() {
   const theme = useAppTheme();
@@ -30,8 +32,12 @@ export function CustomersScreen() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [search, setSearch] = useState("");
+  const [submittedQuery, setSubmittedQuery] = useState("");
   const [includeDeleted, setIncludeDeleted] = useState(false);
+  const [limit, setLimit] = useState(INITIAL_LIMIT);
+  const [hasMore, setHasMore] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -41,13 +47,19 @@ export function CustomersScreen() {
   const [formNotes, setFormNotes] = useState("");
 
   useEffect(() => {
-    void loadCustomers(false);
+    setLimit(INITIAL_LIMIT);
+    void loadCustomers(false, INITIAL_LIMIT, true, submittedQuery);
   }, [includeDeleted]);
 
-  async function loadCustomers(isRefresh: boolean): Promise<void> {
+  async function loadCustomers(
+    isRefresh: boolean,
+    targetLimit = limit,
+    forceRefresh = false,
+    queryParam = submittedQuery
+  ): Promise<void> {
     if (isRefresh) {
       setRefreshing(true);
-    } else {
+    } else if (!loadingMore) {
       setLoading(true);
     }
 
@@ -55,19 +67,19 @@ export function CustomersScreen() {
 
     try {
       const data = await listCustomers({
-        query: search,
-        limit: 60,
+        query: queryParam,
+        limit: targetLimit,
         includeDeleted: includeDeleted && canArchive ? true : undefined,
+        forceRefresh: isRefresh || forceRefresh,
       });
       setCustomers(data);
+      setHasMore(data.length >= targetLimit && targetLimit < MAX_LIMIT);
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error));
     } finally {
-      if (isRefresh) {
-        setRefreshing(false);
-      } else {
-        setLoading(false);
-      }
+      setLoading(false);
+      setRefreshing(false);
+      setLoadingMore(false);
     }
   }
 
@@ -112,7 +124,7 @@ export function CustomersScreen() {
         setActionMessage("Pelanggan berhasil ditambahkan.");
       }
       resetForm();
-      await loadCustomers(false);
+      await loadCustomers(false, limit, true);
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error));
     } finally {
@@ -136,25 +148,11 @@ export function CustomersScreen() {
         await archiveCustomer(item.id);
         setActionMessage("Pelanggan berhasil diarsipkan.");
       }
-      await loadCustomers(false);
+      await loadCustomers(false, limit, true);
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error));
     }
   }
-
-  const filteredCustomers = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
-    if (!keyword) {
-      return customers;
-    }
-
-    return customers.filter((customer) => {
-      const values = [customer.name, customer.phone_normalized, customer.notes]
-        .filter((value): value is string => Boolean(value))
-        .map((value) => value.toLowerCase());
-      return values.some((value) => value.includes(keyword));
-    });
-  }, [customers, search]);
 
   function startEdit(item: Customer): void {
     if (!canCreateOrEdit) {
@@ -189,6 +187,42 @@ export function CustomersScreen() {
     );
   }
 
+  function renderSkeletonList() {
+    return (
+      <View style={styles.skeletonWrap}>
+        {Array.from({ length: 4 }).map((_, index) => (
+          <View key={`customer-skeleton-${index}`} style={styles.skeletonCard}>
+            <AppSkeletonBlock height={14} width="46%" />
+            <AppSkeletonBlock height={11} width="62%" />
+            <AppSkeletonBlock height={10} width="74%" />
+          </View>
+        ))}
+      </View>
+    );
+  }
+
+  async function handleSearch(): Promise<void> {
+    const keyword = search.trim();
+    setSubmittedQuery(keyword);
+    setLimit(INITIAL_LIMIT);
+    await loadCustomers(false, INITIAL_LIMIT, true, keyword);
+  }
+
+  async function handleLoadMore(): Promise<void> {
+    if (!hasMore || loading || loadingMore) {
+      return;
+    }
+
+    const nextLimit = Math.min(limit + PAGE_SIZE, MAX_LIMIT);
+    if (nextLimit === limit) {
+      return;
+    }
+
+    setLoadingMore(true);
+    setLimit(nextLimit);
+    await loadCustomers(false, nextLimit, true);
+  }
+
   return (
     <AppScreen contentContainerStyle={styles.content} scroll>
       <View style={styles.header}>
@@ -207,11 +241,14 @@ export function CustomersScreen() {
           style={styles.searchInput}
           value={search}
         />
-        <AppButton onPress={() => void loadCustomers(false)} title="Cari" variant="secondary" />
+        <AppButton onPress={() => void handleSearch()} title="Cari" variant="secondary" />
       </View>
 
       {canArchive ? (
-        <Pressable onPress={() => setIncludeDeleted((value) => !value)} style={[styles.toggleChip, includeDeleted ? styles.toggleChipActive : null]}>
+        <Pressable
+          onPress={() => setIncludeDeleted((value) => !value)}
+          style={[styles.toggleChip, includeDeleted ? styles.toggleChipActive : null]}
+        >
           <Text style={[styles.toggleChipText, includeDeleted ? styles.toggleChipTextActive : null]}>
             {includeDeleted ? "Menampilkan Arsip" : "Sembunyikan Arsip"}
           </Text>
@@ -219,19 +256,29 @@ export function CustomersScreen() {
       ) : null}
 
       {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator color={theme.colors.primaryStrong} />
-          <Text style={styles.loadingText}>Memuat pelanggan...</Text>
-        </View>
+        renderSkeletonList()
       ) : (
         <FlatList
           contentContainerStyle={styles.listContent}
-          data={filteredCustomers}
+          data={customers}
           keyExtractor={(item) => item.id}
-          onRefresh={() => void loadCustomers(true)}
+          onRefresh={() => void loadCustomers(true, limit, true)}
           refreshing={refreshing}
           renderItem={renderItem}
           ListEmptyComponent={<Text style={styles.emptyText}>Belum ada pelanggan untuk filter saat ini.</Text>}
+          ListFooterComponent={
+            hasMore ? (
+              <View style={styles.loadMoreWrap}>
+                <AppButton
+                  disabled={loadingMore}
+                  loading={loadingMore}
+                  onPress={() => void handleLoadMore()}
+                  title={loadingMore ? "Memuat..." : "Muat Lebih Banyak"}
+                  variant="secondary"
+                />
+              </View>
+            ) : null
+          }
           scrollEnabled={false}
         />
       )}
@@ -360,15 +407,18 @@ function createStyles(theme: AppTheme) {
     toggleChipTextActive: {
       color: theme.colors.info,
     },
-    centered: {
-      paddingVertical: 28,
-      alignItems: "center",
-      gap: 8,
+    skeletonWrap: {
+      gap: theme.spacing.xs,
+      paddingVertical: 2,
     },
-    loadingText: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.medium,
-      fontSize: 12,
+    skeletonCard: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.lg,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+      gap: 7,
     },
     listContent: {
       gap: theme.spacing.xs,
@@ -411,6 +461,9 @@ function createStyles(theme: AppTheme) {
     customerActions: {
       flexDirection: "row",
       gap: theme.spacing.xs,
+    },
+    loadMoreWrap: {
+      marginTop: 2,
     },
     formPanel: {
       gap: theme.spacing.sm,

@@ -12,6 +12,11 @@ import { QuickActionScreen } from "../screens/app/QuickActionScreen";
 import { ReportsScreen } from "../screens/app/ReportsScreen";
 import { AccountHubScreen } from "../screens/app/AccountHubScreen";
 import { CustomersScreen } from "../screens/app/CustomersScreen";
+import { FinanceToolsScreen } from "../screens/app/FinanceToolsScreen";
+import { PrinterNoteScreen } from "../screens/app/PrinterNoteScreen";
+import { HelpInfoScreen } from "../screens/app/HelpInfoScreen";
+import { WhatsAppToolsScreen } from "../screens/app/WhatsAppToolsScreen";
+import { canSeeQuickActionTab, canSeeReportsTab } from "../lib/accessControl";
 
 const RootStack = createNativeStackNavigator<AppRootStackParamList>();
 const Tab = createBottomTabNavigator<AppTabParamList>();
@@ -32,6 +37,10 @@ function AccountTabNavigator() {
     <AccountStack.Navigator screenOptions={{ headerShown: false }}>
       <AccountStack.Screen name="AccountHub" component={AccountHubScreen} />
       <AccountStack.Screen name="Customers" component={CustomersScreen} />
+      <AccountStack.Screen name="FinanceTools" component={FinanceToolsScreen} />
+      <AccountStack.Screen name="PrinterNote" component={PrinterNoteScreen} />
+      <AccountStack.Screen name="HelpInfo" component={HelpInfoScreen} />
+      <AccountStack.Screen name="WhatsAppTools" component={WhatsAppToolsScreen} />
     </AccountStack.Navigator>
   );
 }
@@ -58,6 +67,10 @@ function QuickActionTabButton(props: BottomTabBarButtonProps) {
 
 function MainTabsNavigator() {
   const theme = useAppTheme();
+  const { session } = useSession();
+  const roles = session?.roles ?? [];
+  const showQuickAction = canSeeQuickActionTab(roles);
+  const showReports = canSeeReportsTab(roles);
 
   return (
     <Tab.Navigator
@@ -98,23 +111,27 @@ function MainTabsNavigator() {
           tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>P</Text>,
         }}
       />
-      <Tab.Screen
-        name="QuickActionTab"
-        component={QuickActionScreen}
-        options={{
-          tabBarLabel: "",
-          tabBarIcon: () => null,
-          tabBarButton: (props) => <QuickActionTabButton {...props} />,
-        }}
-      />
-      <Tab.Screen
-        name="ReportsTab"
-        component={ReportsScreen}
-        options={{
-          tabBarLabel: "Laporan",
-          tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>L</Text>,
-        }}
-      />
+      {showQuickAction ? (
+        <Tab.Screen
+          name="QuickActionTab"
+          component={QuickActionScreen}
+          options={{
+            tabBarLabel: "",
+            tabBarIcon: () => null,
+            tabBarButton: (props) => <QuickActionTabButton {...props} />,
+          }}
+        />
+      ) : null}
+      {showReports ? (
+        <Tab.Screen
+          name="ReportsTab"
+          component={ReportsScreen}
+          options={{
+            tabBarLabel: "Laporan",
+            tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>L</Text>,
+          }}
+        />
+      ) : null}
       <Tab.Screen
         name="AccountTab"
         component={AccountTabNavigator}

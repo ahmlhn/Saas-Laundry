@@ -100,6 +100,32 @@ Referensi frame yang dianalisis:
 - Target outcome:
   - UX matang, cepat, dan sesuai batasan role/plan.
 
+## 5.1) Status Implementasi (Update 2026-02-21 - Fase 4)
+- Fase 1: selesai.
+  - Bottom tab 5 menu aktif.
+  - Beranda + Pesanan + Akun hub sudah inline dengan referensi.
+- Fase 2: selesai.
+  - Modul pelanggan mobile (list/search/create/edit/archive/restore) sudah aktif dari tab Akun.
+- Fase 3: sebagian besar selesai.
+  - `Kelola Keuangan`: snapshot quota (`/billing/quota`) + snapshot transaksi (`/orders`) aktif.
+  - `Printer & Nota`: konfigurasi profil nota + nomor nota + toggle tampilan aktif (persist lokal perangkat).
+  - `Bantuan & Informasi`: utility hub aktif.
+  - Catatan: write API finance detail (pendapatan/pengeluaran/koreksi) masih menunggu endpoint backend dedicated.
+- Fase 4: selesai (iterasi UI + flow utama).
+  - Biometric re-login aktif:
+    - Toggle aktivasi dari tab Akun.
+    - Login screen mendukung masuk ulang via biometrik jika sesi token masih tersimpan.
+  - Role-based visibility diterapkan:
+    - Tab `+` dan `Laporan` hanya tampil untuk owner/admin/cashier.
+    - Menu akun difilter berdasarkan role owner/admin/cashier/worker/courier.
+  - WA feature gate sesuai plan:
+    - Menu `Kirim WA` hanya terbuka untuk role owner/admin dengan plan `Premium` atau `Pro`.
+    - Screen WA menampilkan status provider dan ringkasan pesan.
+  - Performance pass:
+    - Cache list API (orders/customers) untuk mengurangi request berulang.
+    - Pagination incremental sampai limit 100 item.
+    - Skeleton loading untuk list pesanan dan pelanggan.
+
 ## 6) Mapping Fitur Ke API Existing
 - Auth:
   - `POST /api/auth/login`

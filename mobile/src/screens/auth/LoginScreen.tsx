@@ -13,11 +13,12 @@ import { useAppTheme } from "../../theme/useAppTheme";
 export function LoginScreen() {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const { login } = useSession();
+  const { login, biometricLogin, hasStoredSession, biometricAvailable, biometricEnabled, biometricLabel } = useSession();
   const [email, setEmail] = useState("cashier@demo.local");
   const [password, setPassword] = useState("password");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [biometricSubmitting, setBiometricSubmitting] = useState(false);
   const [checkingConnection, setCheckingConnection] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
@@ -25,6 +26,7 @@ export function LoginScreen() {
   const apiCandidates = useMemo(() => getApiBaseCandidates(), []);
 
   const canSubmit = !submitting && email.trim().length > 0 && password.length > 0;
+  const canBiometricLogin = hasStoredSession && biometricAvailable && biometricEnabled && !biometricSubmitting && !submitting;
 
   async function handleSubmit(): Promise<void> {
     if (!canSubmit) {
@@ -41,6 +43,24 @@ export function LoginScreen() {
       setErrorMessage(getApiErrorMessage(error));
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleBiometricLogin(): Promise<void> {
+    if (!canBiometricLogin) {
+      return;
+    }
+
+    setBiometricSubmitting(true);
+    setErrorMessage(null);
+    setConnectionMessage(null);
+
+    try {
+      await biometricLogin();
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error));
+    } finally {
+      setBiometricSubmitting(false);
     }
   }
 
@@ -114,6 +134,15 @@ export function LoginScreen() {
 
         <View style={styles.actionsBlock}>
           <AppButton disabled={!canSubmit} loading={submitting} onPress={() => void handleSubmit()} title={submitting ? "Memproses..." : "Masuk Sekarang"} />
+          {hasStoredSession ? (
+            <AppButton
+              disabled={!canBiometricLogin}
+              loading={biometricSubmitting}
+              onPress={() => void handleBiometricLogin()}
+              title={biometricSubmitting ? "Verifikasi..." : `Masuk dengan ${biometricLabel}`}
+              variant="secondary"
+            />
+          ) : null}
           <AppButton
             disabled={checkingConnection}
             loading={checkingConnection}
@@ -122,6 +151,12 @@ export function LoginScreen() {
             variant="secondary"
           />
         </View>
+
+        {hasStoredSession && (!biometricAvailable || !biometricEnabled) ? (
+          <Text style={styles.biometricHint}>
+            Sesi sebelumnya terdeteksi. Aktifkan login biometrik dari menu Akun untuk akses cepat.
+          </Text>
+        ) : null}
 
         {connectionMessage ? (
           <View style={[styles.connectionInfo, isConnectionError ? styles.connectionError : styles.connectionOk]}>
@@ -257,6 +292,12 @@ function createStyles(theme: AppTheme) {
       color: theme.colors.danger,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
+    },
+    biometricHint: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 18,
     },
     connectionInfo: {
       borderRadius: theme.radii.md,

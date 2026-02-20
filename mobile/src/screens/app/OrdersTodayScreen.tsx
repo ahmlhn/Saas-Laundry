@@ -2,10 +2,11 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
+import { AppSkeletonBlock } from "../../components/ui/AppSkeletonBlock";
 import { StatusPill } from "../../components/ui/StatusPill";
 import { ORDER_BUCKETS, type OrderBucket, resolveOrderBucket } from "../../features/orders/orderBuckets";
 import { listOrders } from "../../features/orders/orderApi";
@@ -21,6 +22,9 @@ type Navigation = NativeStackNavigationProp<OrdersStackParamList, "OrdersToday">
 type OrdersRoute = RouteProp<OrdersStackParamList, "OrdersToday">;
 
 const currencyFormatter = new Intl.NumberFormat("id-ID");
+const PAGE_SIZE = 20;
+const INITIAL_LIMIT = 30;
+const MAX_LIMIT = 100;
 
 function formatMoney(value: number): string {
   return `Rp ${currencyFormatter.format(value)}`;
@@ -49,7 +53,10 @@ export function OrdersTodayScreen() {
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [query, setQuery] = useState("");
+  const [limit, setLimit] = useState(INITIAL_LIMIT);
+  const [hasMore, setHasMore] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeBucket, setActiveBucket] = useState<OrderBucket>(route.params?.initialBucket ?? "validasi");
 
@@ -60,7 +67,8 @@ export function OrdersTodayScreen() {
   }, [route.params?.initialBucket]);
 
   useEffect(() => {
-    void loadOrders(false);
+    setLimit(INITIAL_LIMIT);
+    void loadOrders(false, INITIAL_LIMIT, true);
   }, [selectedOutlet?.id]);
 
   const titleLine = useMemo(() => {
@@ -106,16 +114,18 @@ export function OrdersTodayScreen() {
     return counts;
   }, [orders]);
 
-  async function loadOrders(isRefresh: boolean): Promise<void> {
+  async function loadOrders(isRefresh: boolean, targetLimit: number, forceRefresh = false): Promise<void> {
     if (!selectedOutlet) {
       setOrders([]);
       setLoading(false);
+      setRefreshing(false);
+      setIsLoadingMore(false);
       return;
     }
 
     if (isRefresh) {
       setRefreshing(true);
-    } else {
+    } else if (!isLoadingMore) {
       setLoading(true);
     }
 
@@ -124,18 +134,33 @@ export function OrdersTodayScreen() {
     try {
       const data = await listOrders({
         outletId: selectedOutlet.id,
-        limit: 60,
+        limit: targetLimit,
+        forceRefresh: isRefresh || forceRefresh,
       });
       setOrders(data);
+      setHasMore(data.length >= targetLimit && targetLimit < MAX_LIMIT);
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error));
     } finally {
-      if (isRefresh) {
-        setRefreshing(false);
-      } else {
-        setLoading(false);
-      }
+      setLoading(false);
+      setRefreshing(false);
+      setIsLoadingMore(false);
     }
+  }
+
+  async function handleLoadMore(): Promise<void> {
+    if (!hasMore || isLoadingMore || loading) {
+      return;
+    }
+
+    const nextLimit = Math.min(limit + PAGE_SIZE, MAX_LIMIT);
+    if (nextLimit === limit) {
+      return;
+    }
+
+    setIsLoadingMore(true);
+    setLimit(nextLimit);
+    await loadOrders(false, nextLimit, true);
   }
 
   function renderOrderCard({ item }: { item: OrderSummary }) {
@@ -166,6 +191,21 @@ export function OrdersTodayScreen() {
     );
   }
 
+  function renderLoadingSkeleton() {
+    return (
+      <View style={styles.skeletonWrap}>
+        {Array.from({ length: 4 }).map((_, index) => (
+          <View key={`order-skeleton-${index}`} style={styles.skeletonCard}>
+            <AppSkeletonBlock height={16} width="42%" />
+            <AppSkeletonBlock height={12} width="56%" />
+            <AppSkeletonBlock height={11} width="82%" />
+            <AppSkeletonBlock height={11} width="70%" />
+          </View>
+        ))}
+      </View>
+    );
+  }
+
   return (
     <AppScreen contentContainerStyle={styles.screenContent}>
       <View style={styles.headerBlock}>
@@ -187,7 +227,7 @@ export function OrdersTodayScreen() {
 
       <View style={styles.actionRow}>
         <View style={styles.actionItem}>
-          <AppButton onPress={() => void loadOrders(false)} title="Refresh" variant="secondary" />
+          <AppButton onPress={() => void loadOrders(false, limit, true)} title="Refresh" variant="secondary" />
         </View>
         <View style={styles.actionItem}>
           <AppButton
@@ -209,16 +249,13 @@ export function OrdersTodayScreen() {
       />
 
       {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator color={theme.colors.primaryStrong} size="large" />
-          <Text style={styles.loadingText}>Mengambil data order...</Text>
-        </View>
+        renderLoadingSkeleton()
       ) : (
         <FlatList
           contentContainerStyle={styles.listContainer}
           data={filteredOrders}
           keyExtractor={(item) => item.id}
-          onRefresh={() => void loadOrders(true)}
+          onRefresh={() => void loadOrders(true, limit, true)}
           refreshing={refreshing}
           renderItem={renderOrderCard}
           style={styles.list}
@@ -235,6 +272,21 @@ export function OrdersTodayScreen() {
               </View>
             ) : null
           }
+          ListFooterComponent={
+            hasMore ? (
+              <View style={styles.footerWrap}>
+                <AppButton
+                  disabled={isLoadingMore}
+                  loading={isLoadingMore}
+                  onPress={() => void handleLoadMore()}
+                  title={isLoadingMore ? "Memuat..." : "Muat Lebih Banyak"}
+                  variant="secondary"
+                />
+              </View>
+            ) : null
+          }
+          onEndReachedThreshold={0.4}
+          onEndReached={() => void handleLoadMore()}
           showsVerticalScrollIndicator={false}
         />
       )}
@@ -326,16 +378,19 @@ function createStyles(theme: AppTheme) {
       paddingHorizontal: 13,
       paddingVertical: 11,
     },
-    centered: {
+    skeletonWrap: {
       flex: 1,
-      alignItems: "center",
-      justifyContent: "center",
       gap: theme.spacing.sm,
+      paddingTop: 4,
     },
-    loadingText: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.medium,
-      fontSize: 13,
+    skeletonCard: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.lg,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: theme.spacing.md,
+      paddingVertical: theme.spacing.sm,
+      gap: theme.spacing.xs,
     },
     listContainer: {
       paddingTop: 4,
@@ -422,6 +477,9 @@ function createStyles(theme: AppTheme) {
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 18,
+    },
+    footerWrap: {
+      marginTop: theme.spacing.xs,
     },
     errorWrap: {
       marginBottom: 8,
