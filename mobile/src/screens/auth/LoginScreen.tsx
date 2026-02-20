@@ -35,11 +35,14 @@ export function LoginScreen() {
   const [focusedField, setFocusedField] = useState<FocusedField>(null);
   const [viewRole, setViewRole] = useState<LoginViewRole>("owner");
   const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const passwordInputRef = useRef<TextInput | null>(null);
   const focusedFieldRef = useRef<FocusedField>(null);
   const screenScrollRef = useRef<ScrollView | null>(null);
   const panelTopRef = useRef(0);
+  const currentScrollYRef = useRef(0);
+  const restoreScrollYRef = useRef(0);
+  const keyboardHeightRef = useRef(0);
+  const keyboardRaisedRef = useRef(false);
   const entranceProgress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -51,9 +54,10 @@ export function LoginScreen() {
     }).start();
   }, [entranceProgress]);
 
-  function scrollFormIntoView(targetField: FocusedField = focusedFieldRef.current): void {
+  function scrollFormIntoView(targetField: FocusedField = focusedFieldRef.current, keyboardHeightPx?: number): void {
     const baseOffset = Math.max(panelTopRef.current - 20, 0);
-    const keyboardBoost = keyboardVisible ? Math.min(Math.max(keyboardHeight * 0.3, 56), 120) : 0;
+    const effectiveKeyboardHeight = keyboardHeightPx ?? keyboardHeightRef.current;
+    const keyboardBoost = effectiveKeyboardHeight > 0 ? Math.min(Math.max(effectiveKeyboardHeight * 0.3, 56), 120) : 0;
     const fieldBoost = targetField === "password" ? 160 : targetField === "email" ? 110 : 90;
 
     screenScrollRef.current?.scrollTo({
@@ -64,15 +68,27 @@ export function LoginScreen() {
 
   useEffect(() => {
     const showSub = Keyboard.addListener("keyboardDidShow", (event: KeyboardEvent) => {
+      if (!keyboardRaisedRef.current) {
+        restoreScrollYRef.current = currentScrollYRef.current;
+      }
+      keyboardRaisedRef.current = true;
+      keyboardHeightRef.current = event.endCoordinates.height;
       setKeyboardVisible(true);
-      setKeyboardHeight(event.endCoordinates.height);
       setTimeout(() => {
-        scrollFormIntoView();
+        scrollFormIntoView(undefined, event.endCoordinates.height);
       }, 60);
     });
     const hideSub = Keyboard.addListener("keyboardDidHide", () => {
       setKeyboardVisible(false);
-      setKeyboardHeight(0);
+      keyboardHeightRef.current = 0;
+      const restoreY = restoreScrollYRef.current;
+      keyboardRaisedRef.current = false;
+      setTimeout(() => {
+        screenScrollRef.current?.scrollTo({
+          y: Math.max(restoreY, 0),
+          animated: true,
+        });
+      }, 60);
     });
 
     return () => {
@@ -158,7 +174,16 @@ export function LoginScreen() {
   }
 
   return (
-    <AppScreen contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="always" scroll scrollRef={screenScrollRef}>
+    <AppScreen
+      contentContainerStyle={styles.scrollContainer}
+      keyboardShouldPersistTaps="always"
+      onScroll={(event) => {
+        currentScrollYRef.current = event.nativeEvent.contentOffset.y;
+      }}
+      scroll
+      scrollEventThrottle={16}
+      scrollRef={screenScrollRef}
+    >
       <Animated.View style={[styles.heroShell, heroAnimatedStyle, focusMode ? styles.heroShellFocused : null]}>
         <View pointerEvents="none" style={styles.heroBlueBase} />
         <View pointerEvents="none" style={styles.heroBlueLayer} />

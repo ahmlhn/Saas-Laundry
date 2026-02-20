@@ -11,6 +11,8 @@ interface AppScreenProps {
   contentContainerStyle?: StyleProp<ViewStyle>;
   keyboardShouldPersistTaps?: ScrollViewProps["keyboardShouldPersistTaps"];
   scrollRef?: RefObject<ScrollView | null>;
+  onScroll?: ScrollViewProps["onScroll"];
+  scrollEventThrottle?: number;
 }
 
 export function AppScreen({
@@ -20,6 +22,8 @@ export function AppScreen({
   contentContainerStyle,
   keyboardShouldPersistTaps = "handled",
   scrollRef,
+  onScroll,
+  scrollEventThrottle = 16,
 }: AppScreenProps) {
   const theme = useAppTheme();
 
@@ -34,7 +38,9 @@ export function AppScreen({
         <ScrollView
           contentContainerStyle={contentContainerStyle}
           keyboardShouldPersistTaps={keyboardShouldPersistTaps}
+          onScroll={onScroll}
           ref={scrollRef}
+          scrollEventThrottle={scrollEventThrottle}
           style={[styles.flex, style]}
           showsVerticalScrollIndicator={false}
         >
