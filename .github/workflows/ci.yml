@@ -53,6 +53,8 @@ jobs:
         run: php artisan migrate:fresh --seed --force
 
       - name: Run readiness gate
+        env:
+          QUEUE_CONNECTION: database
         run: php artisan ops:readiness:check --strict
 
       - name: Run test suite
