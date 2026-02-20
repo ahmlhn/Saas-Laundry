@@ -165,6 +165,14 @@ Referensi frame yang dianalisis:
 - Target outcome:
   - Koreksi draft item jadi lebih cepat tanpa edit manual berulang.
 
+### Fase 13 (UI/UX Global Responsive Pass)
+- Global mobile UI:
+  - Menyatukan visual language lintas screen lewat komponen dasar (`AppScreen`, `AppPanel`, `AppButton`, `StatusPill`).
+  - Meningkatkan responsivitas untuk HP kecil/besar serta tablet.
+  - Menjamin pengalaman portrait + landscape tetap usable untuk flow utama.
+- Target outcome:
+  - Seluruh fitur terasa konsisten dan tetap nyaman dipakai lintas ukuran/orientasi layar.
+
 ## 5.1) Status Implementasi (Update 2026-02-21 - Fase 4)
 - Fase 1: selesai.
   - Bottom tab 5 menu aktif.
@@ -227,6 +235,10 @@ Referensi frame yang dianalisis:
   - Quick Action menambahkan stepper `-/+` untuk `qty`/`kg` pada setiap item.
   - Urutan item bisa diubah lewat kontrol `Naik`/`Turun` sebelum submit.
   - Validasi submit + panel ringkasan estimasi mengikuti urutan dan nilai draft terbaru.
+- Fase 13: selesai (MOB-015).
+  - Komponen UI dasar mobile dipoles ulang agar konsisten di semua halaman.
+  - Bottom tab diperbarui dengan ikon yang lebih jelas dan adaptif landscape/tablet.
+  - Dukungan portrait + landscape diaktifkan dengan aturan responsif lintas viewport.
 
 ## 6) Mapping Fitur Ke API Existing
 - Auth:

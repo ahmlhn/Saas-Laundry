@@ -61,6 +61,9 @@ Catatan orientasi:
 - Modul outlet dari tab Akun (`Kelola Outlet`) untuk list + search + pilih outlet aktif + arsip/restore (owner-only untuk arsip)
 - Modul zona antar dari tab Akun (`Zona Antar`) untuk list + create per outlet (owner/admin)
 - Quick Action tab (`+`) mendukung create order multi-item + ringkasan estimasi (subtotal/ongkir/diskon), stepper qty/kg, dan urut ulang item sebelum submit via `POST /api/orders` (owner/admin/cashier)
+- Global mobile UI pass:
+  - Komponen dasar (`AppScreen`, `AppPanel`, `AppButton`, `StatusPill`) diseragamkan untuk konsistensi lintas halaman.
+  - Bottom tab memakai ikon aktual dan adaptif pada landscape/tablet.
 - Modul `Kelola Keuangan` dari tab Akun:
   - Snapshot billing quota via `/api/billing/quota` (owner/admin)
   - Snapshot kas operasional dari data `/api/orders` outlet aktif

@@ -1,6 +1,7 @@
 import { createBottomTabNavigator, type BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { HomeDashboardScreen } from "../screens/app/HomeDashboardScreen";
 import { OrderDetailScreen } from "../screens/app/OrderDetailScreen";
 import { OrdersTodayScreen } from "../screens/app/OrdersTodayScreen";
@@ -55,19 +56,36 @@ function AccountTabNavigator() {
 
 function QuickActionTabButton(props: BottomTabBarButtonProps) {
   const theme = useAppTheme();
+  const { width, height } = useWindowDimensions();
+  const isLandscape = width > height;
+  const minEdge = Math.min(width, height);
+  const isTablet = minEdge >= 600;
+  const buttonSize = isTablet ? 62 : isLandscape ? 52 : 58;
+  const wrapperTop = isLandscape ? -10 : -16;
 
   return (
-    <Pressable accessibilityLabel={props.accessibilityLabel} onPress={props.onPress} style={styles.quickActionButtonWrap}>
+    <Pressable
+      accessibilityLabel={props.accessibilityLabel}
+      onPress={props.onPress}
+      style={[styles.quickActionButtonWrap, { top: wrapperTop }]}
+    >
       <View
         style={[
           styles.quickActionButton,
           {
             borderColor: theme.colors.surface,
             backgroundColor: theme.colors.primaryStrong,
+            width: buttonSize,
+            height: buttonSize,
+            shadowColor: theme.colors.primaryStrong,
+            shadowOpacity: theme.mode === "dark" ? 0.35 : 0.22,
+            shadowRadius: 8,
+            shadowOffset: { width: 0, height: 4 },
+            elevation: 6,
           },
         ]}
       >
-        <Text style={[styles.quickActionButtonText, { color: theme.colors.primaryContrast, fontFamily: theme.fonts.heavy }]}>+</Text>
+        <Ionicons color={theme.colors.primaryContrast} name="add" size={isTablet ? 30 : 28} />
       </View>
     </Pressable>
   );
@@ -75,6 +93,13 @@ function QuickActionTabButton(props: BottomTabBarButtonProps) {
 
 function MainTabsNavigator() {
   const theme = useAppTheme();
+  const { width, height } = useWindowDimensions();
+  const isLandscape = width > height;
+  const minEdge = Math.min(width, height);
+  const isTablet = minEdge >= 600;
+  const tabBarHeight = isTablet ? 86 : isLandscape ? 68 : 74;
+  const labelSize = isTablet ? 12 : 11;
+  const iconSize = isTablet ? 21 : 19;
   const { session } = useSession();
   const roles = session?.roles ?? [];
   const showQuickAction = canSeeQuickActionTab(roles);
@@ -89,16 +114,19 @@ function MainTabsNavigator() {
           backgroundColor: theme.colors.surface,
           borderTopColor: theme.colors.border,
           borderTopWidth: 1,
-          height: 74,
-          paddingTop: 8,
-          paddingBottom: 8,
+          height: tabBarHeight,
+          paddingTop: isLandscape ? 6 : 8,
+          paddingBottom: isLandscape ? 6 : 8,
         },
         tabBarActiveTintColor: theme.colors.info,
         tabBarInactiveTintColor: theme.colors.textMuted,
         tabBarLabelStyle: {
           fontFamily: theme.fonts.semibold,
-          fontSize: 11,
+          fontSize: labelSize,
           marginBottom: 2,
+        },
+        tabBarItemStyle: {
+          paddingTop: isLandscape ? 0 : 2,
         },
         tabBarHideOnKeyboard: true,
       }}
@@ -108,7 +136,7 @@ function MainTabsNavigator() {
         component={HomeDashboardScreen}
         options={{
           tabBarLabel: "Beranda",
-          tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>H</Text>,
+          tabBarIcon: ({ color, focused }) => <Ionicons color={color} name={focused ? "home" : "home-outline"} size={iconSize} />,
         }}
       />
       <Tab.Screen
@@ -116,7 +144,7 @@ function MainTabsNavigator() {
         component={OrdersTabNavigator}
         options={{
           tabBarLabel: "Pesanan",
-          tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>P</Text>,
+          tabBarIcon: ({ color, focused }) => <Ionicons color={color} name={focused ? "receipt" : "receipt-outline"} size={iconSize} />,
         }}
       />
       {showQuickAction ? (
@@ -136,7 +164,7 @@ function MainTabsNavigator() {
           component={ReportsScreen}
           options={{
             tabBarLabel: "Laporan",
-            tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>L</Text>,
+            tabBarIcon: ({ color, focused }) => <Ionicons color={color} name={focused ? "bar-chart" : "bar-chart-outline"} size={iconSize} />,
           }}
         />
       ) : null}
@@ -145,7 +173,7 @@ function MainTabsNavigator() {
         component={AccountTabNavigator}
         options={{
           tabBarLabel: "Akun",
-          tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>A</Text>,
+          tabBarIcon: ({ color, focused }) => <Ionicons color={color} name={focused ? "grid" : "grid-outline"} size={iconSize} />,
         }}
       />
     </Tab.Navigator>
@@ -173,26 +201,14 @@ export function AppNavigator() {
 }
 
 const styles = StyleSheet.create({
-  tabIcon: {
-    fontSize: 13,
-    fontWeight: "800",
-    marginBottom: -2,
-  },
   quickActionButtonWrap: {
-    top: -16,
     justifyContent: "center",
     alignItems: "center",
   },
   quickActionButton: {
-    width: 58,
-    height: 58,
     borderRadius: 999,
     borderWidth: 4,
     alignItems: "center",
     justifyContent: "center",
-  },
-  quickActionButtonText: {
-    fontSize: 30,
-    lineHeight: 30,
   },
 });
