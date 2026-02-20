@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Animated,
+  Easing,
+  Keyboard,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type ScrollView,
+} from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { getApiErrorMessage } from "../../lib/httpClient";
@@ -22,7 +33,10 @@ export function LoginScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [focusedField, setFocusedField] = useState<FocusedField>(null);
   const [viewRole, setViewRole] = useState<LoginViewRole>("owner");
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const passwordInputRef = useRef<TextInput | null>(null);
+  const screenScrollRef = useRef<ScrollView | null>(null);
+  const panelTopRef = useRef(0);
   const entranceProgress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -33,6 +47,30 @@ export function LoginScreen() {
       useNativeDriver: true,
     }).start();
   }, [entranceProgress]);
+
+  function scrollFormIntoView(): void {
+    screenScrollRef.current?.scrollTo({
+      y: Math.max(panelTopRef.current - 16, 0),
+      animated: true,
+    });
+  }
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener("keyboardDidShow", () => {
+      setKeyboardVisible(true);
+      setTimeout(() => {
+        scrollFormIntoView();
+      }, 60);
+    });
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardVisible(false);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const heroAnimatedStyle = useMemo(
     () => ({
@@ -70,6 +108,7 @@ export function LoginScreen() {
   const canSubmit = !submitting && email.trim().length > 0 && password.length > 0;
   const canBiometricLogin = hasStoredSession && biometricAvailable && biometricEnabled && !biometricSubmitting && !submitting;
   const inputDisabled = submitting || biometricSubmitting;
+  const focusMode = keyboardVisible || focusedField !== null;
   const roleHint =
     viewRole === "owner"
       ? "Mode pemilik untuk monitoring KPI, billing, dan kontrol lintas outlet."
@@ -110,8 +149,8 @@ export function LoginScreen() {
   }
 
   return (
-    <AppScreen contentContainerStyle={styles.scrollContainer} scroll>
-      <Animated.View style={[styles.heroShell, heroAnimatedStyle]}>
+    <AppScreen contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="always" scroll scrollRef={screenScrollRef}>
+      <Animated.View style={[styles.heroShell, heroAnimatedStyle, focusMode ? styles.heroShellFocused : null]}>
         <View pointerEvents="none" style={styles.heroBlueBase} />
         <View pointerEvents="none" style={styles.heroBlueLayer} />
         <View pointerEvents="none" style={styles.heroAccentRing} />
@@ -135,7 +174,12 @@ export function LoginScreen() {
         </View>
       </Animated.View>
 
-      <Animated.View style={[styles.panelWrap, panelAnimatedStyle]}>
+      <Animated.View
+        onLayout={(event) => {
+          panelTopRef.current = event.nativeEvent.layout.y;
+        }}
+        style={[styles.panelWrap, focusMode ? styles.panelWrapFocused : null, panelAnimatedStyle]}
+      >
         <AppPanel style={styles.panel}>
           <Text style={styles.loginAsLabel}>Login sebagai</Text>
           <View style={styles.roleSwitchRow}>
@@ -173,7 +217,12 @@ export function LoginScreen() {
               keyboardType="email-address"
               onBlur={() => setFocusedField((field) => (field === "email" ? null : field))}
               onChangeText={setEmail}
-              onFocus={() => setFocusedField("email")}
+              onFocus={() => {
+                setFocusedField("email");
+                setTimeout(() => {
+                  scrollFormIntoView();
+                }, 40);
+              }}
               onSubmitEditing={() => passwordInputRef.current?.focus()}
               placeholder="Email"
               placeholderTextColor={theme.colors.textMuted}
@@ -190,7 +239,12 @@ export function LoginScreen() {
                 editable={!inputDisabled}
                 onBlur={() => setFocusedField((field) => (field === "password" ? null : field))}
                 onChangeText={setPassword}
-                onFocus={() => setFocusedField("password")}
+                onFocus={() => {
+                  setFocusedField("password");
+                  setTimeout(() => {
+                    scrollFormIntoView();
+                  }, 40);
+                }}
                 onSubmitEditing={() => {
                   if (canSubmit) {
                     void handleSubmit();
@@ -305,6 +359,9 @@ function createStyles(theme: AppTheme) {
       borderRadius: 32,
       overflow: "hidden",
       position: "relative",
+    },
+    heroShellFocused: {
+      height: 246,
     },
     heroBlueBase: {
       ...StyleSheet.absoluteFillObject,
@@ -427,6 +484,9 @@ function createStyles(theme: AppTheme) {
     panelWrap: {
       marginTop: -72,
       paddingHorizontal: 2,
+    },
+    panelWrapFocused: {
+      marginTop: -44,
     },
     panel: {
       gap: theme.spacing.sm,

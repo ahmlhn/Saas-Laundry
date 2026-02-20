@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import type { ScrollViewProps, StyleProp, ViewStyle } from "react-native";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -10,6 +10,7 @@ interface AppScreenProps {
   style?: StyleProp<ViewStyle>;
   contentContainerStyle?: StyleProp<ViewStyle>;
   keyboardShouldPersistTaps?: ScrollViewProps["keyboardShouldPersistTaps"];
+  scrollRef?: RefObject<ScrollView | null>;
 }
 
 export function AppScreen({
@@ -18,6 +19,7 @@ export function AppScreen({
   style,
   contentContainerStyle,
   keyboardShouldPersistTaps = "handled",
+  scrollRef,
 }: AppScreenProps) {
   const theme = useAppTheme();
 
@@ -32,6 +34,7 @@ export function AppScreen({
         <ScrollView
           contentContainerStyle={contentContainerStyle}
           keyboardShouldPersistTaps={keyboardShouldPersistTaps}
+          ref={scrollRef}
           style={[styles.flex, style]}
           showsVerticalScrollIndicator={false}
         >
