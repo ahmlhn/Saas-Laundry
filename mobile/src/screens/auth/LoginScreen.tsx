@@ -4,6 +4,7 @@ import {
   Animated,
   Easing,
   Keyboard,
+  type KeyboardEvent,
   Pressable,
   StyleSheet,
   Text,
@@ -34,7 +35,9 @@ export function LoginScreen() {
   const [focusedField, setFocusedField] = useState<FocusedField>(null);
   const [viewRole, setViewRole] = useState<LoginViewRole>("owner");
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const passwordInputRef = useRef<TextInput | null>(null);
+  const focusedFieldRef = useRef<FocusedField>(null);
   const screenScrollRef = useRef<ScrollView | null>(null);
   const panelTopRef = useRef(0);
   const entranceProgress = useRef(new Animated.Value(0)).current;
@@ -48,22 +51,28 @@ export function LoginScreen() {
     }).start();
   }, [entranceProgress]);
 
-  function scrollFormIntoView(): void {
+  function scrollFormIntoView(targetField: FocusedField = focusedFieldRef.current): void {
+    const baseOffset = Math.max(panelTopRef.current - 20, 0);
+    const keyboardBoost = keyboardVisible ? Math.min(Math.max(keyboardHeight * 0.3, 56), 120) : 0;
+    const fieldBoost = targetField === "password" ? 160 : targetField === "email" ? 110 : 90;
+
     screenScrollRef.current?.scrollTo({
-      y: Math.max(panelTopRef.current - 16, 0),
+      y: Math.max(baseOffset + keyboardBoost + fieldBoost, 0),
       animated: true,
     });
   }
 
   useEffect(() => {
-    const showSub = Keyboard.addListener("keyboardDidShow", () => {
+    const showSub = Keyboard.addListener("keyboardDidShow", (event: KeyboardEvent) => {
       setKeyboardVisible(true);
+      setKeyboardHeight(event.endCoordinates.height);
       setTimeout(() => {
         scrollFormIntoView();
       }, 60);
     });
     const hideSub = Keyboard.addListener("keyboardDidHide", () => {
       setKeyboardVisible(false);
+      setKeyboardHeight(0);
     });
 
     return () => {
@@ -215,13 +224,17 @@ export function LoginScreen() {
               autoCorrect={false}
               editable={!inputDisabled}
               keyboardType="email-address"
-              onBlur={() => setFocusedField((field) => (field === "email" ? null : field))}
+              onBlur={() => {
+                focusedFieldRef.current = null;
+                setFocusedField((field) => (field === "email" ? null : field));
+              }}
               onChangeText={setEmail}
               onFocus={() => {
+                focusedFieldRef.current = "email";
                 setFocusedField("email");
                 setTimeout(() => {
-                  scrollFormIntoView();
-                }, 40);
+                  scrollFormIntoView("email");
+                }, 70);
               }}
               onSubmitEditing={() => passwordInputRef.current?.focus()}
               placeholder="Email"
@@ -237,13 +250,17 @@ export function LoginScreen() {
             <View style={styles.passwordFieldContainer}>
               <TextInput
                 editable={!inputDisabled}
-                onBlur={() => setFocusedField((field) => (field === "password" ? null : field))}
+                onBlur={() => {
+                  focusedFieldRef.current = null;
+                  setFocusedField((field) => (field === "password" ? null : field));
+                }}
                 onChangeText={setPassword}
                 onFocus={() => {
+                  focusedFieldRef.current = "password";
                   setFocusedField("password");
                   setTimeout(() => {
-                    scrollFormIntoView();
-                  }, 40);
+                    scrollFormIntoView("password");
+                  }, 70);
                 }}
                 onSubmitEditing={() => {
                   if (canSubmit) {
@@ -361,7 +378,7 @@ function createStyles(theme: AppTheme) {
       position: "relative",
     },
     heroShellFocused: {
-      height: 246,
+      height: 220,
     },
     heroBlueBase: {
       ...StyleSheet.absoluteFillObject,
@@ -486,7 +503,7 @@ function createStyles(theme: AppTheme) {
       paddingHorizontal: 2,
     },
     panelWrapFocused: {
-      marginTop: -44,
+      marginTop: -92,
     },
     panel: {
       gap: theme.spacing.sm,
