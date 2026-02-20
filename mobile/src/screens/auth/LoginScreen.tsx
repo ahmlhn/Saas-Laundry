@@ -318,12 +318,14 @@ export function LoginScreen() {
                 pressed && canSubmit ? styles.submitPrimaryButtonPressed : null,
               ]}
             >
-              <View pointerEvents="none" style={styles.submitPrimaryLayerLeft} />
-              <View pointerEvents="none" style={styles.submitPrimaryLayerRight} />
+              <View pointerEvents="none" style={styles.submitPrimaryBase} />
+              <View pointerEvents="none" style={styles.submitPrimaryAccent} />
+              <View pointerEvents="none" style={styles.submitPrimaryGlow} />
+              <View pointerEvents="none" style={styles.submitPrimarySheen} />
               {submitting ? (
                 <ActivityIndicator color="#ffffff" size="small" />
               ) : (
-                <Text style={styles.submitPrimaryText}>MASUK</Text>
+                <Text style={styles.submitPrimaryText}>Masuk</Text>
               )}
             </Pressable>
 
@@ -710,36 +712,66 @@ function createStyles(theme: AppTheme) {
     },
     submitPrimaryButton: {
       flex: 1,
-      minHeight: 52,
+      minHeight: 54,
       borderRadius: theme.radii.pill,
       overflow: "hidden",
       alignItems: "center",
       justifyContent: "center",
       borderWidth: 1,
-      borderColor: "#149cd5",
+      borderColor: "#1b9ecf",
+      backgroundColor: "#24b7de",
       position: "relative",
+      shadowColor: "#1b9ecf",
+      shadowOpacity: theme.mode === "dark" ? 0.4 : 0.26,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 5,
     },
-    submitPrimaryLayerLeft: {
+    submitPrimaryBase: {
       ...StyleSheet.absoluteFillObject,
-      right: "48%",
-      backgroundColor: "#3ac9d6",
+      backgroundColor: "#1fa0d6",
     },
-    submitPrimaryLayerRight: {
-      ...StyleSheet.absoluteFillObject,
-      left: "48%",
-      backgroundColor: "#1390e9",
+    submitPrimaryAccent: {
+      position: "absolute",
+      left: -42,
+      top: -26,
+      width: 172,
+      height: 116,
+      borderRadius: 64,
+      backgroundColor: "#4bd5d5",
+      opacity: 0.96,
+    },
+    submitPrimaryGlow: {
+      position: "absolute",
+      right: -36,
+      top: -42,
+      width: 146,
+      height: 146,
+      borderRadius: 74,
+      backgroundColor: "rgba(107, 210, 255, 0.42)",
+    },
+    submitPrimarySheen: {
+      position: "absolute",
+      left: -28,
+      top: 8,
+      width: 112,
+      height: 16,
+      borderRadius: 12,
+      backgroundColor: "rgba(255,255,255,0.28)",
+      transform: [{ rotate: "-17deg" }],
     },
     submitPrimaryButtonDisabled: {
       opacity: 0.52,
     },
     submitPrimaryButtonPressed: {
-      opacity: 0.86,
+      opacity: 0.9,
     },
     submitPrimaryText: {
       color: "#ffffff",
       fontFamily: theme.fonts.bold,
-      fontSize: 24,
-      letterSpacing: 2.4,
+      fontSize: 19,
+      letterSpacing: 0.9,
+      textTransform: "uppercase",
     },
     submitBiometricButton: {
       width: 88,
