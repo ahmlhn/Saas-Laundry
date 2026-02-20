@@ -282,7 +282,12 @@ export function LoginScreen() {
                 onPress={() => setShowPassword((value) => !value)}
                 style={({ pressed }) => [styles.passwordToggle, pressed ? styles.passwordTogglePressed : null]}
               >
-                <Text style={styles.passwordToggleText}>{showPassword ? "Tutup" : "Lihat"}</Text>
+                <View style={styles.passwordEyeIcon}>
+                  <View style={styles.passwordEyeOuter}>
+                    <View style={styles.passwordEyePupil} />
+                  </View>
+                  {!showPassword ? <View style={styles.passwordEyeSlash} /> : null}
+                </View>
               </Pressable>
             </View>
           </View>
@@ -609,17 +614,44 @@ function createStyles(theme: AppTheme) {
       backgroundColor: theme.colors.surface,
       borderWidth: 1,
       borderColor: theme.colors.border,
-      paddingHorizontal: 11,
-      paddingVertical: 6,
+      width: 40,
+      height: 32,
+      alignItems: "center",
+      justifyContent: "center",
     },
     passwordTogglePressed: {
       opacity: 0.8,
     },
-    passwordToggleText: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 11,
-      letterSpacing: 0.2,
+    passwordEyeIcon: {
+      width: 18,
+      height: 18,
+      alignItems: "center",
+      justifyContent: "center",
+      position: "relative",
+    },
+    passwordEyeOuter: {
+      width: 16,
+      height: 10,
+      borderWidth: 1.5,
+      borderColor: theme.colors.textSecondary,
+      borderRadius: 8,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "transparent",
+    },
+    passwordEyePupil: {
+      width: 4,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: theme.colors.textSecondary,
+    },
+    passwordEyeSlash: {
+      position: "absolute",
+      width: 18,
+      height: 2,
+      borderRadius: 2,
+      backgroundColor: theme.colors.textSecondary,
+      transform: [{ rotate: "-33deg" }],
     },
     forgotHint: {
       color: "#20b6cf",
