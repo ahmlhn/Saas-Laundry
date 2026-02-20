@@ -66,7 +66,9 @@ jobs:
           npm run build
           tar -czf build-artifacts.tar.gz public/build
 
-      - name: Upload built assets to server
+      - name: Upload built assets to server (attempt 1)
+        id: upload_assets_attempt_1
+        continue-on-error: true
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -75,9 +77,36 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           passphrase: ${{ secrets.DEPLOY_SSH_PASSPHRASE }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
+          timeout: 90s
+          command_timeout: 15m
           source: build-artifacts.tar.gz
           target: /tmp
           overwrite: true
+
+      - name: Upload built assets to server (attempt 2)
+        id: upload_assets_attempt_2
+        if: ${{ steps.upload_assets_attempt_1.outcome == 'failure' }}
+        continue-on-error: true
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          passphrase: ${{ secrets.DEPLOY_SSH_PASSPHRASE }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          timeout: 90s
+          command_timeout: 15m
+          source: build-artifacts.tar.gz
+          target: /tmp
+          overwrite: true
+
+      - name: Stop if SCP upload failed after retries
+        if: ${{ steps.upload_assets_attempt_1.outcome == 'failure' && steps.upload_assets_attempt_2.outcome == 'failure' }}
+        run: |
+          echo "Upload assets ke server gagal 2x (timeout jaringan SSH)."
+          echo "Cek DEPLOY_HOST/DEPLOY_PORT, status SSH hosting, dan firewall/rate-limit host."
+          exit 1
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
@@ -97,6 +126,7 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           passphrase: ${{ secrets.DEPLOY_SSH_PASSPHRASE }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
+          timeout: 90s
           envs: APP_PATH,PHP_BIN,COMPOSER_BIN,REPO_URL,DEPLOY_REF,RUN_MIGRATIONS,MAINTENANCE_MODE,GIT_REPOSITORY
           command_timeout: 45m
           script_stop: true
