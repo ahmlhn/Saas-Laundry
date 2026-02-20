@@ -57,7 +57,7 @@ npm run web
 - Modul pegawai dari tab Akun (`Kelola Pegawai`) untuk list + search + arsip/restore (owner-only untuk arsip)
 - Modul outlet dari tab Akun (`Kelola Outlet`) untuk list + search + pilih outlet aktif + arsip/restore (owner-only untuk arsip)
 - Modul zona antar dari tab Akun (`Zona Antar`) untuk list + create per outlet (owner/admin)
-- Quick Action tab (`+`) mendukung create order multi-item + ringkasan estimasi (subtotal/ongkir/diskon) via `POST /api/orders` (owner/admin/cashier)
+- Quick Action tab (`+`) mendukung create order multi-item + ringkasan estimasi (subtotal/ongkir/diskon), stepper qty/kg, dan urut ulang item sebelum submit via `POST /api/orders` (owner/admin/cashier)
 - Modul `Kelola Keuangan` dari tab Akun:
   - Snapshot billing quota via `/api/billing/quota` (owner/admin)
   - Snapshot kas operasional dari data `/api/orders` outlet aktif

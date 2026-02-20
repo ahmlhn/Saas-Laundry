@@ -22,6 +22,8 @@ interface DraftOrderItem {
   metricInput: string;
 }
 
+type DraftMetricDirection = -1 | 1;
+
 function generateDraftItemId(): string {
   return `item-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 }
@@ -32,6 +34,38 @@ function createDraftItem(serviceId: string | null): DraftOrderItem {
     serviceId,
     metricInput: "",
   };
+}
+
+function isKgUnit(unitType: string | undefined): boolean {
+  return unitType === "kg";
+}
+
+function parseMetricInput(raw: string): number {
+  const normalized = raw.trim().replace(",", ".");
+  return Number.parseFloat(normalized);
+}
+
+function getMetricStep(unitType: string | undefined): number {
+  return isKgUnit(unitType) ? 0.1 : 1;
+}
+
+function normalizeMetricValue(value: number, unitType: string | undefined): number {
+  if (isKgUnit(unitType)) {
+    return Math.round(value * 10) / 10;
+  }
+
+  return Math.round(value);
+}
+
+function formatMetricInputValue(value: number, unitType: string | undefined): string {
+  const normalizedValue = normalizeMetricValue(value, unitType);
+
+  if (isKgUnit(unitType)) {
+    const fixed = normalizedValue.toFixed(1);
+    return fixed.endsWith(".0") ? fixed.slice(0, -2) : fixed;
+  }
+
+  return `${normalizedValue}`;
 }
 
 const currencyFormatter = new Intl.NumberFormat("id-ID");
@@ -142,10 +176,50 @@ export function QuickActionScreen() {
     });
   }
 
+  function handleMoveItem(itemId: string, direction: "up" | "down"): void {
+    setDraftItems((previous) => {
+      const currentIndex = previous.findIndex((item) => item.id === itemId);
+      if (currentIndex < 0) {
+        return previous;
+      }
+
+      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+      if (targetIndex < 0 || targetIndex >= previous.length) {
+        return previous;
+      }
+
+      const nextItems = [...previous];
+      const [movedItem] = nextItems.splice(currentIndex, 1);
+      nextItems.splice(targetIndex, 0, movedItem);
+      return nextItems;
+    });
+  }
+
+  function handleStepMetric(itemId: string, direction: DraftMetricDirection): void {
+    const item = draftItems.find((draft) => draft.id === itemId);
+    if (!item) {
+      return;
+    }
+
+    const selectedService = services.find((service) => service.id === item.serviceId);
+    if (!selectedService) {
+      return;
+    }
+
+    const currentValue = parseMetricInput(item.metricInput);
+    const safeValue = Number.isFinite(currentValue) ? currentValue : 0;
+    const step = getMetricStep(selectedService.unit_type);
+    const nextValue = Math.max(normalizeMetricValue(safeValue + direction * step, selectedService.unit_type), 0);
+
+    updateDraftItem(item.id, {
+      metricInput: nextValue > 0 ? formatMetricInputValue(nextValue, selectedService.unit_type) : "",
+    });
+  }
+
   const itemPricingPreview = useMemo(() => {
     return draftItems.map((item, index) => {
       const selectedService = services.find((service) => service.id === item.serviceId) ?? null;
-      const metricValue = Number.parseFloat(item.metricInput.trim());
+      const metricValue = parseMetricInput(item.metricInput);
       const hasValidMetric = Number.isFinite(metricValue) && metricValue > 0;
       const unitPrice = selectedService?.effective_price_amount ?? 0;
       const lineSubtotal = selectedService && hasValidMetric ? Math.round(metricValue * unitPrice) : 0;
@@ -214,16 +288,16 @@ export function QuickActionScreen() {
         return;
       }
 
-      const metricValue = Number.parseFloat(item.metricInput.trim());
+      const metricValue = parseMetricInput(item.metricInput);
       if (!Number.isFinite(metricValue) || metricValue <= 0) {
-        setErrorMessage(selectedService.unit_type === "kg" ? `Item ${index + 1}: berat (kg) harus lebih dari 0.` : `Item ${index + 1}: qty harus lebih dari 0.`);
+        setErrorMessage(isKgUnit(selectedService.unit_type) ? `Item ${index + 1}: berat (kg) harus lebih dari 0.` : `Item ${index + 1}: qty harus lebih dari 0.`);
         return;
       }
 
       normalizedItems.push({
         serviceId: selectedService.id,
-        qty: selectedService.unit_type === "pcs" ? metricValue : undefined,
-        weightKg: selectedService.unit_type === "kg" ? metricValue : undefined,
+        qty: isKgUnit(selectedService.unit_type) ? undefined : metricValue,
+        weightKg: isKgUnit(selectedService.unit_type) ? metricValue : undefined,
       });
     }
 
@@ -259,22 +333,51 @@ export function QuickActionScreen() {
 
   function renderItemDraft(item: DraftOrderItem, index: number) {
     const selectedService = services.find((service) => service.id === item.serviceId) ?? null;
-    const metricValue = Number.parseFloat(item.metricInput.trim());
+    const metricValue = parseMetricInput(item.metricInput);
     const hasValidMetric = Number.isFinite(metricValue) && metricValue > 0;
     const unitPrice = selectedService?.effective_price_amount ?? 0;
     const lineSubtotal = selectedService && hasValidMetric ? Math.round(metricValue * unitPrice) : 0;
+    const canMoveUp = index > 0;
+    const canMoveDown = index < draftItems.length - 1;
+    const metricLabel = isKgUnit(selectedService?.unit_type) ? "Berat (kg)" : "Qty";
+    const stepInfo = isKgUnit(selectedService?.unit_type) ? "Step 0.1" : "Step 1";
 
     return (
       <View key={item.id} style={styles.itemPanel}>
         <View style={styles.itemHeader}>
           <Text style={styles.inputLabel}>Item {index + 1}</Text>
-          {draftItems.length > 1 ? (
-            <AppButton
-              onPress={() => handleRemoveItem(item.id)}
-              title="Hapus"
-              variant="ghost"
-            />
-          ) : null}
+          <View style={styles.itemHeaderActions}>
+            <Pressable
+              disabled={!canMoveUp}
+              onPress={() => handleMoveItem(item.id, "up")}
+              style={({ pressed }) => [
+                styles.headerActionButton,
+                !canMoveUp ? styles.headerActionButtonDisabled : null,
+                canMoveUp && pressed ? styles.headerActionButtonPressed : null,
+              ]}
+            >
+              <Text style={[styles.headerActionText, !canMoveUp ? styles.headerActionTextDisabled : null]}>Naik</Text>
+            </Pressable>
+            <Pressable
+              disabled={!canMoveDown}
+              onPress={() => handleMoveItem(item.id, "down")}
+              style={({ pressed }) => [
+                styles.headerActionButton,
+                !canMoveDown ? styles.headerActionButtonDisabled : null,
+                canMoveDown && pressed ? styles.headerActionButtonPressed : null,
+              ]}
+            >
+              <Text style={[styles.headerActionText, !canMoveDown ? styles.headerActionTextDisabled : null]}>Turun</Text>
+            </Pressable>
+            {draftItems.length > 1 ? (
+              <Pressable
+                onPress={() => handleRemoveItem(item.id)}
+                style={({ pressed }) => [styles.headerActionButton, pressed ? styles.headerActionButtonPressed : null]}
+              >
+                <Text style={styles.headerActionDangerText}>Hapus</Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
         <View style={styles.serviceList}>
           {services.map((service) => {
@@ -293,10 +396,32 @@ export function QuickActionScreen() {
             );
           })}
         </View>
+        {selectedService ? (
+          <View style={styles.metricStepperWrap}>
+            <Text style={styles.inputLabel}>
+              Stepper {metricLabel} ({stepInfo})
+            </Text>
+            <View style={styles.metricStepperRow}>
+              <Pressable
+                onPress={() => handleStepMetric(item.id, -1)}
+                style={({ pressed }) => [styles.metricStepperButton, pressed ? styles.metricStepperButtonPressed : null]}
+              >
+                <Text style={styles.metricStepperButtonText}>-</Text>
+              </Pressable>
+              <Text style={styles.metricStepperValue}>{item.metricInput.trim() || "0"}</Text>
+              <Pressable
+                onPress={() => handleStepMetric(item.id, 1)}
+                style={({ pressed }) => [styles.metricStepperButton, pressed ? styles.metricStepperButtonPressed : null]}
+              >
+                <Text style={styles.metricStepperButtonText}>+</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
         <TextInput
           keyboardType="numeric"
           onChangeText={(value) => updateDraftItem(item.id, { metricInput: value })}
-          placeholder={selectedService?.unit_type === "kg" ? "Berat (kg), contoh 2.5" : "Qty, contoh 3"}
+          placeholder={isKgUnit(selectedService?.unit_type) ? "Berat (kg), contoh 2.5" : "Qty, contoh 3"}
           placeholderTextColor={theme.colors.textMuted}
           style={styles.input}
           value={item.metricInput}
@@ -582,6 +707,75 @@ function createStyles(theme: AppTheme) {
       alignItems: "center",
       justifyContent: "space-between",
       gap: theme.spacing.xs,
+    },
+    itemHeaderActions: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      justifyContent: "flex-end",
+      gap: 4,
+    },
+    headerActionButton: {
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 9,
+      paddingVertical: 5,
+    },
+    headerActionButtonDisabled: {
+      opacity: 0.52,
+    },
+    headerActionButtonPressed: {
+      opacity: 0.78,
+    },
+    headerActionText: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
+      letterSpacing: 0.15,
+    },
+    headerActionTextDisabled: {
+      color: theme.colors.textMuted,
+    },
+    headerActionDangerText: {
+      color: theme.colors.danger,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
+      letterSpacing: 0.15,
+    },
+    metricStepperWrap: {
+      gap: 5,
+    },
+    metricStepperRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.spacing.xs,
+    },
+    metricStepperButton: {
+      width: 32,
+      height: 32,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.sm,
+      backgroundColor: theme.colors.surfaceSoft,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    metricStepperButtonPressed: {
+      opacity: 0.78,
+    },
+    metricStepperButtonText: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 16,
+      lineHeight: 19,
+    },
+    metricStepperValue: {
+      minWidth: 42,
+      textAlign: "center",
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13,
     },
     itemPriceInfo: {
       gap: 2,

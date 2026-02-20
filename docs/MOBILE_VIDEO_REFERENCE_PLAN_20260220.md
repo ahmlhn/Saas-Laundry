@@ -157,6 +157,14 @@ Referensi frame yang dianalisis:
 - Target outcome:
   - User bisa verifikasi nilai transaksi sebelum order disimpan.
 
+### Fase 12 (Quick Action Item Editing)
+- Quick Action:
+  - Tambah stepper `-/+` untuk metrik item (`qty`/`kg`) sebelum submit.
+  - Tambah kontrol urutan item (`Naik`/`Turun`) agar item bisa diprioritaskan.
+  - Pastikan validasi + ringkasan estimasi tetap mengikuti urutan item terbaru.
+- Target outcome:
+  - Koreksi draft item jadi lebih cepat tanpa edit manual berulang.
+
 ## 5.1) Status Implementasi (Update 2026-02-21 - Fase 4)
 - Fase 1: selesai.
   - Bottom tab 5 menu aktif.
@@ -215,6 +223,10 @@ Referensi frame yang dianalisis:
   - Quick Action menampilkan harga satuan dan subtotal di setiap item.
   - Ringkasan estimasi total ditambahkan (subtotal, ongkir, diskon, grand total).
   - Ongkir dan diskon bisa diinput sebelum submit order.
+- Fase 12: selesai (MOB-014).
+  - Quick Action menambahkan stepper `-/+` untuk `qty`/`kg` pada setiap item.
+  - Urutan item bisa diubah lewat kontrol `Naik`/`Turun` sebelum submit.
+  - Validasi submit + panel ringkasan estimasi mengikuti urutan dan nilai draft terbaru.
 
 ## 6) Mapping Fitur Ke API Existing
 - Auth:
