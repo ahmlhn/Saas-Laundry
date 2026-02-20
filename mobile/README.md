@@ -15,14 +15,15 @@ npm install
 Edit `.env`:
 
 ```env
-EXPO_PUBLIC_API_URL=http://127.0.0.1:8000
+EXPO_PUBLIC_API_URL=https://saas.daratlaut.com
 EXPO_PUBLIC_DEVICE_NAME=mobile-app
 ```
 
 Catatan endpoint:
-- Android emulator: biasanya pakai `http://10.0.2.2:8000`
-- iOS simulator: biasanya `http://127.0.0.1:8000`
-- Device fisik: pakai IP LAN mesin backend, contoh `http://192.168.1.10:8000`
+- Production (online): `https://saas.daratlaut.com`
+- Android emulator lokal: biasanya pakai `http://10.0.2.2:8000`
+- iOS simulator lokal: biasanya `http://127.0.0.1:8000`
+- Device fisik lokal: pakai IP LAN mesin backend, contoh `http://192.168.1.10:8000`
 
 ## 3) Jalankan
 
@@ -42,6 +43,7 @@ npm run web
 
 - Login via `/api/auth/login` (Sanctum token)
 - Persist token via `expo-secure-store`
+- Persist outlet aktif via `expo-secure-store`
 - Restore sesi via `/api/me`
 - Flow navigation: `Login -> Outlet Select -> Orders Today`
 - Fetch order read-only via `/api/orders` dengan context outlet aktif

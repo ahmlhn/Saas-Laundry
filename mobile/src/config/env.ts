@@ -1,5 +1,10 @@
-const FALLBACK_API_URL = "http://127.0.0.1:8000";
-const DEFAULT_API_FALLBACKS = ["http://10.0.2.2:8000", "http://127.0.0.1:8000", "http://localhost:8000"];
+const FALLBACK_API_URL = "https://saas.daratlaut.com";
+const DEFAULT_API_FALLBACKS = [
+  "https://saas.daratlaut.com",
+  "http://10.0.2.2:8000",
+  "http://127.0.0.1:8000",
+  "http://localhost:8000",
+];
 
 function trimTrailingSlash(url: string): string {
   return url.replace(/\/+$/, "");

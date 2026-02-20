@@ -2,7 +2,14 @@ import { createContext, type ReactNode, useContext, useEffect, useMemo, useState
 import { MOBILE_DEVICE_NAME } from "../config/env";
 import { fetchMeContext, loginWithEmailPassword, logoutCurrentSession } from "../features/auth/authApi";
 import { setAuthBearerToken } from "../lib/httpClient";
-import { clearStoredAccessToken, getStoredAccessToken, setStoredAccessToken } from "../lib/secureTokenStorage";
+import {
+  clearStoredAccessToken,
+  clearStoredSelectedOutletId,
+  getStoredAccessToken,
+  getStoredSelectedOutletId,
+  setStoredAccessToken,
+  setStoredSelectedOutletId,
+} from "../lib/secureTokenStorage";
 import type { AllowedOutlet, UserContext } from "../types/auth";
 
 interface LoginInput {
@@ -22,7 +29,22 @@ interface SessionContextValue {
 
 const SessionContext = createContext<SessionContextValue | undefined>(undefined);
 
-function reconcileSelectedOutlet(session: UserContext, previousOutlet: AllowedOutlet | null): AllowedOutlet | null {
+function reconcileSelectedOutlet(
+  session: UserContext,
+  options: {
+    preferredOutletId?: string | null;
+    previousOutlet?: AllowedOutlet | null;
+  }
+): AllowedOutlet | null {
+  const preferredOutletId = options.preferredOutletId?.trim();
+  if (preferredOutletId) {
+    const byPreferredId = session.allowed_outlets.find((outlet) => outlet.id === preferredOutletId);
+    if (byPreferredId) {
+      return byPreferredId;
+    }
+  }
+
+  const previousOutlet = options.previousOutlet ?? null;
   if (previousOutlet) {
     const match = session.allowed_outlets.find((outlet) => outlet.id === previousOutlet.id);
     if (match) {
@@ -35,6 +57,15 @@ function reconcileSelectedOutlet(session: UserContext, previousOutlet: AllowedOu
   }
 
   return null;
+}
+
+async function persistSelectedOutlet(outlet: AllowedOutlet | null): Promise<void> {
+  if (!outlet) {
+    await clearStoredSelectedOutletId();
+    return;
+  }
+
+  await setStoredSelectedOutletId(outlet.id);
 }
 
 export function SessionProvider({ children }: { children: ReactNode }) {
@@ -54,6 +85,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setAuthBearerToken(null);
       setSession(null);
       setSelectedOutlet(null);
+      await clearStoredSelectedOutletId();
       setBooting(false);
       return;
     }
@@ -62,10 +94,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     try {
       const response = await fetchMeContext();
+      const preferredOutletId = await getStoredSelectedOutletId();
+      const nextSelectedOutlet = reconcileSelectedOutlet(response.data, {
+        preferredOutletId,
+        previousOutlet: selectedOutlet,
+      });
+
       setSession(response.data);
-      setSelectedOutlet((previousOutlet) => reconcileSelectedOutlet(response.data, previousOutlet));
+      setSelectedOutlet(nextSelectedOutlet);
+      await persistSelectedOutlet(nextSelectedOutlet);
     } catch {
-      await clearStoredAccessToken();
+      await Promise.all([clearStoredAccessToken(), clearStoredSelectedOutletId()]);
       setAuthBearerToken(null);
       setSession(null);
       setSelectedOutlet(null);
@@ -80,8 +119,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
 
     const response = await fetchMeContext();
+    const preferredOutletId = await getStoredSelectedOutletId();
+    const nextSelectedOutlet = reconcileSelectedOutlet(response.data, {
+      preferredOutletId,
+      previousOutlet: selectedOutlet,
+    });
+
     setSession(response.data);
-    setSelectedOutlet((previousOutlet) => reconcileSelectedOutlet(response.data, previousOutlet));
+    setSelectedOutlet(nextSelectedOutlet);
+    await persistSelectedOutlet(nextSelectedOutlet);
   }
 
   async function login(input: LoginInput): Promise<void> {
@@ -94,8 +140,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await setStoredAccessToken(response.access_token);
     setAuthBearerToken(response.access_token);
 
+    const preferredOutletId = await getStoredSelectedOutletId();
+    const nextSelectedOutlet = reconcileSelectedOutlet(response.data, {
+      preferredOutletId,
+      previousOutlet: selectedOutlet,
+    });
+
     setSession(response.data);
-    setSelectedOutlet((previousOutlet) => reconcileSelectedOutlet(response.data, previousOutlet));
+    setSelectedOutlet(nextSelectedOutlet);
+    await persistSelectedOutlet(nextSelectedOutlet);
   }
 
   async function logout(): Promise<void> {
@@ -104,11 +157,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     } catch {
       // best effort: sesi lokal tetap dibersihkan.
     } finally {
-      await clearStoredAccessToken();
+      await Promise.all([clearStoredAccessToken(), clearStoredSelectedOutletId()]);
       setAuthBearerToken(null);
       setSession(null);
       setSelectedOutlet(null);
     }
+  }
+
+  function selectOutlet(outlet: AllowedOutlet | null): void {
+    setSelectedOutlet(outlet);
+    void persistSelectedOutlet(outlet);
   }
 
   const value = useMemo<SessionContextValue>(
@@ -118,7 +176,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       selectedOutlet,
       login,
       logout,
-      selectOutlet: setSelectedOutlet,
+      selectOutlet,
       refreshSession,
     }),
     [booting, session, selectedOutlet]
