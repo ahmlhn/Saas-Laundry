@@ -15,6 +15,11 @@ use App\Http\Controllers\Api\UserManagementController;
 use App\Http\Controllers\Api\WaController;
 use Illuminate\Support\Facades\Route;
 
+Route::get('/health', static fn () => response()->json([
+    'ok' => true,
+    'time' => now()->toIso8601String(),
+]));
+
 Route::prefix('auth')->group(function (): void {
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:auth-login');
     Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');

@@ -10,7 +10,13 @@ use App\Models\Tenant;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
-    $tenant = Tenant::query()->orderBy('created_at')->first();
+    try {
+        $tenant = Tenant::query()->orderBy('created_at')->first();
+    } catch (\Throwable $e) {
+        report($e);
+
+        return view('welcome');
+    }
 
     if ($tenant) {
         return redirect()->route('tenant.login', ['tenant' => $tenant->id]);
@@ -20,7 +26,13 @@ Route::get('/', function () {
 });
 
 Route::get('/login', function () {
-    $tenant = Tenant::query()->orderBy('created_at')->first();
+    try {
+        $tenant = Tenant::query()->orderBy('created_at')->first();
+    } catch (\Throwable $e) {
+        report($e);
+
+        abort(503, 'Database is not ready yet. Please try again in a moment.');
+    }
 
     if (! $tenant) {
         abort(404, 'No tenant available.');

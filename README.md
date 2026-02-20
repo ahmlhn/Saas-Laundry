@@ -91,6 +91,18 @@ UAT business pack otomatis + report:
 php artisan ops:uat:run --seed-demo
 ```
 
+## Mobile App (Kickoff)
+Client mobile ada di folder `mobile/` (Expo + TypeScript).
+
+```bash
+cd mobile
+cp .env.example .env
+npm install
+npm run start
+```
+
+Panduan detail ada di `mobile/README.md`.
+
 ## Operational Commands
 - Readiness check staging/release:
   - `php artisan ops:readiness:check`
@@ -117,7 +129,8 @@ Workflow deploy akan jalan saat:
 - `DEPLOY_PORT` -> contoh: `65002`
 - `DEPLOY_USER` -> contoh: `u429122506`
 - `DEPLOY_SSH_KEY` -> private key SSH (recommended)
-- `DEPLOY_PASSWORD` -> opsional jika tidak pakai key
+- `DEPLOY_SSH_PASSPHRASE` -> opsional jika private key memakai passphrase
+- `DEPLOY_PASSWORD` -> opsional jika tidak pakai key (workflow menerima key **atau** password)
 
 ### Variables (Settings > Secrets and variables > Actions > Variables)
 - `DEPLOY_PATH` -> path project di server, contoh: `/home/u429122506/saas-laundry`
@@ -129,6 +142,18 @@ Workflow deploy akan jalan saat:
 - Pastikan file `.env` sudah dibuat di server sebelum workflow deploy pertama.
 - Workflow deploy meng-upload hasil build frontend (`public/build`) dari GitHub Actions.
 - Jika `run_migrations=true`, migration akan dijalankan otomatis.
+- Pastikan SSH aktif di shared hosting (umumnya perlu enable dari panel hosting dulu).
+- Untuk private repo, pastikan server bisa `git pull` (deploy key/token) atau gunakan `DEPLOY_REPO_URL` ke mirror yang dapat diakses.
+
+### Checklist Shared Hosting (disarankan sebelum deploy pertama)
+1. Buat folder app, contoh: `/home/<user>/apps/saas-laundry`.
+2. Set `DEPLOY_PATH` ke folder app tersebut.
+3. Atur document root domain/subdomain ke `<DEPLOY_PATH>/public`.
+4. Upload/buat `.env` di server dan isi kredensial production.
+5. Jalankan sekali di server (manual) untuk verifikasi:
+   - `php artisan key:generate` (jika `APP_KEY` belum ada)
+   - `php artisan migrate --force`
+6. Setelah itu, jalankan workflow `Deploy` dari tab Actions.
 
 ## Dokumentasi
 - `docs/IMPLEMENTATION_SPECS.md`
