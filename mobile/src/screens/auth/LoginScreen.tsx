@@ -1,7 +1,6 @@
-import { useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
-import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { API_BASE_URL } from "../../config/env";
 import { checkApiHealth } from "../../features/auth/authApi";
@@ -11,6 +10,7 @@ import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
 
 type FocusedField = "email" | "password" | null;
+type LoginViewRole = "owner" | "staff";
 
 export function LoginScreen() {
   const theme = useAppTheme();
@@ -26,14 +26,69 @@ export function LoginScreen() {
   const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
   const [focusedField, setFocusedField] = useState<FocusedField>(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [viewRole, setViewRole] = useState<LoginViewRole>("owner");
   const passwordInputRef = useRef<TextInput | null>(null);
   const setupChecklist = useMemo(() => getApiSetupChecklist(), []);
   const apiCandidates = useMemo(() => getApiBaseCandidates(), []);
   const activeApiBaseUrl = getActiveApiBaseUrl();
+  const entranceProgress = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(entranceProgress, {
+      toValue: 1,
+      duration: 620,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [entranceProgress]);
+
+  const heroAnimatedStyle = useMemo(
+    () => ({
+      opacity: entranceProgress,
+      transform: [
+        {
+          translateY: entranceProgress.interpolate({
+            inputRange: [0, 1],
+            outputRange: [-16, 0],
+          }),
+        },
+      ],
+    }),
+    [entranceProgress]
+  );
+
+  const panelAnimatedStyle = useMemo(
+    () => ({
+      opacity: entranceProgress.interpolate({
+        inputRange: [0, 0.25, 1],
+        outputRange: [0, 0.35, 1],
+      }),
+      transform: [
+        {
+          translateY: entranceProgress.interpolate({
+            inputRange: [0, 1],
+            outputRange: [24, 0],
+          }),
+        },
+      ],
+    }),
+    [entranceProgress]
+  );
 
   const canSubmit = !submitting && email.trim().length > 0 && password.length > 0;
   const canBiometricLogin = hasStoredSession && biometricAvailable && biometricEnabled && !biometricSubmitting && !submitting;
   const inputDisabled = submitting || biometricSubmitting;
+  const diagnosticsToggleLabel = showDiagnostics ? "Sembunyikan Diagnostik API" : "Lihat Diagnostik API";
+  const biometricButtonLabel = biometricLabel
+    .split(" ")
+    .map((chunk) => chunk.slice(0, 1))
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const roleHint =
+    viewRole === "owner"
+      ? "Mode pemilik untuk monitoring KPI, billing, dan kontrol lintas outlet."
+      : "Mode pegawai untuk operasional harian: order, status laundry, dan serah-terima.";
 
   async function handleSubmit(): Promise<void> {
     if (!canSubmit) {
@@ -91,171 +146,216 @@ export function LoginScreen() {
   }
 
   const isConnectionError = connectionMessage ? !connectionMessage.toLowerCase().includes("ok=true") : false;
-  const diagnosticsToggleLabel = showDiagnostics ? "Sembunyikan Diagnostik API" : "Lihat Diagnostik API";
 
   return (
     <AppScreen contentContainerStyle={styles.scrollContainer} scroll>
-      <View style={styles.heroCard}>
-        <View style={styles.heroGlowLarge} pointerEvents="none" />
-        <View style={styles.heroGlowSmall} pointerEvents="none" />
+      <Animated.View style={[styles.heroShell, heroAnimatedStyle]}>
+        <View style={styles.heroBlueBase} />
+        <View style={styles.heroBlueLayer} />
+        <View style={styles.heroAccentRing} />
+        <View style={styles.heroAccentDot} />
+        <View style={styles.heroWavePrimary} />
+        <View style={styles.heroWaveSecondary} />
 
-        <View style={styles.brandRow}>
-          <View style={styles.brandPill}>
-            <Text style={styles.brandPillText}>bilas</Text>
+        <View style={styles.heroContent}>
+          <View style={styles.brandRow}>
+            <View style={styles.brandMarkWrap}>
+              <View style={styles.brandMarkBubble} />
+              <Text style={styles.brandMarkText}>CL</Text>
+            </View>
+            <View style={styles.brandTextWrap}>
+              <Text style={styles.brandTitle}>Cuci Laundry</Text>
+              <Text style={styles.brandSubtitle}>Operasional Mobile</Text>
+            </View>
           </View>
-          <Text style={styles.brandMeta}>Mobile Ops</Text>
+          <Text style={styles.heroTitle}>Masuk untuk kendalikan workflow outlet setiap hari.</Text>
+          <Text style={styles.heroSubtitle}>Satu aplikasi untuk kasir, progress laundry, kurir, dan rekap cepat operasional.</Text>
         </View>
-        <Text style={styles.heroTitle}>Masuk dan mulai operasional outlet.</Text>
-        <Text style={styles.heroSubtitle}>Pantau pesanan, update status layanan, dan jalankan quick action dari satu aplikasi.</Text>
-        <View style={styles.heroChipRow}>
-          <View style={styles.heroChip}>
-            <Text style={styles.heroChipText}>Order Harian</Text>
-          </View>
-          <View style={styles.heroChip}>
-            <Text style={styles.heroChipText}>Status Real-time</Text>
-          </View>
-          <View style={styles.heroChip}>
-            <Text style={styles.heroChipText}>Multi Outlet</Text>
-          </View>
-        </View>
-      </View>
+      </Animated.View>
 
-      <AppPanel style={styles.panel}>
-        <View style={styles.panelHeader}>
-          <Text style={styles.panelTitle}>Login Akun</Text>
-          <Text style={styles.panelSubtitle}>Gunakan akun yang sudah diberi akses outlet oleh owner/admin.</Text>
-        </View>
-
-        <View style={styles.apiBadge}>
-          <Text style={styles.apiBadgeLabel}>Endpoint aktif</Text>
-          <Text numberOfLines={1} style={styles.apiBadgeValue}>
-            {activeApiBaseUrl}
-          </Text>
-        </View>
-
-        <View style={styles.fieldGroup}>
-          <Text style={styles.fieldLabel}>Email</Text>
-          <TextInput
-            autoCapitalize="none"
-            autoComplete="email"
-            autoCorrect={false}
-            editable={!inputDisabled}
-            keyboardType="email-address"
-            onBlur={() => setFocusedField((field) => (field === "email" ? null : field))}
-            onChangeText={setEmail}
-            onFocus={() => setFocusedField("email")}
-            onSubmitEditing={() => passwordInputRef.current?.focus()}
-            placeholder="email@contoh.com"
-            placeholderTextColor={theme.colors.textMuted}
-            returnKeyType="next"
-            style={[styles.input, focusedField === "email" ? styles.inputFocused : null]}
-            textContentType="emailAddress"
-            value={email}
-          />
-        </View>
-
-        <View style={styles.fieldGroup}>
-          <Text style={styles.fieldLabel}>Password</Text>
-          <View style={[styles.passwordWrap, focusedField === "password" ? styles.inputFocused : null]}>
-            <TextInput
-              editable={!inputDisabled}
-              onBlur={() => setFocusedField((field) => (field === "password" ? null : field))}
-              onChangeText={setPassword}
-              onFocus={() => setFocusedField("password")}
-              onSubmitEditing={() => {
-                if (canSubmit) {
-                  void handleSubmit();
-                }
-              }}
-              placeholder="Masukkan password"
-              placeholderTextColor={theme.colors.textMuted}
-              ref={passwordInputRef}
-              returnKeyType="go"
-              secureTextEntry={!showPassword}
-              style={styles.passwordInput}
-              textContentType="password"
-              value={password}
-            />
+      <Animated.View style={[styles.panelWrap, panelAnimatedStyle]}>
+        <AppPanel style={styles.panel}>
+          <Text style={styles.loginAsLabel}>Login sebagai</Text>
+          <View style={styles.roleSwitchRow}>
             <Pressable
               accessibilityRole="button"
-              disabled={inputDisabled}
-              onPress={() => setShowPassword((value) => !value)}
-              style={({ pressed }) => [styles.passwordToggle, pressed ? styles.passwordTogglePressed : null]}
+              onPress={() => setViewRole("owner")}
+              style={({ pressed }) => [
+                styles.roleChip,
+                viewRole === "owner" ? styles.roleChipActive : null,
+                pressed ? styles.roleChipPressed : null,
+              ]}
             >
-              <Text style={styles.passwordToggleText}>{showPassword ? "Sembunyikan" : "Tampil"}</Text>
+              <Text style={[styles.roleChipText, viewRole === "owner" ? styles.roleChipTextActive : null]}>PEMILIK</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setViewRole("staff")}
+              style={({ pressed }) => [
+                styles.roleChip,
+                viewRole === "staff" ? styles.roleChipActive : null,
+                pressed ? styles.roleChipPressed : null,
+              ]}
+            >
+              <Text style={[styles.roleChipText, viewRole === "staff" ? styles.roleChipTextActive : null]}>PEGAWAI</Text>
             </Pressable>
           </View>
-        </View>
+          <Text style={styles.roleHintText}>{roleHint}</Text>
 
-        {errorMessage ? (
-          <View style={styles.errorWrap}>
-            <Text style={styles.errorTitle}>Login gagal</Text>
-            <Text style={styles.errorText}>{errorMessage}</Text>
-          </View>
-        ) : null}
-
-        <View style={styles.actionsBlock}>
-          <AppButton disabled={!canSubmit} loading={submitting} onPress={() => void handleSubmit()} title={submitting ? "Memproses..." : "Masuk Sekarang"} />
-          {hasStoredSession ? (
-            <AppButton
-              disabled={!canBiometricLogin}
-              loading={biometricSubmitting}
-              onPress={() => void handleBiometricLogin()}
-              title={biometricSubmitting ? "Verifikasi..." : `Masuk dengan ${biometricLabel}`}
-              variant="secondary"
+          <View style={styles.fieldGroup}>
+            <TextInput
+              autoCapitalize="none"
+              autoComplete="email"
+              autoCorrect={false}
+              editable={!inputDisabled}
+              keyboardType="email-address"
+              onBlur={() => setFocusedField((field) => (field === "email" ? null : field))}
+              onChangeText={setEmail}
+              onFocus={() => setFocusedField("email")}
+              onSubmitEditing={() => passwordInputRef.current?.focus()}
+              placeholder="Email"
+              placeholderTextColor={theme.colors.textMuted}
+              returnKeyType="next"
+              style={[styles.input, focusedField === "email" ? styles.inputFocused : null]}
+              textContentType="emailAddress"
+              value={email}
             />
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <View style={[styles.passwordWrap, focusedField === "password" ? styles.inputFocused : null]}>
+              <TextInput
+                editable={!inputDisabled}
+                onBlur={() => setFocusedField((field) => (field === "password" ? null : field))}
+                onChangeText={setPassword}
+                onFocus={() => setFocusedField("password")}
+                onSubmitEditing={() => {
+                  if (canSubmit) {
+                    void handleSubmit();
+                  }
+                }}
+                placeholder="Kata Sandi"
+                placeholderTextColor={theme.colors.textMuted}
+                ref={passwordInputRef}
+                returnKeyType="go"
+                secureTextEntry={!showPassword}
+                style={styles.passwordInput}
+                textContentType="password"
+                value={password}
+              />
+              <Pressable
+                accessibilityRole="button"
+                disabled={inputDisabled}
+                onPress={() => setShowPassword((value) => !value)}
+                style={({ pressed }) => [styles.passwordToggle, pressed ? styles.passwordTogglePressed : null]}
+              >
+                <Text style={styles.passwordToggleText}>{showPassword ? "Tutup" : "Lihat"}</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <Text style={styles.forgotHint}>Lupa password? Hubungi owner/admin tenant untuk reset akun.</Text>
+
+          {errorMessage ? (
+            <View style={styles.errorWrap}>
+              <Text style={styles.errorTitle}>Login gagal</Text>
+              <Text style={styles.errorText}>{errorMessage}</Text>
+            </View>
           ) : null}
-        </View>
 
-        <View style={styles.utilityRow}>
-          <Pressable
-            accessibilityRole="button"
-            disabled={checkingConnection}
-            onPress={() => void handleCheckConnection()}
-            style={({ pressed }) => [
-              styles.utilityButton,
-              checkingConnection ? styles.utilityButtonDisabled : null,
-              pressed && !checkingConnection ? styles.utilityButtonPressed : null,
-            ]}
-          >
-            <Text style={styles.utilityButtonText}>{checkingConnection ? "Mengecek koneksi..." : "Tes Koneksi API"}</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setShowDiagnostics((value) => !value)}
-            style={({ pressed }) => [styles.utilityButton, pressed ? styles.utilityButtonPressed : null]}
-          >
-            <Text style={styles.utilityButtonText}>{diagnosticsToggleLabel}</Text>
-          </Pressable>
-        </View>
+          <View style={styles.submitRow}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={!canSubmit}
+              onPress={() => void handleSubmit()}
+              style={({ pressed }) => [
+                styles.submitPrimaryButton,
+                !canSubmit ? styles.submitPrimaryButtonDisabled : null,
+                pressed && canSubmit ? styles.submitPrimaryButtonPressed : null,
+              ]}
+            >
+              <View style={styles.submitPrimaryLayerLeft} pointerEvents="none" />
+              <View style={styles.submitPrimaryLayerRight} pointerEvents="none" />
+              {submitting ? (
+                <ActivityIndicator color="#ffffff" size="small" />
+              ) : (
+                <Text style={styles.submitPrimaryText}>MASUK</Text>
+              )}
+            </Pressable>
 
-        {hasStoredSession && (!biometricAvailable || !biometricEnabled) ? (
-          <View style={styles.biometricHintWrap}>
-            <Text style={styles.biometricHint}>Sesi sebelumnya terdeteksi. Aktifkan login biometrik dari menu Akun untuk akses cepat.</Text>
+            {hasStoredSession ? (
+              <Pressable
+                accessibilityRole="button"
+                disabled={!canBiometricLogin}
+                onPress={() => void handleBiometricLogin()}
+                style={({ pressed }) => [
+                  styles.submitBiometricButton,
+                  !canBiometricLogin ? styles.submitBiometricButtonDisabled : null,
+                  pressed && canBiometricLogin ? styles.submitBiometricButtonPressed : null,
+                ]}
+              >
+                {biometricSubmitting ? (
+                  <ActivityIndicator color="#ffffff" size="small" />
+                ) : (
+                  <>
+                    <Text style={styles.submitBiometricLabel}>{biometricButtonLabel || "BIO"}</Text>
+                    <Text style={styles.submitBiometricSubLabel}>{biometricLabel}</Text>
+                  </>
+                )}
+              </Pressable>
+            ) : null}
           </View>
-        ) : null}
 
-        {connectionMessage ? (
-          <View style={[styles.connectionInfo, isConnectionError ? styles.connectionError : styles.connectionOk]}>
-            <Text style={styles.connectionText}>{connectionMessage}</Text>
+          {hasStoredSession && (!biometricAvailable || !biometricEnabled) ? (
+            <View style={styles.biometricHintWrap}>
+              <Text style={styles.biometricHint}>Sesi tersimpan terdeteksi. Aktifkan login biometrik dari menu Akun untuk akses instan.</Text>
+            </View>
+          ) : null}
+
+          <View style={styles.utilityRow}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={checkingConnection}
+              onPress={() => void handleCheckConnection()}
+              style={({ pressed }) => [
+                styles.utilityButton,
+                checkingConnection ? styles.utilityButtonDisabled : null,
+                pressed && !checkingConnection ? styles.utilityButtonPressed : null,
+              ]}
+            >
+              <Text style={styles.utilityButtonText}>{checkingConnection ? "Mengecek API..." : "Tes Koneksi API"}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setShowDiagnostics((value) => !value)}
+              style={({ pressed }) => [styles.utilityButton, pressed ? styles.utilityButtonPressed : null]}
+            >
+              <Text style={styles.utilityButtonText}>{diagnosticsToggleLabel}</Text>
+            </Pressable>
           </View>
-        ) : null}
-      </AppPanel>
 
-      {showDiagnostics ? (
-        <AppPanel style={styles.hintPanel}>
-          <Text style={styles.hintTitle}>Diagnostik API</Text>
-          <Text style={styles.hintText}>API dari env: {API_BASE_URL}</Text>
-          <Text style={styles.hintText}>API aktif runtime: {activeApiBaseUrl}</Text>
-          <Text style={styles.hintText}>Kandidat fallback: {apiCandidates.join(", ")}</Text>
-          <Text style={styles.hintText}>Pastikan `EXPO_PUBLIC_API_URL` sesuai emulator atau device fisik.</Text>
-          {setupChecklist.map((tip, index) => (
-            <Text key={`${index}-${tip}`} style={styles.hintText}>
-              {index + 1}. {tip}
-            </Text>
-          ))}
+          {connectionMessage ? (
+            <View style={[styles.connectionInfo, isConnectionError ? styles.connectionError : styles.connectionOk]}>
+              <Text style={styles.connectionText}>{connectionMessage}</Text>
+            </View>
+          ) : null}
+
+          {showDiagnostics ? (
+            <View style={styles.diagnosticsPanel}>
+              <Text style={styles.diagnosticsTitle}>Diagnostik API</Text>
+              <Text style={styles.diagnosticsText}>API dari env: {API_BASE_URL}</Text>
+              <Text style={styles.diagnosticsText}>API aktif runtime: {activeApiBaseUrl}</Text>
+              <Text style={styles.diagnosticsText}>Kandidat fallback: {apiCandidates.join(", ")}</Text>
+              <Text style={styles.diagnosticsText}>Pastikan `EXPO_PUBLIC_API_URL` sesuai emulator/device fisik.</Text>
+              {setupChecklist.map((tip, index) => (
+                <Text key={`${index}-${tip}`} style={styles.diagnosticsText}>
+                  {index + 1}. {tip}
+                </Text>
+              ))}
+            </View>
+          ) : null}
         </AppPanel>
-      ) : null}
+      </Animated.View>
     </AppScreen>
   );
 }
@@ -265,200 +365,259 @@ function createStyles(theme: AppTheme) {
     scrollContainer: {
       flexGrow: 1,
       paddingHorizontal: theme.spacing.lg,
-      paddingTop: theme.spacing.lg,
+      paddingTop: theme.spacing.md,
       paddingBottom: theme.spacing.xxl,
-      gap: theme.spacing.lg,
+      gap: theme.spacing.md,
     },
-    heroCard: {
-      position: "relative",
+    heroShell: {
+      height: 306,
+      borderRadius: 32,
       overflow: "hidden",
-      borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.xl,
-      backgroundColor: theme.colors.surface,
-      paddingHorizontal: theme.spacing.lg,
-      paddingVertical: theme.spacing.lg,
-      gap: theme.spacing.sm,
+      position: "relative",
     },
-    heroGlowLarge: {
+    heroBlueBase: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: "#2187e8",
+    },
+    heroBlueLayer: {
       position: "absolute",
-      top: -58,
-      right: -34,
-      width: 176,
-      height: 176,
+      top: 0,
+      right: 0,
+      bottom: 0,
+      width: "72%",
+      backgroundColor: "#0e69cc",
+      opacity: 0.52,
+    },
+    heroAccentRing: {
+      position: "absolute",
+      top: -92,
+      right: -74,
+      width: 248,
+      height: 248,
+      borderRadius: 124,
+      borderWidth: 40,
+      borderColor: "rgba(255,255,255,0.08)",
+    },
+    heroAccentDot: {
+      position: "absolute",
+      top: 36,
+      left: 36,
+      width: 78,
+      height: 78,
+      borderRadius: 39,
+      backgroundColor: "rgba(255,255,255,0.09)",
+    },
+    heroWavePrimary: {
+      position: "absolute",
+      left: -58,
+      right: -44,
+      bottom: -134,
+      height: 244,
+      borderRadius: 180,
+      backgroundColor: "#ffffff",
+    },
+    heroWaveSecondary: {
+      position: "absolute",
+      right: -56,
+      bottom: -100,
+      width: 220,
+      height: 130,
       borderRadius: 90,
-      backgroundColor: theme.colors.primarySoft,
-      opacity: 0.85,
+      backgroundColor: "rgba(33, 228, 235, 0.62)",
     },
-    heroGlowSmall: {
-      position: "absolute",
-      bottom: -74,
-      left: -42,
-      width: 148,
-      height: 148,
-      borderRadius: 74,
-      backgroundColor: theme.colors.backgroundStrong,
-      opacity: 0.7,
+    heroContent: {
+      paddingHorizontal: theme.spacing.lg,
+      paddingTop: theme.spacing.xl,
+      gap: theme.spacing.sm,
     },
     brandRow: {
       flexDirection: "row",
       alignItems: "center",
-      justifyContent: "space-between",
-      gap: theme.spacing.xs,
+      gap: theme.spacing.sm,
+      marginBottom: 3,
     },
-    brandPill: {
-      backgroundColor: theme.colors.primaryStrong,
-      borderRadius: theme.radii.pill,
-      paddingHorizontal: 16,
-      paddingVertical: 7,
+    brandMarkWrap: {
+      width: 58,
+      height: 58,
+      borderRadius: 30,
+      borderWidth: 2,
+      borderColor: "rgba(255,255,255,0.9)",
+      alignItems: "center",
+      justifyContent: "center",
+      overflow: "hidden",
+      backgroundColor: "rgba(11, 81, 178, 0.45)",
     },
-    brandPillText: {
-      color: theme.colors.primaryContrast,
-      fontFamily: theme.fonts.bold,
-      fontSize: 13,
-      letterSpacing: 0.9,
-      textTransform: "lowercase",
+    brandMarkBubble: {
+      position: "absolute",
+      bottom: -16,
+      width: 52,
+      height: 31,
+      borderRadius: 16,
+      backgroundColor: "#ffd45c",
+      opacity: 0.95,
     },
-    brandMeta: {
-      color: theme.colors.textMuted,
+    brandMarkText: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.heavy,
+      fontSize: 18,
+      letterSpacing: 0.3,
+    },
+    brandTextWrap: {
+      gap: 2,
+    },
+    brandTitle: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.heavy,
+      fontSize: 30,
+      lineHeight: 34,
+      letterSpacing: 0.2,
+    },
+    brandSubtitle: {
+      color: "rgba(255,255,255,0.82)",
       fontFamily: theme.fonts.semibold,
       fontSize: 11,
-      letterSpacing: 0.5,
+      letterSpacing: 1.6,
       textTransform: "uppercase",
     },
     heroTitle: {
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.heavy,
-      fontSize: 29,
-      lineHeight: 35,
+      color: "#ffffff",
+      fontFamily: theme.fonts.bold,
+      fontSize: 19,
+      lineHeight: 25,
+      maxWidth: 320,
     },
     heroSubtitle: {
-      color: theme.colors.textSecondary,
+      color: "rgba(255,255,255,0.86)",
       fontFamily: theme.fonts.medium,
-      fontSize: 14,
-      lineHeight: 21,
+      fontSize: 12,
+      lineHeight: 18,
+      maxWidth: 340,
     },
-    heroChipRow: {
+    panelWrap: {
+      marginTop: -72,
+      paddingHorizontal: 2,
+    },
+    panel: {
+      gap: theme.spacing.sm,
+      borderRadius: 26,
+      paddingHorizontal: theme.spacing.lg,
+      paddingTop: theme.spacing.lg,
+      paddingBottom: theme.spacing.lg,
+      borderColor: theme.colors.borderStrong,
+      shadowOpacity: theme.mode === "dark" ? 0.42 : 0.22,
+      shadowRadius: 16,
+      elevation: 7,
+    },
+    loginAsLabel: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13,
+      textAlign: "center",
+    },
+    roleSwitchRow: {
       flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 7,
+      justifyContent: "center",
+      alignItems: "center",
+      gap: theme.spacing.xs,
+      marginTop: -2,
     },
-    heroChip: {
+    roleChip: {
+      minWidth: 112,
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.pill,
       backgroundColor: theme.colors.surfaceSoft,
-      paddingHorizontal: 11,
-      paddingVertical: 5,
+      alignItems: "center",
+      paddingHorizontal: 14,
+      paddingVertical: 8,
     },
-    heroChipText: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 11,
-      letterSpacing: 0.15,
+    roleChipActive: {
+      borderColor: "#0b8de4",
+      backgroundColor: "#d9f3ff",
     },
-    panel: {
-      gap: theme.spacing.md,
-      padding: theme.spacing.lg,
+    roleChipPressed: {
+      opacity: 0.84,
     },
-    panelHeader: {
-      gap: 2,
-    },
-    panelTitle: {
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.bold,
-      fontSize: 21,
-    },
-    panelSubtitle: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.medium,
-      fontSize: 12,
-      lineHeight: 18,
-    },
-    apiBadge: {
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: theme.radii.md,
-      backgroundColor: theme.colors.surfaceSoft,
-      paddingHorizontal: 11,
-      paddingVertical: 9,
-      gap: 2,
-    },
-    apiBadgeLabel: {
+    roleChipText: {
       color: theme.colors.textMuted,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 11,
-      textTransform: "uppercase",
-      letterSpacing: 0.4,
-    },
-    apiBadgeValue: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.medium,
+      fontFamily: theme.fonts.bold,
       fontSize: 12,
+      letterSpacing: 0.5,
+    },
+    roleChipTextActive: {
+      color: "#0877cc",
+    },
+    roleHintText: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 16,
+      textAlign: "center",
+      marginBottom: 2,
     },
     fieldGroup: {
       gap: theme.spacing.xs,
     },
-    fieldLabel: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 13,
-    },
     input: {
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.md,
+      borderRadius: theme.radii.pill,
       backgroundColor: theme.colors.inputBg,
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.medium,
-      minHeight: 47,
-      paddingHorizontal: 13,
+      minHeight: 50,
+      paddingHorizontal: 16,
       paddingVertical: 12,
-      fontSize: 14,
+      fontSize: 15,
     },
     inputFocused: {
       borderColor: theme.colors.ring,
       shadowColor: theme.colors.ring,
-      shadowOpacity: theme.mode === "dark" ? 0.35 : 0.14,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: theme.mode === "dark" ? 0.4 : 0.17,
+      shadowRadius: 9,
+      shadowOffset: { width: 0, height: 1 },
     },
     passwordWrap: {
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.md,
+      borderRadius: theme.radii.pill,
       backgroundColor: theme.colors.inputBg,
       flexDirection: "row",
       alignItems: "center",
-      minHeight: 47,
+      minHeight: 50,
       paddingRight: 8,
     },
     passwordInput: {
       flex: 1,
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.medium,
-      paddingHorizontal: 13,
+      paddingHorizontal: 16,
       paddingVertical: 12,
-      fontSize: 14,
+      fontSize: 15,
     },
     passwordToggle: {
-      paddingHorizontal: 8,
-      paddingVertical: 6,
-      borderRadius: theme.radii.sm,
+      borderRadius: theme.radii.pill,
       backgroundColor: theme.colors.surface,
       borderWidth: 1,
       borderColor: theme.colors.border,
+      paddingHorizontal: 11,
+      paddingVertical: 6,
     },
     passwordTogglePressed: {
-      opacity: 0.82,
+      opacity: 0.8,
     },
     passwordToggleText: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.semibold,
       fontSize: 11,
+      letterSpacing: 0.2,
     },
-    actionsBlock: {
-      gap: theme.spacing.sm,
+    forgotHint: {
+      color: "#20b6cf",
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13,
+      marginTop: -2,
+      marginLeft: 4,
     },
     errorWrap: {
       borderWidth: 1,
@@ -480,10 +639,94 @@ function createStyles(theme: AppTheme) {
       fontSize: 12,
       lineHeight: 18,
     },
+    submitRow: {
+      flexDirection: "row",
+      gap: theme.spacing.sm,
+      marginTop: 3,
+    },
+    submitPrimaryButton: {
+      flex: 1,
+      minHeight: 52,
+      borderRadius: theme.radii.pill,
+      overflow: "hidden",
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: "#149cd5",
+      position: "relative",
+    },
+    submitPrimaryLayerLeft: {
+      ...StyleSheet.absoluteFillObject,
+      right: "48%",
+      backgroundColor: "#3ac9d6",
+    },
+    submitPrimaryLayerRight: {
+      ...StyleSheet.absoluteFillObject,
+      left: "48%",
+      backgroundColor: "#1390e9",
+    },
+    submitPrimaryButtonDisabled: {
+      opacity: 0.52,
+    },
+    submitPrimaryButtonPressed: {
+      opacity: 0.86,
+    },
+    submitPrimaryText: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.bold,
+      fontSize: 24,
+      letterSpacing: 2.4,
+    },
+    submitBiometricButton: {
+      width: 90,
+      minHeight: 52,
+      borderRadius: theme.radii.pill,
+      borderWidth: 1,
+      borderColor: "#24abd8",
+      backgroundColor: "#23bde4",
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 8,
+      gap: 1,
+    },
+    submitBiometricButtonDisabled: {
+      opacity: 0.52,
+    },
+    submitBiometricButtonPressed: {
+      opacity: 0.85,
+    },
+    submitBiometricLabel: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.heavy,
+      fontSize: 14,
+      letterSpacing: 0.8,
+      textTransform: "uppercase",
+    },
+    submitBiometricSubLabel: {
+      color: "rgba(255,255,255,0.85)",
+      fontFamily: theme.fonts.semibold,
+      fontSize: 9,
+      textAlign: "center",
+    },
+    biometricHintWrap: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 11,
+      paddingVertical: 8,
+    },
+    biometricHint: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 18,
+    },
     utilityRow: {
       flexDirection: "row",
       flexWrap: "wrap",
       gap: theme.spacing.xs,
+      marginTop: 2,
     },
     utilityButton: {
       borderWidth: 1,
@@ -505,20 +748,6 @@ function createStyles(theme: AppTheme) {
       fontSize: 11,
       letterSpacing: 0.2,
     },
-    biometricHintWrap: {
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: theme.radii.md,
-      backgroundColor: theme.colors.surfaceSoft,
-      paddingHorizontal: 11,
-      paddingVertical: 8,
-    },
-    biometricHint: {
-      color: theme.colors.textMuted,
-      fontFamily: theme.fonts.medium,
-      fontSize: 12,
-      lineHeight: 18,
-    },
     connectionInfo: {
       borderRadius: theme.radii.md,
       borderWidth: 1,
@@ -537,22 +766,27 @@ function createStyles(theme: AppTheme) {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
+      lineHeight: 18,
     },
-    hintPanel: {
-      backgroundColor: theme.colors.surfaceSoft,
+    diagnosticsPanel: {
+      borderWidth: 1,
       borderColor: theme.colors.borderStrong,
-      gap: 7,
+      borderRadius: theme.radii.lg,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 11,
+      paddingVertical: 10,
+      gap: 6,
     },
-    hintTitle: {
+    diagnosticsTitle: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
-      fontSize: 14,
+      fontSize: 13,
     },
-    hintText: {
+    diagnosticsText: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
-      fontSize: 12,
-      lineHeight: 18,
+      fontSize: 11,
+      lineHeight: 16,
     },
   });
 }
