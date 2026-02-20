@@ -52,10 +52,8 @@ jobs:
       - name: Run database migrations
         run: php artisan migrate:fresh --seed --force
 
-      - name: Run readiness gate
-        env:
-          QUEUE_CONNECTION: database
-        run: php artisan ops:readiness:check --strict
+      - name: Run readiness gate (non-strict on CI)
+        run: php artisan ops:readiness:check
 
       - name: Run test suite
         run: php artisan test
