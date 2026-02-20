@@ -34,6 +34,12 @@ function createDraftItem(serviceId: string | null): DraftOrderItem {
   };
 }
 
+const currencyFormatter = new Intl.NumberFormat("id-ID");
+
+function formatMoney(value: number): string {
+  return `Rp ${currencyFormatter.format(value)}`;
+}
+
 export function QuickActionScreen() {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -49,6 +55,8 @@ export function QuickActionScreen() {
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerNotes, setCustomerNotes] = useState("");
+  const [shippingFeeInput, setShippingFeeInput] = useState("");
+  const [discountInput, setDiscountInput] = useState("");
   const [orderNotes, setOrderNotes] = useState("");
   const [lastCreatedOrderId, setLastCreatedOrderId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -110,6 +118,8 @@ export function QuickActionScreen() {
     setCustomerName("");
     setCustomerPhone("");
     setCustomerNotes("");
+    setShippingFeeInput("");
+    setDiscountInput("");
     setOrderNotes("");
     setDraftItems([createDraftItem(services[0]?.id ?? null)]);
   }
@@ -132,6 +142,37 @@ export function QuickActionScreen() {
     });
   }
 
+  const itemPricingPreview = useMemo(() => {
+    return draftItems.map((item, index) => {
+      const selectedService = services.find((service) => service.id === item.serviceId) ?? null;
+      const metricValue = Number.parseFloat(item.metricInput.trim());
+      const hasValidMetric = Number.isFinite(metricValue) && metricValue > 0;
+      const unitPrice = selectedService?.effective_price_amount ?? 0;
+      const lineSubtotal = selectedService && hasValidMetric ? Math.round(metricValue * unitPrice) : 0;
+
+      return {
+        id: item.id,
+        label: `Item ${index + 1}`,
+        service: selectedService,
+        metricValue,
+        hasValidMetric,
+        unitPrice,
+        lineSubtotal,
+      };
+    });
+  }, [draftItems, services]);
+
+  const estimatedSubtotal = useMemo(() => itemPricingPreview.reduce((total, item) => total + item.lineSubtotal, 0), [itemPricingPreview]);
+  const parsedShippingFee = useMemo(() => {
+    const parsed = Number.parseInt(shippingFeeInput.trim(), 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  }, [shippingFeeInput]);
+  const parsedDiscount = useMemo(() => {
+    const parsed = Number.parseInt(discountInput.trim(), 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  }, [discountInput]);
+  const estimatedTotal = useMemo(() => Math.max(estimatedSubtotal + parsedShippingFee - parsedDiscount, 0), [estimatedSubtotal, parsedShippingFee, parsedDiscount]);
+
   async function handleCreateOrder(): Promise<void> {
     if (!selectedOutlet || !canCreateOrder || submitting) {
       return;
@@ -139,6 +180,8 @@ export function QuickActionScreen() {
 
     const name = customerName.trim();
     const phone = customerPhone.trim();
+    const parsedShipping = shippingFeeInput.trim() ? Number.parseInt(shippingFeeInput.trim(), 10) : 0;
+    const parsedDiscountAmount = discountInput.trim() ? Number.parseInt(discountInput.trim(), 10) : 0;
 
     if (!name || !phone) {
       setErrorMessage("Nama pelanggan dan nomor HP wajib diisi.");
@@ -147,6 +190,16 @@ export function QuickActionScreen() {
 
     if (draftItems.length === 0) {
       setErrorMessage("Minimal satu item layanan wajib diisi.");
+      return;
+    }
+
+    if (!Number.isFinite(parsedShipping) || parsedShipping < 0) {
+      setErrorMessage("Ongkir harus berupa angka >= 0.");
+      return;
+    }
+
+    if (!Number.isFinite(parsedDiscountAmount) || parsedDiscountAmount < 0) {
+      setErrorMessage("Diskon harus berupa angka >= 0.");
       return;
     }
 
@@ -187,6 +240,8 @@ export function QuickActionScreen() {
           notes: customerNotes,
         },
         items: normalizedItems,
+        shippingFeeAmount: parsedShipping,
+        discountAmount: parsedDiscountAmount,
         notes: orderNotes,
       });
 
@@ -204,6 +259,10 @@ export function QuickActionScreen() {
 
   function renderItemDraft(item: DraftOrderItem, index: number) {
     const selectedService = services.find((service) => service.id === item.serviceId) ?? null;
+    const metricValue = Number.parseFloat(item.metricInput.trim());
+    const hasValidMetric = Number.isFinite(metricValue) && metricValue > 0;
+    const unitPrice = selectedService?.effective_price_amount ?? 0;
+    const lineSubtotal = selectedService && hasValidMetric ? Math.round(metricValue * unitPrice) : 0;
 
     return (
       <View key={item.id} style={styles.itemPanel}>
@@ -242,6 +301,16 @@ export function QuickActionScreen() {
           style={styles.input}
           value={item.metricInput}
         />
+        {selectedService ? (
+          <View style={styles.itemPriceInfo}>
+            <Text style={styles.itemPriceText}>
+              Harga satuan: {formatMoney(unitPrice)} / {selectedService.unit_type.toUpperCase()}
+            </Text>
+            <Text style={styles.itemPriceText}>
+              Subtotal item: {formatMoney(lineSubtotal)}
+            </Text>
+          </View>
+        ) : null}
       </View>
     );
   }
@@ -318,6 +387,22 @@ export function QuickActionScreen() {
             />
           </View>
           <TextInput
+            keyboardType="numeric"
+            onChangeText={setShippingFeeInput}
+            placeholder="Ongkir (opsional, angka)"
+            placeholderTextColor={theme.colors.textMuted}
+            style={styles.input}
+            value={shippingFeeInput}
+          />
+          <TextInput
+            keyboardType="numeric"
+            onChangeText={setDiscountInput}
+            placeholder="Diskon (opsional, angka)"
+            placeholderTextColor={theme.colors.textMuted}
+            style={styles.input}
+            value={discountInput}
+          />
+          <TextInput
             multiline
             onChangeText={setOrderNotes}
             placeholder="Catatan order (opsional)"
@@ -325,6 +410,35 @@ export function QuickActionScreen() {
             style={[styles.input, styles.notesInput]}
             value={orderNotes}
           />
+
+          <AppPanel style={styles.summaryPanel}>
+            <Text style={styles.formTitle}>Ringkasan Estimasi</Text>
+            {itemPricingPreview.map((item) => (
+              <View key={`summary-${item.id}`} style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>
+                  {item.label} - {item.service ? item.service.name : "Pilih layanan"}
+                </Text>
+                <Text style={styles.summaryValue}>{formatMoney(item.lineSubtotal)}</Text>
+              </View>
+            ))}
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Subtotal</Text>
+              <Text style={styles.summaryValue}>{formatMoney(estimatedSubtotal)}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Ongkir</Text>
+              <Text style={styles.summaryValue}>{formatMoney(parsedShippingFee)}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Diskon</Text>
+              <Text style={styles.summaryValue}>- {formatMoney(parsedDiscount)}</Text>
+            </View>
+            <View style={styles.summaryDivider} />
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryTotalLabel}>Estimasi Total</Text>
+              <Text style={styles.summaryTotalValue}>{formatMoney(estimatedTotal)}</Text>
+            </View>
+          </AppPanel>
 
           <View style={styles.formActions}>
             <AppButton disabled={submitting || services.length === 0} loading={submitting} onPress={() => void handleCreateOrder()} title="Simpan Order" />
@@ -469,6 +583,15 @@ function createStyles(theme: AppTheme) {
       justifyContent: "space-between",
       gap: theme.spacing.xs,
     },
+    itemPriceInfo: {
+      gap: 2,
+    },
+    itemPriceText: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 17,
+    },
     serviceList: {
       flexDirection: "row",
       flexWrap: "wrap",
@@ -496,6 +619,45 @@ function createStyles(theme: AppTheme) {
     },
     formActions: {
       gap: theme.spacing.xs,
+    },
+    summaryPanel: {
+      gap: 6,
+      borderColor: theme.colors.borderStrong,
+      backgroundColor: theme.colors.surfaceSoft,
+    },
+    summaryRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: theme.spacing.sm,
+    },
+    summaryLabel: {
+      flex: 1,
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    summaryValue: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+    },
+    summaryDivider: {
+      height: 1,
+      backgroundColor: theme.colors.border,
+      marginVertical: 2,
+    },
+    summaryTotalLabel: {
+      flex: 1,
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 13,
+    },
+    summaryTotalValue: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.heavy,
+      fontSize: 14,
     },
     followupPanel: {
       gap: theme.spacing.xs,

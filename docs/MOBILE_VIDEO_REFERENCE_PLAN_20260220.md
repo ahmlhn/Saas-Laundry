@@ -149,6 +149,14 @@ Referensi frame yang dianalisis:
 - Target outcome:
   - Entry order mobile lebih fleksibel untuk transaksi campuran layanan.
 
+### Fase 11 (Quick Action Pricing Summary)
+- Quick Action:
+  - Ringkasan subtotal per item sebelum submit.
+  - Estimasi total dengan komponen ongkir dan diskon.
+  - Feedback harga satuan layanan langsung di setiap item.
+- Target outcome:
+  - User bisa verifikasi nilai transaksi sebelum order disimpan.
+
 ## 5.1) Status Implementasi (Update 2026-02-21 - Fase 4)
 - Fase 1: selesai.
   - Bottom tab 5 menu aktif.
@@ -203,6 +211,10 @@ Referensi frame yang dianalisis:
   - Quick Action mendukung create order multi-item dalam satu submit.
   - User bisa menambah dan menghapus item layanan sebelum simpan.
   - Payload create order menggunakan array `items` ke `POST /api/orders`.
+- Fase 11: selesai (MOB-013).
+  - Quick Action menampilkan harga satuan dan subtotal di setiap item.
+  - Ringkasan estimasi total ditambahkan (subtotal, ongkir, diskon, grand total).
+  - Ongkir dan diskon bisa diinput sebelum submit order.
 
 ## 6) Mapping Fitur Ke API Existing
 - Auth:
