@@ -1,8 +1,9 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useMemo, useState } from "react";
 import * as ImagePicker from "expo-image-picker";
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
@@ -19,7 +20,12 @@ type Navigation = NativeStackNavigationProp<AccountStackParamList, "PrinterNote"
 
 export function PrinterNoteScreen() {
   const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const { width, height } = useWindowDimensions();
+  const minEdge = Math.min(width, height);
+  const isLandscape = width > height;
+  const isTablet = minEdge >= 600;
+  const isCompactLandscape = isLandscape && !isTablet;
+  const styles = useMemo(() => createStyles(theme, isTablet, isCompactLandscape), [theme, isTablet, isCompactLandscape]);
   const navigation = useNavigation<Navigation>();
   const { selectedOutlet } = useSession();
 
@@ -171,13 +177,20 @@ export function PrinterNoteScreen() {
 
   return (
     <AppScreen contentContainerStyle={styles.content} scroll>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Text style={styles.backButtonText}>Kembali</Text>
-        </Pressable>
+      <AppPanel style={styles.heroPanel}>
+        <View style={styles.heroTopRow}>
+          <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}>
+            <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={18} />
+          </Pressable>
+          <View style={styles.heroBadge}>
+            <Ionicons color={theme.colors.info} name="print-outline" size={15} />
+            <Text style={styles.heroBadgeText}>Printer & Nota</Text>
+          </View>
+          <View style={styles.heroSpacer} />
+        </View>
         <Text style={styles.title}>Printer & Nota</Text>
         <Text style={styles.subtitle}>Atur profil nota dan format nomor struk sesuai standar outlet.</Text>
-      </View>
+      </AppPanel>
 
       {loading || !form ? (
         <View style={styles.loadingWrap}>
@@ -193,6 +206,7 @@ export function PrinterNoteScreen() {
             </View>
             <AppButton
               disabled={uploadingLogo || !selectedOutlet}
+              leftElement={<Ionicons color={theme.colors.info} name="image-outline" size={17} />}
               loading={uploadingLogo}
               onPress={() => void handleUploadLogo()}
               title={form.logoUrl ? "Ganti Logo" : "Upload"}
@@ -291,17 +305,25 @@ export function PrinterNoteScreen() {
             <View style={[styles.toggleKnob, form.showCustomerReceipt ? styles.toggleKnobActive : null]} />
           </Pressable>
 
-          <AppButton disabled={saving} loading={saving} onPress={() => void handleSave()} title="Simpan" />
+          <AppButton
+            disabled={saving}
+            leftElement={<Ionicons color={theme.colors.primaryContrast} name="save-outline" size={17} />}
+            loading={saving}
+            onPress={() => void handleSave()}
+            title="Simpan"
+          />
         </AppPanel>
       )}
 
       {successMessage ? (
         <View style={styles.successWrap}>
+          <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={16} />
           <Text style={styles.successText}>{successMessage}</Text>
         </View>
       ) : null}
       {errorMessage ? (
         <View style={styles.errorWrap}>
+          <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
           <Text style={styles.errorText}>{errorMessage}</Text>
         </View>
       ) : null}
@@ -309,43 +331,71 @@ export function PrinterNoteScreen() {
   );
 }
 
-function createStyles(theme: AppTheme) {
+function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: boolean) {
   return StyleSheet.create({
     content: {
       flexGrow: 1,
-      paddingHorizontal: theme.spacing.lg,
-      paddingTop: theme.spacing.md,
+      paddingHorizontal: isTablet ? theme.spacing.xl : theme.spacing.lg,
+      paddingTop: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
       paddingBottom: theme.spacing.xxl,
+      gap: isCompactLandscape ? theme.spacing.xs : theme.spacing.sm,
+    },
+    heroPanel: {
+      gap: theme.spacing.xs,
+      backgroundColor: theme.mode === "dark" ? "#122d46" : "#f2faff",
+      borderColor: theme.colors.borderStrong,
+    },
+    heroTopRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
       gap: theme.spacing.sm,
     },
-    header: {
-      gap: 2,
+    heroIconButton: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surface,
+      width: 36,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
     },
-    backButton: {
-      alignSelf: "flex-start",
+    heroIconButtonPressed: {
+      opacity: 0.82,
+    },
+    heroBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
       borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surface,
-      paddingHorizontal: 12,
-      paddingVertical: 7,
-      marginBottom: 2,
+      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.92)",
+      paddingHorizontal: 10,
+      paddingVertical: 5,
     },
-    backButtonText: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 12,
+    heroBadgeText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.bold,
+      fontSize: 11,
+      letterSpacing: 0.2,
+      textTransform: "uppercase",
+    },
+    heroSpacer: {
+      width: 36,
+      height: 36,
     },
     title: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.heavy,
-      fontSize: 27,
-      lineHeight: 34,
+      fontSize: isTablet ? 27 : 24,
+      lineHeight: isTablet ? 33 : 30,
     },
     subtitle: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
-      fontSize: 12,
+      fontSize: 12.5,
       lineHeight: 18,
     },
     loadingWrap: {
@@ -360,11 +410,11 @@ function createStyles(theme: AppTheme) {
       fontSize: 12,
     },
     panel: {
-      gap: theme.spacing.xs,
+      gap: theme.spacing.sm,
     },
     rowBetween: {
-      flexDirection: "row",
-      alignItems: "flex-start",
+      flexDirection: isTablet || isCompactLandscape ? "row" : "column",
+      alignItems: isTablet || isCompactLandscape ? "flex-start" : "stretch",
       justifyContent: "space-between",
       gap: theme.spacing.sm,
     },
@@ -375,7 +425,7 @@ function createStyles(theme: AppTheme) {
     helper: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
-      fontSize: 11,
+      fontSize: 11.5,
       lineHeight: 16,
     },
     logoPreview: {
@@ -405,7 +455,7 @@ function createStyles(theme: AppTheme) {
     label: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 12,
+      fontSize: 12.5,
       marginTop: 2,
     },
     input: {
@@ -415,19 +465,20 @@ function createStyles(theme: AppTheme) {
       backgroundColor: theme.colors.inputBg,
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.medium,
-      fontSize: 13,
+      fontSize: isTablet ? 14 : 13,
       paddingHorizontal: 12,
       paddingVertical: 10,
     },
     notesInput: {
-      minHeight: 70,
+      minHeight: isTablet ? 88 : 70,
     },
     modeRow: {
-      flexDirection: "row",
+      flexDirection: isTablet || isCompactLandscape ? "row" : "column",
       gap: theme.spacing.xs,
     },
     modeOption: {
       flex: 1,
+      minWidth: isTablet || isCompactLandscape ? 160 : undefined,
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.md,
@@ -513,9 +564,13 @@ function createStyles(theme: AppTheme) {
       borderRadius: theme.radii.md,
       backgroundColor: theme.mode === "dark" ? "#173f2d" : "#edf9f1",
       paddingHorizontal: 12,
-      paddingVertical: 9,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
     },
     successText: {
+      flex: 1,
       color: theme.colors.success,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
@@ -527,9 +582,13 @@ function createStyles(theme: AppTheme) {
       borderRadius: theme.radii.md,
       backgroundColor: theme.mode === "dark" ? "#482633" : "#fff1f4",
       paddingHorizontal: 12,
-      paddingVertical: 9,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
     },
     errorText: {
+      flex: 1,
       color: theme.colors.danger,
       fontFamily: theme.fonts.medium,
       fontSize: 12,

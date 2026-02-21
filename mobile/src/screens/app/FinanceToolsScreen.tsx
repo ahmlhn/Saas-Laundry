@@ -1,7 +1,8 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
@@ -93,7 +94,12 @@ function entryTypeTone(type: BillingEntryType): "success" | "danger" | "warning"
 
 export function FinanceToolsScreen() {
   const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const { width, height } = useWindowDimensions();
+  const minEdge = Math.min(width, height);
+  const isLandscape = width > height;
+  const isTablet = minEdge >= 600;
+  const isCompactLandscape = isLandscape && !isTablet;
+  const styles = useMemo(() => createStyles(theme, isTablet, isCompactLandscape), [theme, isTablet, isCompactLandscape]);
   const navigation = useNavigation<Navigation>();
   const { session, selectedOutlet } = useSession();
   const roles = session?.roles ?? [];
@@ -177,6 +183,7 @@ export function FinanceToolsScreen() {
     net_amount: 0,
     entries_count: 0,
   };
+  const outletLabel = selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "Pilih outlet aktif untuk ringkasan keuangan.";
 
   function handleTypeChange(nextType: BillingEntryType): void {
     setEntryType(nextType);
@@ -262,18 +269,28 @@ export function FinanceToolsScreen() {
 
   return (
     <AppScreen contentContainerStyle={styles.content} scroll>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Text style={styles.backButtonText}>Kembali</Text>
-        </Pressable>
+      <AppPanel style={styles.heroPanel}>
+        <View style={styles.heroTopRow}>
+          <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}>
+            <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={18} />
+          </Pressable>
+          <View style={styles.heroBadge}>
+            <Ionicons color={theme.colors.info} name="wallet-outline" size={15} />
+            <Text style={styles.heroBadgeText}>Finance Tools</Text>
+          </View>
+          <Pressable onPress={() => void loadData(true)} style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}>
+            <Ionicons color={theme.colors.textSecondary} name="refresh-outline" size={18} />
+          </Pressable>
+        </View>
         <Text style={styles.title}>Kelola Keuangan</Text>
-        <Text style={styles.subtitle}>
-          {selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "Pilih outlet aktif untuk ringkasan keuangan."}
+        <Text numberOfLines={2} style={styles.subtitle}>
+          {outletLabel}
         </Text>
-      </View>
+      </AppPanel>
 
       {!canManageFinance ? (
         <View style={styles.warningWrap}>
+          <Ionicons color={theme.colors.warning} name="alert-circle-outline" size={16} />
           <StatusPill label="Read-only" tone="warning" />
           <Text style={styles.warningText}>Role saat ini tidak bisa melakukan aksi koreksi keuangan. Ringkasan tetap bisa dipantau.</Text>
         </View>
@@ -281,8 +298,17 @@ export function FinanceToolsScreen() {
 
       <AppPanel style={styles.panel}>
         <View style={styles.panelTop}>
-          <Text style={styles.sectionTitle}>Kuota & Subscription</Text>
-          <AppButton disabled={refreshing} onPress={() => void loadData(true)} title="Refresh" variant="secondary" />
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Kuota & Subscription</Text>
+            <Ionicons color={theme.colors.info} name="layers-outline" size={16} />
+          </View>
+          <AppButton
+            disabled={refreshing}
+            leftElement={<Ionicons color={theme.colors.info} name="refresh-outline" size={17} />}
+            onPress={() => void loadData(true)}
+            title="Refresh"
+            variant="secondary"
+          />
         </View>
 
         {loading ? (
@@ -317,7 +343,10 @@ export function FinanceToolsScreen() {
       </AppPanel>
 
       <AppPanel style={styles.panel}>
-        <Text style={styles.sectionTitle}>Snapshot Kas Operasional (Order)</Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Snapshot Kas Operasional (Order)</Text>
+          <Ionicons color={theme.colors.info} name="analytics-outline" size={16} />
+        </View>
         {loading ? (
           <View style={styles.loadingWrap}>
             <ActivityIndicator color={theme.colors.primaryStrong} />
@@ -347,7 +376,10 @@ export function FinanceToolsScreen() {
       </AppPanel>
 
       <AppPanel style={styles.panel}>
-        <Text style={styles.sectionTitle}>Jurnal Keuangan Non-Order</Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Jurnal Keuangan Non-Order</Text>
+          <Ionicons color={theme.colors.info} name="document-text-outline" size={16} />
+        </View>
         <View style={styles.financeGrid}>
           <View style={styles.financeCard}>
             <Text style={styles.financeValue}>{formatMoney(financeSummary.total_income)}</Text>
@@ -420,6 +452,7 @@ export function FinanceToolsScreen() {
 
             <AppButton
               disabled={submittingEntry || refreshing}
+              leftElement={<Ionicons color={theme.colors.primaryContrast} name="save-outline" size={17} />}
               loading={submittingEntry}
               onPress={() => void handleCreateEntry()}
               title={`Simpan ${entryTypeLabel(entryType)}`}
@@ -431,7 +464,10 @@ export function FinanceToolsScreen() {
       </AppPanel>
 
       <AppPanel style={styles.panel}>
-        <Text style={styles.sectionTitle}>Riwayat Jurnal Terbaru</Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Riwayat Jurnal Terbaru</Text>
+          <Ionicons color={theme.colors.info} name="time-outline" size={16} />
+        </View>
         {loading ? (
           <View style={styles.loadingWrap}>
             <ActivityIndicator color={theme.colors.primaryStrong} />
@@ -462,11 +498,13 @@ export function FinanceToolsScreen() {
 
       {actionMessage ? (
         <View style={styles.successWrap}>
+          <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={16} />
           <Text style={styles.successText}>{actionMessage}</Text>
         </View>
       ) : null}
       {errorMessage ? (
         <View style={styles.errorWrap}>
+          <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
           <Text style={styles.errorText}>{errorMessage}</Text>
         </View>
       ) : null}
@@ -474,49 +512,76 @@ export function FinanceToolsScreen() {
   );
 }
 
-function createStyles(theme: AppTheme) {
+function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: boolean) {
   return StyleSheet.create({
     content: {
       flexGrow: 1,
-      paddingHorizontal: theme.spacing.lg,
-      paddingTop: theme.spacing.md,
+      paddingHorizontal: isTablet ? theme.spacing.xl : theme.spacing.lg,
+      paddingTop: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
       paddingBottom: theme.spacing.xxl,
+      gap: isCompactLandscape ? theme.spacing.xs : theme.spacing.sm,
+    },
+    heroPanel: {
+      gap: theme.spacing.xs,
+      backgroundColor: theme.mode === "dark" ? "#122d46" : "#f2faff",
+      borderColor: theme.colors.borderStrong,
+    },
+    heroTopRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
       gap: theme.spacing.sm,
     },
-    header: {
-      gap: 2,
+    heroIconButton: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surface,
+      width: 36,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
     },
-    backButton: {
-      alignSelf: "flex-start",
+    heroIconButtonPressed: {
+      opacity: 0.82,
+    },
+    heroBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
       borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surface,
-      paddingHorizontal: 12,
-      paddingVertical: 7,
-      marginBottom: 2,
+      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.92)",
+      paddingHorizontal: 10,
+      paddingVertical: 5,
     },
-    backButtonText: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 12,
+    heroBadgeText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.bold,
+      fontSize: 11,
+      letterSpacing: 0.2,
+      textTransform: "uppercase",
     },
     title: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.heavy,
-      fontSize: 27,
-      lineHeight: 34,
+      fontSize: isTablet ? 27 : 24,
+      lineHeight: isTablet ? 33 : 30,
     },
     subtitle: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
-      fontSize: 12,
+      fontSize: 12.5,
       lineHeight: 18,
     },
     panel: {
       gap: theme.spacing.sm,
     },
     panelTop: {
+      gap: theme.spacing.xs,
+    },
+    sectionHeaderRow: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
@@ -525,7 +590,7 @@ function createStyles(theme: AppTheme) {
     sectionTitle: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
-      fontSize: 16,
+      fontSize: isTablet ? 16 : 15,
       flex: 1,
     },
     loadingWrap: {
@@ -555,12 +620,17 @@ function createStyles(theme: AppTheme) {
     metricValue: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 13,
+      fontSize: isTablet ? 14 : 13,
     },
     financeGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
       gap: theme.spacing.xs,
     },
     financeCard: {
+      minWidth: isTablet ? 190 : 150,
+      flexGrow: 1,
+      flexBasis: isCompactLandscape ? "24%" : "48%",
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.md,
@@ -572,7 +642,7 @@ function createStyles(theme: AppTheme) {
     financeValue: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
-      fontSize: 14,
+      fontSize: isTablet ? 15 : 14,
     },
     dueValue: {
       color: theme.colors.warning,
@@ -595,7 +665,7 @@ function createStyles(theme: AppTheme) {
       borderTopWidth: 1,
       borderTopColor: theme.colors.border,
       marginTop: 4,
-      paddingTop: 10,
+      paddingTop: 12,
       gap: theme.spacing.xs,
     },
     formTitle: {
@@ -604,11 +674,13 @@ function createStyles(theme: AppTheme) {
       fontSize: 14,
     },
     typeRow: {
-      flexDirection: "row",
+      flexDirection: isTablet || isCompactLandscape ? "row" : "column",
+      flexWrap: "wrap",
       gap: theme.spacing.xs,
     },
     typeCard: {
       flex: 1,
+      minWidth: isTablet || isCompactLandscape ? 160 : undefined,
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.md,
@@ -650,12 +722,12 @@ function createStyles(theme: AppTheme) {
       backgroundColor: theme.colors.inputBg,
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.medium,
-      fontSize: 13,
+      fontSize: isTablet ? 14 : 13,
       paddingHorizontal: 12,
       paddingVertical: 10,
     },
     notesInput: {
-      minHeight: 68,
+      minHeight: isTablet ? 84 : 68,
     },
     entryList: {
       gap: theme.spacing.xs,
@@ -687,7 +759,7 @@ function createStyles(theme: AppTheme) {
     entryCategory: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 13,
+      fontSize: isTablet ? 14 : 13,
     },
     entryNotes: {
       color: theme.colors.textMuted,
@@ -698,7 +770,7 @@ function createStyles(theme: AppTheme) {
     entryAmount: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
-      fontSize: 13,
+      fontSize: isTablet ? 14 : 13,
       marginTop: 1,
     },
     warningWrap: {
@@ -707,10 +779,14 @@ function createStyles(theme: AppTheme) {
       borderRadius: theme.radii.md,
       backgroundColor: theme.mode === "dark" ? "#3f3117" : "#fff8ea",
       paddingHorizontal: 12,
-      paddingVertical: 9,
-      gap: 6,
+      paddingVertical: 10,
+      gap: 7,
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
     },
     warningText: {
+      flex: 1,
       color: theme.colors.warning,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
@@ -722,9 +798,13 @@ function createStyles(theme: AppTheme) {
       borderRadius: theme.radii.md,
       backgroundColor: theme.mode === "dark" ? "#173f2d" : "#edf9f1",
       paddingHorizontal: 12,
-      paddingVertical: 9,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
     },
     successText: {
+      flex: 1,
       color: theme.colors.success,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
@@ -736,9 +816,13 @@ function createStyles(theme: AppTheme) {
       borderRadius: theme.radii.md,
       backgroundColor: theme.mode === "dark" ? "#482633" : "#fff1f4",
       paddingHorizontal: 12,
-      paddingVertical: 9,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
     },
     errorText: {
+      flex: 1,
       color: theme.colors.danger,
       fontFamily: theme.fonts.medium,
       fontSize: 12,

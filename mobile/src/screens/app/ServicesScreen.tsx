@@ -1,9 +1,11 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useMemo, useState } from "react";
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
+import { AppPanel } from "../../components/ui/AppPanel";
 import { AppSkeletonBlock } from "../../components/ui/AppSkeletonBlock";
 import { StatusPill } from "../../components/ui/StatusPill";
 import { archiveService, listServices, restoreService } from "../../features/services/serviceApi";
@@ -40,7 +42,12 @@ function formatUnitType(value: string): string {
 
 export function ServicesScreen() {
   const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const { width, height } = useWindowDimensions();
+  const minEdge = Math.min(width, height);
+  const isLandscape = width > height;
+  const isTablet = minEdge >= 600;
+  const isCompactLandscape = isLandscape && !isTablet;
+  const styles = useMemo(() => createStyles(theme, isTablet, isCompactLandscape), [theme, isTablet, isCompactLandscape]);
   const navigation = useNavigation<NativeStackNavigationProp<AccountStackParamList, "Services">>();
   const { session, selectedOutlet } = useSession();
   const roles = session?.roles ?? [];
@@ -55,6 +62,7 @@ export function ServicesScreen() {
   const [onlyActive, setOnlyActive] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const outletLabel = selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "Semua outlet";
 
   useEffect(() => {
     if (!canView) {
@@ -174,7 +182,12 @@ export function ServicesScreen() {
 
         {canArchive ? (
           <View style={styles.actionRow}>
-            <AppButton onPress={() => void handleToggleArchive(item)} title={item.deleted_at ? "Restore" : "Arsipkan"} variant="ghost" />
+            <AppButton
+              leftElement={<Ionicons color={theme.colors.textPrimary} name={item.deleted_at ? "refresh-outline" : "archive-outline"} size={17} />}
+              onPress={() => void handleToggleArchive(item)}
+              title={item.deleted_at ? "Restore" : "Arsipkan"}
+              variant="ghost"
+            />
           </View>
         ) : null}
       </View>
@@ -184,28 +197,42 @@ export function ServicesScreen() {
   if (!canView) {
     return (
       <AppScreen contentContainerStyle={styles.content} scroll>
-        <View style={styles.header}>
-          <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Text style={styles.backButtonText}>Kembali</Text>
-          </Pressable>
+        <AppPanel style={styles.heroPanel}>
+          <View style={styles.heroTopRow}>
+            <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}>
+              <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={18} />
+            </Pressable>
+            <View style={styles.heroBadge}>
+              <Ionicons color={theme.colors.info} name="cube-outline" size={15} />
+              <Text style={styles.heroBadgeText}>Layanan/Produk</Text>
+            </View>
+            <View style={styles.heroSpacer} />
+          </View>
           <Text style={styles.title}>Layanan/Produk</Text>
           <Text style={styles.subtitle}>Akun Anda tidak memiliki akses untuk membuka modul ini.</Text>
-        </View>
+        </AppPanel>
       </AppScreen>
     );
   }
 
   return (
     <AppScreen contentContainerStyle={styles.content} scroll>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Text style={styles.backButtonText}>Kembali</Text>
-        </Pressable>
+      <AppPanel style={styles.heroPanel}>
+        <View style={styles.heroTopRow}>
+          <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}>
+            <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={18} />
+          </Pressable>
+          <View style={styles.heroBadge}>
+            <Ionicons color={theme.colors.info} name="cube-outline" size={15} />
+            <Text style={styles.heroBadgeText}>Layanan/Produk</Text>
+          </View>
+          <Pressable onPress={() => void loadServices(true, true)} style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}>
+            <Ionicons color={theme.colors.textSecondary} name="refresh-outline" size={18} />
+          </Pressable>
+        </View>
         <Text style={styles.title}>Layanan/Produk</Text>
-        <Text style={styles.subtitle}>
-          {selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "Semua outlet"} - Kelola katalog layanan tenant.
-        </Text>
-      </View>
+        <Text style={styles.subtitle}>{outletLabel} - Kelola katalog layanan tenant.</Text>
+      </AppPanel>
 
       <View style={styles.searchRow}>
         <TextInput
@@ -215,7 +242,12 @@ export function ServicesScreen() {
           style={styles.searchInput}
           value={search}
         />
-        <AppButton onPress={() => void loadServices(true, true)} title="Refresh" variant="secondary" />
+        <AppButton
+          leftElement={<Ionicons color={theme.colors.info} name="refresh-outline" size={17} />}
+          onPress={() => void loadServices(true, true)}
+          title="Refresh"
+          variant="secondary"
+        />
       </View>
 
       <View style={styles.filterRow}>
@@ -251,11 +283,13 @@ export function ServicesScreen() {
 
       {actionMessage ? (
         <View style={styles.successWrap}>
+          <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={16} />
           <Text style={styles.successText}>{actionMessage}</Text>
         </View>
       ) : null}
       {errorMessage ? (
         <View style={styles.errorWrap}>
+          <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
           <Text style={styles.errorText}>{errorMessage}</Text>
         </View>
       ) : null}
@@ -263,59 +297,87 @@ export function ServicesScreen() {
   );
 }
 
-function createStyles(theme: AppTheme) {
+function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: boolean) {
   return StyleSheet.create({
     content: {
       flexGrow: 1,
-      paddingHorizontal: theme.spacing.lg,
-      paddingTop: theme.spacing.md,
+      paddingHorizontal: isTablet ? theme.spacing.xl : theme.spacing.lg,
+      paddingTop: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
       paddingBottom: theme.spacing.xxl,
+      gap: isCompactLandscape ? theme.spacing.xs : theme.spacing.sm,
+    },
+    heroPanel: {
+      gap: theme.spacing.xs,
+      backgroundColor: theme.mode === "dark" ? "#122d46" : "#f2faff",
+      borderColor: theme.colors.borderStrong,
+    },
+    heroTopRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
       gap: theme.spacing.sm,
     },
-    header: {
-      gap: 2,
+    heroIconButton: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surface,
+      width: 36,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
     },
-    backButton: {
-      alignSelf: "flex-start",
+    heroIconButtonPressed: {
+      opacity: 0.82,
+    },
+    heroBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
       borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surface,
-      paddingHorizontal: 12,
-      paddingVertical: 7,
-      marginBottom: 2,
+      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.92)",
+      paddingHorizontal: 10,
+      paddingVertical: 5,
     },
-    backButtonText: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 12,
+    heroBadgeText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.bold,
+      fontSize: 11,
+      letterSpacing: 0.2,
+      textTransform: "uppercase",
+    },
+    heroSpacer: {
+      width: 36,
+      height: 36,
     },
     title: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.heavy,
-      fontSize: 27,
-      lineHeight: 34,
+      fontSize: isTablet ? 27 : 24,
+      lineHeight: isTablet ? 33 : 30,
     },
     subtitle: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
-      fontSize: 12,
+      fontSize: 12.5,
       lineHeight: 18,
     },
     searchRow: {
-      flexDirection: "row",
+      flexDirection: isTablet || isCompactLandscape ? "row" : "column",
       gap: theme.spacing.xs,
-      alignItems: "center",
+      alignItems: isTablet || isCompactLandscape ? "center" : "stretch",
     },
     searchInput: {
-      flex: 1,
+      flex: isTablet || isCompactLandscape ? 1 : undefined,
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
       borderRadius: theme.radii.md,
       backgroundColor: theme.colors.inputBg,
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.medium,
-      fontSize: 13,
+      fontSize: isTablet ? 14 : 13,
       paddingHorizontal: 12,
       paddingVertical: 10,
     },
@@ -340,7 +402,7 @@ function createStyles(theme: AppTheme) {
     toggleChipText: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 12,
+      fontSize: 11.5,
     },
     toggleChipTextActive: {
       color: theme.colors.info,
@@ -363,11 +425,11 @@ function createStyles(theme: AppTheme) {
     },
     serviceCard: {
       borderWidth: 1,
-      borderColor: theme.colors.border,
+      borderColor: theme.colors.borderStrong,
       borderRadius: theme.radii.lg,
       backgroundColor: theme.colors.surface,
       paddingHorizontal: 12,
-      paddingVertical: 11,
+      paddingVertical: 12,
       gap: 8,
     },
     serviceTop: {
@@ -383,7 +445,7 @@ function createStyles(theme: AppTheme) {
     serviceName: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 14,
+      fontSize: isTablet ? 15 : 14,
     },
     serviceMeta: {
       color: theme.colors.textSecondary,
@@ -414,9 +476,13 @@ function createStyles(theme: AppTheme) {
       borderRadius: theme.radii.md,
       backgroundColor: theme.mode === "dark" ? "#173f2d" : "#edf9f1",
       paddingHorizontal: 12,
-      paddingVertical: 9,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
     },
     successText: {
+      flex: 1,
       color: theme.colors.success,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
@@ -428,9 +494,13 @@ function createStyles(theme: AppTheme) {
       borderRadius: theme.radii.md,
       backgroundColor: theme.mode === "dark" ? "#482633" : "#fff1f4",
       paddingHorizontal: 12,
-      paddingVertical: 9,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
     },
     errorText: {
+      flex: 1,
       color: theme.colors.danger,
       fontFamily: theme.fonts.medium,
       fontSize: 12,

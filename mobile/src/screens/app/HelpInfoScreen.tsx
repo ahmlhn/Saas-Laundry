@@ -1,10 +1,10 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useMemo, useState } from "react";
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppPanel } from "../../components/ui/AppPanel";
-import { StatusPill } from "../../components/ui/StatusPill";
 import { clearQueryCache } from "../../lib/queryCache";
 import type { AccountStackParamList } from "../../navigation/types";
 import type { AppTheme } from "../../theme/useAppTheme";
@@ -38,9 +38,46 @@ const INFO_ITEMS: HelpItem[] = [
   { key: "about", title: "Tentang Aplikasi", description: "Informasi versi, build, dan lisensi aplikasi." },
 ];
 
+function resolveHelpIcon(key: string): keyof typeof Ionicons.glyphMap {
+  if (key === "reset" || key === "clear-cache") {
+    return "refresh-outline";
+  }
+
+  if (key === "check-update" || key === "latest") {
+    return "sparkles-outline";
+  }
+
+  if (key === "trial") {
+    return "pricetag-outline";
+  }
+
+  if (key === "training" || key === "video") {
+    return "play-circle-outline";
+  }
+
+  if (key === "faq") {
+    return "help-buoy-outline";
+  }
+
+  if (key === "support" || key === "contact") {
+    return "chatbubble-ellipses-outline";
+  }
+
+  if (key === "privacy" || key === "tos") {
+    return "shield-checkmark-outline";
+  }
+
+  return "information-circle-outline";
+}
+
 export function HelpInfoScreen() {
   const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const { width, height } = useWindowDimensions();
+  const minEdge = Math.min(width, height);
+  const isLandscape = width > height;
+  const isTablet = minEdge >= 600;
+  const isCompactLandscape = isLandscape && !isTablet;
+  const styles = useMemo(() => createStyles(theme, isTablet, isCompactLandscape), [theme, isTablet, isCompactLandscape]);
   const navigation = useNavigation<Navigation>();
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
@@ -76,43 +113,58 @@ export function HelpInfoScreen() {
 
   return (
     <AppScreen contentContainerStyle={styles.content} scroll>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Text style={styles.backButtonText}>Kembali</Text>
-        </Pressable>
+      <AppPanel style={styles.heroPanel}>
+        <View style={styles.heroTopRow}>
+          <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}>
+            <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={18} />
+          </Pressable>
+          <View style={styles.heroBadge}>
+            <Ionicons color={theme.colors.info} name="help-circle-outline" size={15} />
+            <Text style={styles.heroBadgeText}>Bantuan</Text>
+          </View>
+          <View style={styles.heroSpacer} />
+        </View>
         <Text style={styles.title}>Bantuan & Informasi</Text>
         <Text style={styles.subtitle}>Semua pusat bantuan operasional tenant tersedia dari menu ini.</Text>
-      </View>
+      </AppPanel>
 
       <AppPanel style={styles.panel}>
-        <Text style={styles.sectionTitle}>Bantuan</Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Bantuan</Text>
+          <Ionicons color={theme.colors.info} name="construct-outline" size={16} />
+        </View>
         <View style={styles.listWrap}>
           {HELP_ITEMS.map((item) => (
-            <Pressable key={item.key} onPress={() => void handlePress(item)} style={styles.itemRow}>
+            <Pressable key={item.key} onPress={() => void handlePress(item)} style={({ pressed }) => [styles.itemRow, pressed ? styles.itemRowPressed : null]}>
               <View style={styles.iconChip}>
-                <Text style={styles.iconText}>i</Text>
+                <Ionicons color={theme.colors.info} name={resolveHelpIcon(item.key)} size={15} />
               </View>
               <View style={styles.itemTextWrap}>
                 <Text style={styles.itemTitle}>{item.title}</Text>
                 <Text style={styles.itemDescription}>{item.description}</Text>
               </View>
+              <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={16} />
             </Pressable>
           ))}
         </View>
       </AppPanel>
 
       <AppPanel style={styles.panel}>
-        <Text style={styles.sectionTitle}>Informasi</Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Informasi</Text>
+          <Ionicons color={theme.colors.info} name="newspaper-outline" size={16} />
+        </View>
         <View style={styles.listWrap}>
           {INFO_ITEMS.map((item) => (
-            <Pressable key={item.key} onPress={() => void handlePress(item)} style={styles.itemRow}>
+            <Pressable key={item.key} onPress={() => void handlePress(item)} style={({ pressed }) => [styles.itemRow, pressed ? styles.itemRowPressed : null]}>
               <View style={styles.iconChip}>
-                <Text style={styles.iconText}>i</Text>
+                <Ionicons color={theme.colors.info} name={resolveHelpIcon(item.key)} size={15} />
               </View>
               <View style={styles.itemTextWrap}>
                 <Text style={styles.itemTitle}>{item.title}</Text>
                 <Text style={styles.itemDescription}>{item.description}</Text>
               </View>
+              <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={16} />
             </Pressable>
           ))}
         </View>
@@ -120,7 +172,7 @@ export function HelpInfoScreen() {
 
       {actionMessage ? (
         <View style={styles.infoWrap}>
-          <StatusPill label="Info" tone="info" />
+          <Ionicons color={theme.colors.info} name="information-circle-outline" size={16} />
           <Text style={styles.infoText}>{actionMessage}</Text>
         </View>
       ) : null}
@@ -128,55 +180,89 @@ export function HelpInfoScreen() {
   );
 }
 
-function createStyles(theme: AppTheme) {
+function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: boolean) {
   return StyleSheet.create({
     content: {
       flexGrow: 1,
-      paddingHorizontal: theme.spacing.lg,
-      paddingTop: theme.spacing.md,
+      paddingHorizontal: isTablet ? theme.spacing.xl : theme.spacing.lg,
+      paddingTop: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
       paddingBottom: theme.spacing.xxl,
+      gap: isCompactLandscape ? theme.spacing.xs : theme.spacing.sm,
+    },
+    heroPanel: {
+      gap: theme.spacing.xs,
+      backgroundColor: theme.mode === "dark" ? "#122d46" : "#f2faff",
+      borderColor: theme.colors.borderStrong,
+    },
+    heroTopRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
       gap: theme.spacing.sm,
     },
-    header: {
-      gap: 2,
+    heroIconButton: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surface,
+      width: 36,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
     },
-    backButton: {
-      alignSelf: "flex-start",
+    heroIconButtonPressed: {
+      opacity: 0.82,
+    },
+    heroBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
       borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surface,
-      paddingHorizontal: 12,
-      paddingVertical: 7,
-      marginBottom: 2,
+      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.92)",
+      paddingHorizontal: 10,
+      paddingVertical: 5,
     },
-    backButtonText: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 12,
+    heroBadgeText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.bold,
+      fontSize: 11,
+      letterSpacing: 0.2,
+      textTransform: "uppercase",
+    },
+    heroSpacer: {
+      width: 36,
+      height: 36,
     },
     title: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.heavy,
-      fontSize: 27,
-      lineHeight: 34,
+      fontSize: isTablet ? 27 : 24,
+      lineHeight: isTablet ? 33 : 30,
     },
     subtitle: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
-      fontSize: 12,
+      fontSize: 12.5,
       lineHeight: 18,
     },
     panel: {
-      gap: theme.spacing.xs,
+      gap: theme.spacing.sm,
+    },
+    sectionHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
     },
     sectionTitle: {
-      color: theme.colors.warning,
+      color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
-      fontSize: 15,
+      fontSize: isTablet ? 16 : 15,
     },
     listWrap: {
-      gap: 2,
+      gap: 4,
     },
     itemRow: {
       flexDirection: "row",
@@ -184,22 +270,22 @@ function createStyles(theme: AppTheme) {
       gap: theme.spacing.sm,
       borderBottomWidth: 1,
       borderBottomColor: theme.colors.border,
-      paddingVertical: 10,
+      borderRadius: theme.radii.sm,
+      paddingVertical: 11,
+      paddingHorizontal: 2,
+    },
+    itemRowPressed: {
+      opacity: 0.8,
     },
     iconChip: {
-      width: 28,
-      height: 28,
+      width: 30,
+      height: 30,
       borderRadius: 999,
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
       backgroundColor: theme.colors.primarySoft,
       alignItems: "center",
       justifyContent: "center",
-    },
-    iconText: {
-      color: theme.colors.info,
-      fontFamily: theme.fonts.bold,
-      fontSize: 12,
     },
     itemTextWrap: {
       flex: 1,
@@ -208,12 +294,12 @@ function createStyles(theme: AppTheme) {
     itemTitle: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 14,
+      fontSize: isTablet ? 14.5 : 14,
     },
     itemDescription: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
-      fontSize: 11,
+      fontSize: 11.5,
       lineHeight: 16,
     },
     infoWrap: {
@@ -223,9 +309,12 @@ function createStyles(theme: AppTheme) {
       backgroundColor: theme.mode === "dark" ? "#162f46" : "#eff6ff",
       paddingHorizontal: 12,
       paddingVertical: 10,
-      gap: 6,
+      gap: 8,
+      flexDirection: "row",
+      alignItems: "center",
     },
     infoText: {
+      flex: 1,
       color: theme.colors.info,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
