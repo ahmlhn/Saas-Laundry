@@ -1,7 +1,8 @@
+import { Ionicons } from "@expo/vector-icons";
 import type { NavigationProp } from "@react-navigation/native";
 import { useNavigation } from "@react-navigation/native";
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
@@ -76,7 +77,12 @@ function formatMoney(value: number): string {
 
 export function QuickActionScreen() {
   const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const { width, height } = useWindowDimensions();
+  const minEdge = Math.min(width, height);
+  const isLandscape = width > height;
+  const isTablet = minEdge >= 600;
+  const isCompactLandscape = isLandscape && !isTablet;
+  const styles = useMemo(() => createStyles(theme, isTablet, isCompactLandscape), [theme, isTablet, isCompactLandscape]);
   const navigation = useNavigation<NavigationProp<AppTabParamList>>();
   const { session, selectedOutlet, refreshSession } = useSession();
   const roles = session?.roles ?? [];
@@ -246,6 +252,13 @@ export function QuickActionScreen() {
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
   }, [discountInput]);
   const estimatedTotal = useMemo(() => Math.max(estimatedSubtotal + parsedShippingFee - parsedDiscount, 0), [estimatedSubtotal, parsedShippingFee, parsedDiscount]);
+  const outletLabel = selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "Outlet belum dipilih";
+  const servicesStatusLabel = loadingServices
+    ? "Memuat layanan aktif..."
+    : services.length > 0
+      ? `${services.length} layanan aktif siap dipakai`
+      : "Belum ada layanan aktif";
+  const createButtonDisabled = !canCreateOrder || loadingServices || services.length === 0;
 
   async function handleCreateOrder(): Promise<void> {
     if (!selectedOutlet || !canCreateOrder || submitting) {
@@ -348,33 +361,36 @@ export function QuickActionScreen() {
           <Text style={styles.inputLabel}>Item {index + 1}</Text>
           <View style={styles.itemHeaderActions}>
             <Pressable
+              accessibilityLabel="Pindahkan item ke atas"
               disabled={!canMoveUp}
               onPress={() => handleMoveItem(item.id, "up")}
               style={({ pressed }) => [
-                styles.headerActionButton,
-                !canMoveUp ? styles.headerActionButtonDisabled : null,
-                canMoveUp && pressed ? styles.headerActionButtonPressed : null,
+                styles.headerActionIconButton,
+                !canMoveUp ? styles.headerActionIconButtonDisabled : null,
+                canMoveUp && pressed ? styles.headerActionIconButtonPressed : null,
               ]}
             >
-              <Text style={[styles.headerActionText, !canMoveUp ? styles.headerActionTextDisabled : null]}>Naik</Text>
+              <Ionicons color={canMoveUp ? theme.colors.textSecondary : theme.colors.textMuted} name="arrow-up" size={14} />
             </Pressable>
             <Pressable
+              accessibilityLabel="Pindahkan item ke bawah"
               disabled={!canMoveDown}
               onPress={() => handleMoveItem(item.id, "down")}
               style={({ pressed }) => [
-                styles.headerActionButton,
-                !canMoveDown ? styles.headerActionButtonDisabled : null,
-                canMoveDown && pressed ? styles.headerActionButtonPressed : null,
+                styles.headerActionIconButton,
+                !canMoveDown ? styles.headerActionIconButtonDisabled : null,
+                canMoveDown && pressed ? styles.headerActionIconButtonPressed : null,
               ]}
             >
-              <Text style={[styles.headerActionText, !canMoveDown ? styles.headerActionTextDisabled : null]}>Turun</Text>
+              <Ionicons color={canMoveDown ? theme.colors.textSecondary : theme.colors.textMuted} name="arrow-down" size={14} />
             </Pressable>
             {draftItems.length > 1 ? (
               <Pressable
+                accessibilityLabel="Hapus item layanan"
                 onPress={() => handleRemoveItem(item.id)}
-                style={({ pressed }) => [styles.headerActionButton, pressed ? styles.headerActionButtonPressed : null]}
+                style={({ pressed }) => [styles.headerActionIconButton, pressed ? styles.headerActionIconButtonPressed : null]}
               >
-                <Text style={styles.headerActionDangerText}>Hapus</Text>
+                <Ionicons color={theme.colors.danger} name="trash-outline" size={14} />
               </Pressable>
             ) : null}
           </View>
@@ -442,16 +458,46 @@ export function QuickActionScreen() {
 
   return (
     <AppScreen contentContainerStyle={styles.content} scroll>
-      <View style={styles.header}>
-        <Text style={styles.title}>Quick Action</Text>
-        <Text style={styles.subtitle}>{selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "Outlet belum dipilih"}</Text>
-      </View>
+      <AppPanel style={styles.heroPanel}>
+        <View style={styles.heroTopRow}>
+          <View style={styles.heroBadge}>
+            <Ionicons color={theme.colors.info} name="flash-outline" size={16} />
+            <Text style={styles.heroBadgeText}>Quick Action</Text>
+          </View>
+          <Text style={styles.heroOutletMeta}>{outletLabel}</Text>
+        </View>
+        <Text style={styles.title}>Aksi Cepat Operasional</Text>
+        <Text style={styles.subtitle}>Buat order baru, kelola item layanan, dan lanjutkan ke detail order dari satu layar.</Text>
+        <View style={styles.heroMetaWrap}>
+          <View style={styles.heroMetaChip}>
+            <Ionicons color={theme.colors.textMuted} name="pricetag-outline" size={14} />
+            <Text numberOfLines={1} style={styles.heroMetaText}>
+              {servicesStatusLabel}
+            </Text>
+          </View>
+          <View style={styles.heroMetaChip}>
+            <Ionicons color={theme.colors.textMuted} name={canCreateOrder ? "shield-checkmark-outline" : "shield-outline"} size={14} />
+            <Text numberOfLines={1} style={styles.heroMetaText}>
+              {canCreateOrder ? "Akses pembuatan order aktif" : "Akses pembuatan order terbatas"}
+            </Text>
+          </View>
+        </View>
+      </AppPanel>
 
       <AppPanel style={styles.panel}>
-        <Text style={styles.sectionTitle}>Aksi Cepat Operasional</Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Aksi Inti</Text>
+          <Text style={styles.sectionMeta}>{showCreateForm ? "Form aktif" : "Siap dipakai"}</Text>
+        </View>
         <View style={styles.actionList}>
-          <AppButton disabled={!canCreateOrder || loadingServices || services.length === 0} onPress={() => setShowCreateForm((value) => !value)} title={showCreateForm ? "Tutup Form Order" : "Buat Order Baru"} />
           <AppButton
+            disabled={createButtonDisabled}
+            leftElement={<Ionicons color={theme.colors.primaryContrast} name={showCreateForm ? "close-outline" : "add-circle-outline"} size={18} />}
+            onPress={() => setShowCreateForm((value) => !value)}
+            title={showCreateForm ? "Tutup Form Order" : "Buat Order Baru"}
+          />
+          <AppButton
+            leftElement={<Ionicons color={theme.colors.info} name="person-add-outline" size={18} />}
             onPress={() =>
               navigation.navigate("AccountTab", {
                 screen: "Customers",
@@ -460,7 +506,13 @@ export function QuickActionScreen() {
             title="Tambah Pelanggan"
             variant="secondary"
           />
-          <AppButton disabled onPress={() => undefined} title="Scan Nota / Barcode (Soon)" variant="secondary" />
+          <AppButton
+            disabled
+            leftElement={<Ionicons color={theme.colors.textMuted} name="scan-outline" size={18} />}
+            onPress={() => undefined}
+            title="Scan Nota / Barcode (Soon)"
+            variant="ghost"
+          />
         </View>
         {!canCreateOrder ? <Text style={styles.infoText}>Role Anda tidak memiliki akses membuat order.</Text> : null}
         {loadingServices ? (
@@ -476,7 +528,13 @@ export function QuickActionScreen() {
 
       {showCreateForm && canCreateOrder ? (
         <AppPanel style={styles.formPanel}>
-          <Text style={styles.formTitle}>Form Order Minimal</Text>
+          <View style={styles.formHeaderRow}>
+            <Ionicons color={theme.colors.info} name="receipt-outline" size={18} />
+            <View style={styles.formHeaderTextWrap}>
+              <Text style={styles.formTitle}>Form Order Minimal</Text>
+              <Text style={styles.formSubtitle}>Isi data utama untuk transaksi cepat dari kasir.</Text>
+            </View>
+          </View>
           <TextInput
             onChangeText={setCustomerName}
             placeholder="Nama pelanggan"
@@ -506,27 +564,30 @@ export function QuickActionScreen() {
             <View style={styles.itemList}>{draftItems.map((item, index) => renderItemDraft(item, index))}</View>
             <AppButton
               disabled={services.length === 0}
+              leftElement={<Ionicons color={theme.colors.info} name="add-outline" size={18} />}
               onPress={handleAddItem}
               title="Tambah Item"
               variant="secondary"
             />
           </View>
-          <TextInput
-            keyboardType="numeric"
-            onChangeText={setShippingFeeInput}
-            placeholder="Ongkir (opsional, angka)"
-            placeholderTextColor={theme.colors.textMuted}
-            style={styles.input}
-            value={shippingFeeInput}
-          />
-          <TextInput
-            keyboardType="numeric"
-            onChangeText={setDiscountInput}
-            placeholder="Diskon (opsional, angka)"
-            placeholderTextColor={theme.colors.textMuted}
-            style={styles.input}
-            value={discountInput}
-          />
+          <View style={[styles.feeRow, isTablet || isCompactLandscape ? styles.feeRowWide : null]}>
+            <TextInput
+              keyboardType="numeric"
+              onChangeText={setShippingFeeInput}
+              placeholder="Ongkir (opsional, angka)"
+              placeholderTextColor={theme.colors.textMuted}
+              style={[styles.input, styles.feeInput]}
+              value={shippingFeeInput}
+            />
+            <TextInput
+              keyboardType="numeric"
+              onChangeText={setDiscountInput}
+              placeholder="Diskon (opsional, angka)"
+              placeholderTextColor={theme.colors.textMuted}
+              style={[styles.input, styles.feeInput]}
+              value={discountInput}
+            />
+          </View>
           <TextInput
             multiline
             onChangeText={setOrderNotes}
@@ -565,25 +626,40 @@ export function QuickActionScreen() {
             </View>
           </AppPanel>
 
-          <View style={styles.formActions}>
-            <AppButton disabled={submitting || services.length === 0} loading={submitting} onPress={() => void handleCreateOrder()} title="Simpan Order" />
-            <AppButton
-              onPress={() => {
-                resetCreateForm();
-                setShowCreateForm(false);
-              }}
-              title="Batal"
-              variant="ghost"
-            />
+          <View style={[styles.formActions, isTablet || isCompactLandscape ? styles.formActionsWide : null]}>
+            <View style={styles.formActionItem}>
+              <AppButton
+                disabled={submitting || services.length === 0}
+                leftElement={<Ionicons color={theme.colors.primaryContrast} name="save-outline" size={18} />}
+                loading={submitting}
+                onPress={() => void handleCreateOrder()}
+                title="Simpan Order"
+              />
+            </View>
+            <View style={styles.formActionItem}>
+              <AppButton
+                leftElement={<Ionicons color={theme.colors.textPrimary} name="refresh-outline" size={18} />}
+                onPress={() => {
+                  resetCreateForm();
+                  setShowCreateForm(false);
+                }}
+                title="Batal"
+                variant="ghost"
+              />
+            </View>
           </View>
         </AppPanel>
       ) : null}
 
       {lastCreatedOrderId ? (
         <AppPanel style={styles.followupPanel}>
-          <Text style={styles.sectionTitle}>Order Terakhir</Text>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Order Terakhir</Text>
+            <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={17} />
+          </View>
           <View style={styles.actionList}>
             <AppButton
+              leftElement={<Ionicons color={theme.colors.info} name="receipt-outline" size={18} />}
               onPress={() =>
                 navigation.navigate("OrdersTab", {
                   screen: "OrderDetail",
@@ -594,6 +670,7 @@ export function QuickActionScreen() {
               variant="secondary"
             />
             <AppButton
+              leftElement={<Ionicons color={theme.colors.textPrimary} name="list-outline" size={18} />}
               onPress={() =>
                 navigation.navigate("OrdersTab", {
                   screen: "OrdersToday",
@@ -608,11 +685,13 @@ export function QuickActionScreen() {
 
       {actionMessage ? (
         <View style={styles.successWrap}>
+          <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={16} />
           <Text style={styles.successText}>{actionMessage}</Text>
         </View>
       ) : null}
       {errorMessage ? (
         <View style={styles.errorWrap}>
+          <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
           <Text style={styles.errorText}>{errorMessage}</Text>
         </View>
       ) : null}
@@ -620,57 +699,141 @@ export function QuickActionScreen() {
   );
 }
 
-function createStyles(theme: AppTheme) {
+function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: boolean) {
+  const contentHorizontal = isTablet ? theme.spacing.xl : theme.spacing.lg;
+  const contentTop = isCompactLandscape ? theme.spacing.md : theme.spacing.lg;
+  const baseInputHeight = isTablet ? 48 : 44;
+
   return StyleSheet.create({
     content: {
       flexGrow: 1,
-      paddingHorizontal: theme.spacing.lg,
-      paddingTop: theme.spacing.lg,
+      paddingHorizontal: contentHorizontal,
+      paddingTop: contentTop,
       paddingBottom: theme.spacing.xxl,
-      gap: theme.spacing.md,
+      gap: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
     },
-    header: {
-      gap: 3,
+    heroPanel: {
+      gap: theme.spacing.sm,
+      borderColor: theme.colors.borderStrong,
+      backgroundColor: theme.mode === "dark" ? "#122d46" : "#f2faff",
+    },
+    heroTopRow: {
+      flexDirection: isCompactLandscape ? "row" : "column",
+      alignItems: isCompactLandscape ? "center" : "flex-start",
+      justifyContent: "space-between",
+      gap: theme.spacing.xs,
+    },
+    heroBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.9)",
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+    },
+    heroBadgeText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.bold,
+      fontSize: 11,
+      letterSpacing: 0.2,
+      textTransform: "uppercase",
+    },
+    heroOutletMeta: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: isTablet ? 13 : 12,
+      lineHeight: 18,
     },
     title: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.heavy,
-      fontSize: 28,
-      lineHeight: 34,
+      fontSize: isTablet ? 28 : 24,
+      lineHeight: isTablet ? 34 : 30,
     },
     subtitle: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
-      fontSize: 13,
-      lineHeight: 19,
+      fontSize: isTablet ? 14 : 13,
+      lineHeight: isTablet ? 20 : 18,
+    },
+    heroMetaWrap: {
+      flexDirection: isCompactLandscape || isTablet ? "row" : "column",
+      flexWrap: "wrap",
+      gap: theme.spacing.xs,
+    },
+    heroMetaChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.8)",
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+    },
+    heroMetaText: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      flexShrink: 1,
     },
     panel: {
+      gap: theme.spacing.md,
+    },
+    sectionHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
       gap: theme.spacing.sm,
     },
     sectionTitle: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
-      fontSize: 16,
+      fontSize: isTablet ? 17 : 16,
+    },
+    sectionMeta: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
     },
     actionList: {
-      gap: theme.spacing.xs,
+      gap: theme.spacing.sm,
     },
     skeletonWrap: {
       gap: 6,
-      marginTop: 4,
+      marginTop: 2,
     },
     formPanel: {
-      gap: theme.spacing.sm,
+      gap: theme.spacing.md,
+    },
+    formHeaderRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: theme.spacing.xs,
+    },
+    formHeaderTextWrap: {
+      flex: 1,
+      gap: 2,
     },
     formTitle: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
-      fontSize: 15,
+      fontSize: isTablet ? 16 : 15,
+    },
+    formSubtitle: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 18,
     },
     inputLabel: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 12,
+      fontSize: 12.5,
     },
     input: {
       borderWidth: 1,
@@ -679,16 +842,17 @@ function createStyles(theme: AppTheme) {
       backgroundColor: theme.colors.inputBg,
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.medium,
-      fontSize: 13,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
+      fontSize: isTablet ? 14 : 13,
+      minHeight: baseInputHeight,
+      paddingHorizontal: 13,
+      paddingVertical: isTablet ? 11 : 10,
     },
     notesInput: {
-      minHeight: 68,
+      minHeight: isTablet ? 84 : 72,
       textAlignVertical: "top",
     },
     serviceWrap: {
-      gap: 7,
+      gap: theme.spacing.xs,
     },
     itemList: {
       gap: theme.spacing.xs,
@@ -698,8 +862,8 @@ function createStyles(theme: AppTheme) {
       borderColor: theme.colors.border,
       borderRadius: theme.radii.md,
       backgroundColor: theme.colors.surface,
-      paddingHorizontal: 10,
-      paddingVertical: 10,
+      paddingHorizontal: 11,
+      paddingVertical: 11,
       gap: theme.spacing.xs,
     },
     itemHeader: {
@@ -714,34 +878,21 @@ function createStyles(theme: AppTheme) {
       justifyContent: "flex-end",
       gap: 4,
     },
-    headerActionButton: {
+    headerActionIconButton: {
       borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
+      borderColor: theme.colors.border,
       borderRadius: theme.radii.pill,
       backgroundColor: theme.colors.surfaceSoft,
-      paddingHorizontal: 9,
-      paddingVertical: 5,
+      width: 30,
+      height: 30,
+      alignItems: "center",
+      justifyContent: "center",
     },
-    headerActionButtonDisabled: {
-      opacity: 0.52,
+    headerActionIconButtonDisabled: {
+      opacity: 0.54,
     },
-    headerActionButtonPressed: {
+    headerActionIconButtonPressed: {
       opacity: 0.78,
-    },
-    headerActionText: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 11,
-      letterSpacing: 0.15,
-    },
-    headerActionTextDisabled: {
-      color: theme.colors.textMuted,
-    },
-    headerActionDangerText: {
-      color: theme.colors.danger,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 11,
-      letterSpacing: 0.15,
     },
     metricStepperWrap: {
       gap: 5,
@@ -752,8 +903,8 @@ function createStyles(theme: AppTheme) {
       gap: theme.spacing.xs,
     },
     metricStepperButton: {
-      width: 32,
-      height: 32,
+      width: isTablet ? 34 : 32,
+      height: isTablet ? 34 : 32,
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
       borderRadius: theme.radii.sm,
@@ -771,11 +922,11 @@ function createStyles(theme: AppTheme) {
       lineHeight: 19,
     },
     metricStepperValue: {
-      minWidth: 42,
+      minWidth: isTablet ? 48 : 42,
       textAlign: "center",
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 13,
+      fontSize: isTablet ? 14 : 13,
     },
     itemPriceInfo: {
       gap: 2,
@@ -797,7 +948,7 @@ function createStyles(theme: AppTheme) {
       borderRadius: theme.radii.pill,
       backgroundColor: theme.colors.surface,
       paddingHorizontal: 12,
-      paddingVertical: 7,
+      paddingVertical: isTablet ? 8 : 7,
     },
     serviceChipActive: {
       borderColor: theme.colors.info,
@@ -806,13 +957,30 @@ function createStyles(theme: AppTheme) {
     serviceChipText: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 12,
+      fontSize: isTablet ? 12.5 : 12,
     },
     serviceChipTextActive: {
       color: theme.colors.info,
     },
+    feeRow: {
+      gap: theme.spacing.xs,
+    },
+    feeRowWide: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    feeInput: {
+      flex: 1,
+    },
     formActions: {
       gap: theme.spacing.xs,
+    },
+    formActionsWide: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    formActionItem: {
+      flex: 1,
     },
     summaryPanel: {
       gap: 6,
@@ -829,13 +997,13 @@ function createStyles(theme: AppTheme) {
       flex: 1,
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
-      fontSize: 12,
+      fontSize: isTablet ? 12.5 : 12,
       lineHeight: 17,
     },
     summaryValue: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 12,
+      fontSize: isTablet ? 12.5 : 12,
     },
     summaryDivider: {
       height: 1,
@@ -846,15 +1014,15 @@ function createStyles(theme: AppTheme) {
       flex: 1,
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
-      fontSize: 13,
+      fontSize: isTablet ? 14 : 13,
     },
     summaryTotalValue: {
       color: theme.colors.info,
       fontFamily: theme.fonts.heavy,
-      fontSize: 14,
+      fontSize: isTablet ? 15 : 14,
     },
     followupPanel: {
-      gap: theme.spacing.xs,
+      gap: theme.spacing.sm,
     },
     infoText: {
       color: theme.colors.textMuted,
@@ -868,9 +1036,13 @@ function createStyles(theme: AppTheme) {
       borderRadius: theme.radii.md,
       backgroundColor: theme.mode === "dark" ? "#173f2d" : "#edf9f1",
       paddingHorizontal: 12,
-      paddingVertical: 9,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
     },
     successText: {
+      flex: 1,
       color: theme.colors.success,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
@@ -882,9 +1054,13 @@ function createStyles(theme: AppTheme) {
       borderRadius: theme.radii.md,
       backgroundColor: theme.mode === "dark" ? "#482633" : "#fff1f4",
       paddingHorizontal: 12,
-      paddingVertical: 9,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
     },
     errorText: {
+      flex: 1,
       color: theme.colors.danger,
       fontFamily: theme.fonts.medium,
       fontSize: 12,

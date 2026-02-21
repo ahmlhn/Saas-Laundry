@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppPanel } from "../../components/ui/AppPanel";
@@ -72,18 +72,33 @@ function getTodayLabel(): string {
   }).format(new Date());
 }
 
+function getUpdatedLabel(date: Date | null): string {
+  if (!date) {
+    return "-";
+  }
+
+  return new Intl.DateTimeFormat("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 export function HomeDashboardScreen() {
   const theme = useAppTheme();
   const { width, height } = useWindowDimensions();
   const minEdge = Math.min(width, height);
   const isLandscape = width > height;
   const isTablet = minEdge >= 600;
-  const styles = useMemo(() => createStyles(theme, isTablet, isLandscape), [theme, isTablet, isLandscape]);
+  const isCompactLandscape = isLandscape && !isTablet;
+  const styles = useMemo(() => createStyles(theme, isTablet, isLandscape, isCompactLandscape), [theme, isTablet, isLandscape, isCompactLandscape]);
   const navigation = useNavigation<Navigation>();
   const { selectedOutlet, session, refreshSession } = useSession();
+  const outletId = selectedOutlet?.id;
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+  const firstFocusHandledRef = useRef(false);
   const entranceProgress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -95,33 +110,55 @@ export function HomeDashboardScreen() {
     }).start();
   }, [entranceProgress]);
 
+  const loadDashboard = useCallback(
+    async (forceRefresh = false): Promise<void> => {
+      if (!outletId) {
+        setOrders([]);
+        setLoading(false);
+        setLastUpdatedAt(null);
+        return;
+      }
+
+      setLoading(true);
+      setErrorMessage(null);
+
+      try {
+        await refreshSession();
+        const data = await listOrders({
+          outletId,
+          limit: 60,
+          forceRefresh,
+        });
+        setOrders(data);
+        setLastUpdatedAt(new Date());
+      } catch (error) {
+        setErrorMessage(getApiErrorMessage(error));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [refreshSession, outletId]
+  );
+
   useEffect(() => {
-    void loadDashboard();
-  }, [selectedOutlet?.id]);
+    firstFocusHandledRef.current = false;
+    void loadDashboard(true);
+  }, [outletId, loadDashboard]);
 
-  async function loadDashboard(): Promise<void> {
-    if (!selectedOutlet) {
-      setOrders([]);
-      setLoading(false);
-      return;
-    }
+  useFocusEffect(
+    useCallback(() => {
+      if (!outletId) {
+        return;
+      }
 
-    setLoading(true);
-    setErrorMessage(null);
+      if (!firstFocusHandledRef.current) {
+        firstFocusHandledRef.current = true;
+        return;
+      }
 
-    try {
-      await refreshSession();
-      const data = await listOrders({
-        outletId: selectedOutlet.id,
-        limit: 60,
-      });
-      setOrders(data);
-    } catch (error) {
-      setErrorMessage(getApiErrorMessage(error));
-    } finally {
-      setLoading(false);
-    }
-  }
+      void loadDashboard(true);
+    }, [outletId, loadDashboard])
+  );
 
   const heroAnimatedStyle = useMemo(
     () => ({
@@ -174,6 +211,7 @@ export function HomeDashboardScreen() {
   const planLabel = session?.plan.key ? session.plan.key.toUpperCase() : "FREE";
   const greeting = getGreetingLabel();
   const todayLabel = getTodayLabel();
+  const updatedLabel = getUpdatedLabel(lastUpdatedAt);
 
   const metricCards = [
     { label: "Total Order", value: formatCompact(orders.length), icon: "receipt-outline" as const, tone: "info" as const },
@@ -240,6 +278,7 @@ export function HomeDashboardScreen() {
           <View style={styles.heroMetaRow}>
             <StatusPill label={`Plan ${planLabel}`} tone="info" />
             <StatusPill label={outletMeta} tone="neutral" />
+            <StatusPill label={`Update ${updatedLabel}`} tone="neutral" />
           </View>
         </View>
       </Animated.View>
@@ -370,20 +409,20 @@ export function HomeDashboardScreen() {
   );
 }
 
-function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) {
+function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, isCompactLandscape: boolean) {
   return StyleSheet.create({
     content: {
       flexGrow: 1,
-      paddingHorizontal: theme.spacing.lg,
-      paddingTop: theme.spacing.md,
-      paddingBottom: theme.spacing.xxl,
-      gap: theme.spacing.md,
+      paddingHorizontal: isCompactLandscape ? theme.spacing.md : theme.spacing.lg,
+      paddingTop: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
+      paddingBottom: isCompactLandscape ? theme.spacing.xl : theme.spacing.xxl,
+      gap: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
     },
     heroCard: {
       position: "relative",
-      borderRadius: isTablet ? 30 : 26,
+      borderRadius: isTablet ? 30 : isCompactLandscape ? 22 : 26,
       overflow: "hidden",
-      minHeight: isTablet ? 228 : isLandscape ? 196 : 214,
+      minHeight: isTablet ? 228 : isCompactLandscape ? 172 : isLandscape ? 196 : 214,
       borderWidth: 1,
       borderColor: "rgba(157,214,255,0.34)",
       backgroundColor: "#0f5ea8",
@@ -421,9 +460,9 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
       backgroundColor: "rgba(52, 214, 231, 0.28)",
     },
     heroContent: {
-      paddingHorizontal: theme.spacing.lg,
-      paddingTop: theme.spacing.lg,
-      paddingBottom: theme.spacing.md,
+      paddingHorizontal: isCompactLandscape ? theme.spacing.md : theme.spacing.lg,
+      paddingTop: isCompactLandscape ? theme.spacing.md : theme.spacing.lg,
+      paddingBottom: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
       gap: theme.spacing.xs,
     },
     heroTopRow: {
@@ -440,9 +479,9 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
       minWidth: 0,
     },
     brandBadge: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
+      width: isCompactLandscape ? 34 : 38,
+      height: isCompactLandscape ? 34 : 38,
+      borderRadius: isCompactLandscape ? 17 : 19,
       borderWidth: 1,
       borderColor: "rgba(255,255,255,0.74)",
       alignItems: "center",
@@ -456,8 +495,8 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
     brandTitle: {
       color: "#ffffff",
       fontFamily: theme.fonts.heavy,
-      fontSize: isTablet ? 25 : 22,
-      lineHeight: isTablet ? 30 : 26,
+      fontSize: isTablet ? 25 : isCompactLandscape ? 20 : 22,
+      lineHeight: isTablet ? 30 : isCompactLandscape ? 24 : 26,
     },
     brandSubtitle: {
       color: "rgba(230,242,255,0.86)",
@@ -473,36 +512,36 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
       borderWidth: 1,
       borderColor: "rgba(255,255,255,0.3)",
       backgroundColor: "rgba(255,255,255,0.12)",
-      paddingHorizontal: 9,
-      paddingVertical: 5,
+      paddingHorizontal: isCompactLandscape ? 8 : 9,
+      paddingVertical: isCompactLandscape ? 4 : 5,
       borderRadius: 999,
     },
     dateChipText: {
       color: "#e4f2ff",
       fontFamily: theme.fonts.semibold,
-      fontSize: 10,
+      fontSize: isCompactLandscape ? 9 : 10,
     },
     greeting: {
       color: "#ffffff",
       fontFamily: theme.fonts.bold,
-      fontSize: isTablet ? 26 : 22,
-      lineHeight: isTablet ? 31 : 27,
+      fontSize: isTablet ? 26 : isCompactLandscape ? 20 : 22,
+      lineHeight: isTablet ? 31 : isCompactLandscape ? 24 : 27,
       marginTop: 2,
     },
     outletLabel: {
       color: "rgba(240,247,255,0.93)",
       fontFamily: theme.fonts.medium,
-      fontSize: 13,
-      lineHeight: 19,
+      fontSize: isCompactLandscape ? 12 : 13,
+      lineHeight: isCompactLandscape ? 17 : 19,
     },
     heroMetaRow: {
       flexDirection: "row",
       flexWrap: "wrap",
-      gap: theme.spacing.xs,
+      gap: isCompactLandscape ? 4 : theme.spacing.xs,
       marginTop: 2,
     },
     sectionPanel: {
-      gap: theme.spacing.sm,
+      gap: isCompactLandscape ? theme.spacing.xs : theme.spacing.sm,
       borderRadius: theme.radii.xl,
       borderColor: theme.colors.borderStrong,
       backgroundColor: theme.colors.surface,
@@ -520,8 +559,8 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
     sectionTitle: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
-      fontSize: 18,
-      lineHeight: 23,
+      fontSize: isCompactLandscape ? 16 : 18,
+      lineHeight: isCompactLandscape ? 21 : 23,
     },
     loadingWrap: {
       flexDirection: "row",
@@ -541,13 +580,13 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
       gap: theme.spacing.xs,
     },
     metricCard: {
-      width: isTablet ? "24%" : "48.3%",
+      width: isTablet || isCompactLandscape ? "24%" : "48.3%",
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.md,
       backgroundColor: theme.colors.surfaceSoft,
-      paddingHorizontal: 10,
-      paddingVertical: 10,
+      paddingHorizontal: isCompactLandscape ? 8 : 10,
+      paddingVertical: isCompactLandscape ? 8 : 10,
       gap: 4,
     },
     metricTopRow: {
@@ -557,23 +596,23 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
       gap: 8,
     },
     metricIconWrap: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
+      width: isCompactLandscape ? 24 : 28,
+      height: isCompactLandscape ? 24 : 28,
+      borderRadius: isCompactLandscape ? 12 : 14,
       alignItems: "center",
       justifyContent: "center",
     },
     metricValue: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.heavy,
-      fontSize: isTablet ? 18 : 16,
-      lineHeight: isTablet ? 23 : 20,
+      fontSize: isTablet ? 18 : isCompactLandscape ? 14 : 16,
+      lineHeight: isTablet ? 23 : isCompactLandscape ? 18 : 20,
     },
     metricLabel: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.semibold,
-      fontSize: 11,
-      lineHeight: 15,
+      fontSize: isCompactLandscape ? 10 : 11,
+      lineHeight: isCompactLandscape ? 14 : 15,
     },
     financeStrip: {
       flexDirection: "row",
@@ -586,8 +625,8 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
     },
     financeBlock: {
       flex: 1,
-      paddingHorizontal: 11,
-      paddingVertical: 9,
+      paddingHorizontal: isCompactLandscape ? 9 : 11,
+      paddingVertical: isCompactLandscape ? 8 : 9,
       gap: 1,
     },
     financeDivider: {
@@ -602,8 +641,8 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
     financeValue: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
-      fontSize: 13,
-      lineHeight: 18,
+      fontSize: isCompactLandscape ? 12 : 13,
+      lineHeight: isCompactLandscape ? 17 : 18,
     },
     financeDanger: {
       color: theme.colors.danger,
@@ -618,13 +657,13 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
       gap: theme.spacing.xs,
     },
     shortcutItem: {
-      width: isTablet ? "31.8%" : "48.3%",
+      width: isTablet || isCompactLandscape ? "31.8%" : "48.3%",
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.md,
       backgroundColor: theme.colors.surfaceSoft,
-      paddingHorizontal: 10,
-      paddingVertical: 10,
+      paddingHorizontal: isCompactLandscape ? 8 : 10,
+      paddingVertical: isCompactLandscape ? 8 : 10,
       gap: 3,
     },
     shortcutPressed: {
@@ -638,27 +677,27 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
     shortcutCount: {
       color: theme.colors.info,
       fontFamily: theme.fonts.heavy,
-      fontSize: 14,
+      fontSize: isCompactLandscape ? 13 : 14,
     },
     shortcutLabel: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 13,
-      lineHeight: 17,
+      fontSize: isCompactLandscape ? 12 : 13,
+      lineHeight: isCompactLandscape ? 16 : 17,
     },
     shortcutSubtitle: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
-      fontSize: 11,
-      lineHeight: 15,
+      fontSize: isCompactLandscape ? 10 : 11,
+      lineHeight: isCompactLandscape ? 14 : 15,
     },
     quickLinkItem: {
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.md,
       backgroundColor: theme.colors.surfaceSoft,
-      paddingHorizontal: 11,
-      paddingVertical: 10,
+      paddingHorizontal: isCompactLandscape ? 10 : 11,
+      paddingVertical: isCompactLandscape ? 8 : 10,
       gap: 8,
       flexDirection: "row",
       alignItems: "center",
@@ -667,9 +706,9 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
       opacity: 0.84,
     },
     quickLinkIcon: {
-      width: 34,
-      height: 34,
-      borderRadius: 17,
+      width: isCompactLandscape ? 30 : 34,
+      height: isCompactLandscape ? 30 : 34,
+      borderRadius: isCompactLandscape ? 15 : 17,
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: theme.colors.surface,
@@ -684,14 +723,14 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
     quickLinkTitle: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 14,
-      lineHeight: 19,
+      fontSize: isCompactLandscape ? 13 : 14,
+      lineHeight: isCompactLandscape ? 17 : 19,
     },
     quickLinkSubtitle: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
-      fontSize: 11,
-      lineHeight: 16,
+      fontSize: isCompactLandscape ? 10 : 11,
+      lineHeight: isCompactLandscape ? 14 : 16,
     },
     errorWrap: {
       borderWidth: 1,

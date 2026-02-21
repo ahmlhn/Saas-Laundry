@@ -6,8 +6,8 @@ import { useMemo, useState } from "react";
 import { Linking, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppPanel } from "../../components/ui/AppPanel";
-import { parseCustomerProfileMeta } from "../../features/customers/customerProfileNote";
 import { extractCustomerPhoneDigits, formatCustomerPhoneDisplay } from "../../features/customers/customerPhone";
+import { parseCustomerProfileMeta } from "../../features/customers/customerProfileNote";
 import { hasAnyRole } from "../../lib/accessControl";
 import type { AccountStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
@@ -16,6 +16,13 @@ import { useAppTheme } from "../../theme/useAppTheme";
 
 type CustomerDetailRoute = RouteProp<AccountStackParamList, "CustomerDetail">;
 type CustomerDetailNavigation = NativeStackNavigationProp<AccountStackParamList, "CustomerDetail">;
+
+interface DetailRow {
+  iconName: keyof typeof Ionicons.glyphMap;
+  label: string;
+  value: string;
+  muted?: boolean;
+}
 
 function mapGender(gender: string): string {
   if (gender === "male") {
@@ -35,33 +42,19 @@ function formatRegisteredDate(createdAt: string): string {
 
   return new Intl.DateTimeFormat("id-ID", {
     day: "2-digit",
-    month: "2-digit",
-    year: "2-digit",
+    month: "short",
+    year: "numeric",
   }).format(date);
-}
-
-interface InfoRowProps {
-  iconName: keyof typeof Ionicons.glyphMap;
-  value: string;
-  muted?: boolean;
-}
-
-function InfoRow({ iconName, value, muted = false }: InfoRowProps) {
-  const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
-
-  return (
-    <View style={styles.infoRow}>
-      <Ionicons color={theme.colors.textSecondary} name={iconName} size={18} />
-      <Text style={[styles.infoText, muted ? styles.infoTextMuted : null]}>{value}</Text>
-    </View>
-  );
 }
 
 export function CustomerDetailScreen() {
   const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
   const { width, height } = useWindowDimensions();
+  const minEdge = Math.min(width, height);
+  const isLandscape = width > height;
+  const isTablet = minEdge >= 600;
+  const isCompactLandscape = isLandscape && !isTablet;
+  const styles = useMemo(() => createStyles(theme, isTablet, isCompactLandscape), [theme, isTablet, isCompactLandscape]);
   const route = useRoute<CustomerDetailRoute>();
   const navigation = useNavigation<CustomerDetailNavigation>();
   const { session } = useSession();
@@ -69,16 +62,64 @@ export function CustomerDetailScreen() {
   const customer = route.params.customer;
   const roles = session?.roles ?? [];
   const canCreateOrEdit = hasAnyRole(roles, ["owner", "admin", "cashier"]);
-  const meta = useMemo(() => parseCustomerProfileMeta(customer.notes), [customer.notes]);
+
   const [expanded, setExpanded] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const minEdge = Math.min(width, height);
-  const isTablet = minEdge >= 600;
-  const compactName = customer.name.trim().length > 22 || width < 380;
-  const veryCompactName = customer.name.trim().length > 34 || width < 340;
+
+  const profileMeta = useMemo(() => parseCustomerProfileMeta(customer.notes), [customer.notes]);
+  const normalizedPhone = useMemo(() => extractCustomerPhoneDigits(customer.phone_normalized), [customer.phone_normalized]);
+  const phoneDisplay = useMemo(() => formatCustomerPhoneDisplay(customer.phone_normalized), [customer.phone_normalized]);
+  const registeredDate = useMemo(() => formatRegisteredDate(customer.created_at), [customer.created_at]);
+
+  const profileRows = useMemo<DetailRow[]>(
+    () => [
+      {
+        iconName: "phone-portrait-outline",
+        label: "Telepon",
+        value: phoneDisplay,
+        muted: !normalizedPhone,
+      },
+      {
+        iconName: "location-outline",
+        label: "Alamat",
+        value: profileMeta.address || "Tidak ada alamat",
+        muted: !profileMeta.address,
+      },
+    ],
+    [phoneDisplay, normalizedPhone, profileMeta.address]
+  );
+
+  const extraRows = useMemo<DetailRow[]>(
+    () => [
+      {
+        iconName: "mail-outline",
+        label: "Email",
+        value: profileMeta.email || "Tidak ada email",
+        muted: !profileMeta.email,
+      },
+      {
+        iconName: "calendar-outline",
+        label: "Tanggal Lahir",
+        value: profileMeta.birthDate || "Tidak diketahui",
+        muted: !profileMeta.birthDate,
+      },
+      {
+        iconName: "transgender-outline",
+        label: "Gender",
+        value: mapGender(profileMeta.gender),
+        muted: !profileMeta.gender,
+      },
+      {
+        iconName: "document-text-outline",
+        label: "Catatan",
+        value: profileMeta.note || "Tidak ada catatan",
+        muted: !profileMeta.note,
+      },
+    ],
+    [profileMeta]
+  );
 
   async function openCustomerAction(action: "wa" | "tel"): Promise<void> {
-    const normalizedPhone = extractCustomerPhoneDigits(customer.phone_normalized);
     if (!normalizedPhone) {
       setErrorMessage("Nomor telepon pelanggan belum tersedia.");
       return;
@@ -102,71 +143,110 @@ export function CustomerDetailScreen() {
 
   return (
     <AppScreen contentContainerStyle={styles.content} scroll>
-      <View style={styles.headerWrap}>
-        <View style={styles.topBar}>
-          <Pressable onPress={() => navigation.goBack()} style={styles.topIconButton}>
-            <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={22} />
-          </Pressable>
-          <Text style={styles.brandText}>Cuci Laundry</Text>
-          <View style={styles.topIconGhost} />
+      <View style={styles.heroCard}>
+        <View style={styles.heroLayerPrimary} />
+        <View style={styles.heroLayerSecondary} />
+        <View style={styles.heroGlow} />
+
+        <View style={styles.heroContent}>
+          <View style={styles.heroTopRow}>
+            <Pressable onPress={() => navigation.goBack()} style={styles.topIconButton}>
+              <Ionicons color="#eaf6ff" name="arrow-back" size={21} />
+            </Pressable>
+
+            <View style={styles.heroBrandWrap}>
+              <Text style={styles.brandText}>Cuci Laundry</Text>
+              <Text style={styles.heroSubtitle}>Detail Pelanggan</Text>
+            </View>
+
+            {canCreateOrEdit ? (
+              <Pressable
+                onPress={() =>
+                  navigation.navigate("CustomerForm", {
+                    mode: "edit",
+                    customer,
+                  })
+                }
+                style={styles.topIconButton}
+              >
+                <Ionicons color="#eaf6ff" name="create-outline" size={19} />
+              </Pressable>
+            ) : (
+              <View style={styles.topIconGhost} />
+            )}
+          </View>
+
+          <Text numberOfLines={2} style={styles.customerName}>
+            {customer.name}
+          </Text>
+
+          <View style={styles.heroMetaRow}>
+            <View style={styles.heroChip}>
+              <Ionicons color="#dff1ff" name="calendar-outline" size={12} />
+              <Text style={styles.heroChipText}>Terdaftar {registeredDate}</Text>
+            </View>
+            <View style={styles.heroChip}>
+              <Ionicons color="#dff1ff" name="call-outline" size={12} />
+              <Text numberOfLines={1} style={styles.heroChipText}>
+                {phoneDisplay}
+              </Text>
+            </View>
+          </View>
         </View>
       </View>
 
-      <AppPanel style={styles.customerNamePanel}>
-        <View style={styles.customerTitleRow}>
-          <View style={styles.customerTitleWrap}>
-            <Text numberOfLines={3} style={[styles.customerName, compactName ? styles.customerNameCompact : null, veryCompactName ? styles.customerNameVeryCompact : null, isTablet ? styles.customerNameTablet : null]}>
-              {customer.name}
-            </Text>
-            <Text style={styles.customerRegistered}>Terdaftar sejak {formatRegisteredDate(customer.created_at)}</Text>
+      <View style={styles.quickActionRow}>
+        <Pressable onPress={() => void openCustomerAction("wa")} style={({ pressed }) => [styles.quickActionButton, pressed ? styles.quickActionPressed : null]}>
+          <View style={[styles.quickActionIcon, styles.quickActionIconWa]}>
+            <Ionicons color={theme.colors.success} name="logo-whatsapp" size={20} />
           </View>
-          {canCreateOrEdit ? (
-            <Pressable
-              onPress={() =>
-                navigation.navigate("CustomerForm", {
-                  mode: "edit",
-                  customer,
-                })
-              }
-              style={styles.editButton}
-            >
-              <Ionicons color={theme.colors.info} name="create-outline" size={20} />
-            </Pressable>
-          ) : null}
-        </View>
-      </AppPanel>
+          <Text style={styles.quickActionTitle}>WhatsApp</Text>
+          <Text style={styles.quickActionSubtitle}>Kirim chat langsung</Text>
+        </Pressable>
+
+        <Pressable onPress={() => void openCustomerAction("tel")} style={({ pressed }) => [styles.quickActionButton, pressed ? styles.quickActionPressed : null]}>
+          <View style={[styles.quickActionIcon, styles.quickActionIconTel]}>
+            <Ionicons color={theme.colors.info} name="call-outline" size={20} />
+          </View>
+          <Text style={styles.quickActionTitle}>Telepon</Text>
+          <Text style={styles.quickActionSubtitle}>Hubungi pelanggan</Text>
+        </Pressable>
+      </View>
 
       <AppPanel style={styles.panel}>
-        <View style={styles.sectionTitleRow}>
+        <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Profil & Kontak</Text>
-          <View style={styles.actionButtonsRow}>
-            <Pressable onPress={() => void openCustomerAction("wa")} style={styles.actionButton}>
-              <Ionicons color={theme.colors.success} name="logo-whatsapp" size={20} />
-            </Pressable>
-            <Pressable onPress={() => void openCustomerAction("tel")} style={styles.actionButton}>
-              <Ionicons color={theme.colors.info} name="call-outline" size={20} />
-            </Pressable>
-          </View>
+          <Pressable onPress={() => setExpanded((value) => !value)} style={styles.expandButton}>
+            <Text style={styles.expandLabel}>{expanded ? "Ringkas" : "Lengkap"}</Text>
+            <Ionicons color={theme.colors.textSecondary} name={expanded ? "chevron-up" : "chevron-down"} size={17} />
+          </Pressable>
         </View>
 
-        <InfoRow
-          iconName="phone-portrait-outline"
-          value={formatCustomerPhoneDisplay(customer.phone_normalized)}
-          muted={!extractCustomerPhoneDigits(customer.phone_normalized)}
-        />
-        <InfoRow iconName="location-outline" value={meta.address || "Tidak ada alamat"} muted={!meta.address} />
-        {expanded ? (
-          <>
-            <InfoRow iconName="mail-outline" value={meta.email || "Tidak ada email"} muted={!meta.email} />
-            <InfoRow iconName="calendar-outline" value={meta.birthDate || "Tanggal lahir tidak diketahui"} muted={!meta.birthDate} />
-            <InfoRow iconName="transgender-outline" value={mapGender(meta.gender)} muted={!meta.gender} />
-            {meta.note ? <InfoRow iconName="document-text-outline" value={meta.note} /> : null}
-          </>
-        ) : null}
+        {profileRows.map((row) => (
+          <View key={row.label} style={styles.infoRow}>
+            <View style={styles.infoIconWrap}>
+              <Ionicons color={theme.colors.textSecondary} name={row.iconName} size={16} />
+            </View>
+            <View style={styles.infoTextWrap}>
+              <Text style={styles.infoLabel}>{row.label}</Text>
+              <Text style={[styles.infoValue, row.muted ? styles.infoValueMuted : null]}>{row.value}</Text>
+            </View>
+          </View>
+        ))}
 
-        <Pressable onPress={() => setExpanded((value) => !value)} style={styles.expandButton}>
-          <Ionicons color={theme.colors.textSecondary} name={expanded ? "chevron-up" : "chevron-down"} size={22} />
-        </Pressable>
+        {expanded
+          ? extraRows.map((row) => (
+              <View key={row.label} style={styles.infoRow}>
+                <View style={styles.infoIconWrap}>
+                  <Ionicons color={theme.colors.textSecondary} name={row.iconName} size={16} />
+                </View>
+                <View style={styles.infoTextWrap}>
+                  <Text style={styles.infoLabel}>{row.label}</Text>
+                  <Text style={[styles.infoValue, row.muted ? styles.infoValueMuted : null]}>{row.value}</Text>
+                </View>
+              </View>
+            ))
+          : null}
       </AppPanel>
 
       <AppPanel style={styles.panel}>
@@ -191,16 +271,23 @@ export function CustomerDetailScreen() {
 
       <AppPanel style={styles.panel}>
         <Text style={styles.sectionTitle}>Data Transaksi</Text>
-        <Text style={styles.emptyText}>Belum mempunyai transaksi</Text>
+        <View style={styles.placeholderRow}>
+          <Ionicons color={theme.colors.textMuted} name="receipt-outline" size={16} />
+          <Text style={styles.placeholderText}>Belum mempunyai transaksi</Text>
+        </View>
       </AppPanel>
 
       <AppPanel style={styles.panel}>
         <Text style={styles.sectionTitle}>Data Paket</Text>
-        <Text style={styles.emptyText}>Belum mempunyai paket</Text>
+        <View style={styles.placeholderRow}>
+          <Ionicons color={theme.colors.textMuted} name="cube-outline" size={16} />
+          <Text style={styles.placeholderText}>Belum mempunyai paket</Text>
+        </View>
       </AppPanel>
 
       {errorMessage ? (
         <View style={styles.errorWrap}>
+          <Ionicons color={theme.colors.danger} name="warning-outline" size={16} />
           <Text style={styles.errorText}>{errorMessage}</Text>
         </View>
       ) : null}
@@ -208,95 +295,175 @@ export function CustomerDetailScreen() {
   );
 }
 
-function createStyles(theme: AppTheme) {
+function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: boolean) {
   return StyleSheet.create({
     content: {
       flexGrow: 1,
-      paddingHorizontal: theme.spacing.lg,
-      paddingTop: theme.spacing.md,
+      paddingHorizontal: isCompactLandscape ? theme.spacing.md : theme.spacing.lg,
+      paddingTop: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
       paddingBottom: theme.spacing.xxl,
       gap: theme.spacing.sm,
     },
-    headerWrap: {
-      gap: theme.spacing.sm,
+    heroCard: {
+      position: "relative",
+      borderRadius: isTablet ? 28 : isCompactLandscape ? 20 : 24,
+      overflow: "hidden",
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? "rgba(91,174,255,0.35)" : "rgba(83,166,248,0.32)",
+      minHeight: isTablet ? 186 : isCompactLandscape ? 152 : 172,
+      backgroundColor: "#1368bc",
     },
-    topBar: {
+    heroLayerPrimary: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: "#1368bc",
+    },
+    heroLayerSecondary: {
+      position: "absolute",
+      top: 0,
+      right: -40,
+      bottom: 0,
+      width: "70%",
+      backgroundColor: "#1fa3e8",
+      opacity: 0.74,
+    },
+    heroGlow: {
+      position: "absolute",
+      right: -72,
+      top: -84,
+      width: 205,
+      height: 205,
+      borderRadius: 132,
+      borderWidth: 28,
+      borderColor: "rgba(255,255,255,0.12)",
+    },
+    heroContent: {
+      paddingHorizontal: isCompactLandscape ? theme.spacing.md : theme.spacing.lg,
+      paddingVertical: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
+      gap: isCompactLandscape ? 8 : theme.spacing.sm,
+    },
+    heroTopRow: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
+      gap: theme.spacing.sm,
     },
     topIconButton: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
+      width: isCompactLandscape ? 34 : 36,
+      height: isCompactLandscape ? 34 : 36,
+      borderRadius: 18,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: theme.colors.surface,
       borderWidth: 1,
-      borderColor: theme.colors.border,
+      borderColor: "rgba(255,255,255,0.32)",
+      backgroundColor: "rgba(255,255,255,0.14)",
     },
     topIconGhost: {
-      width: 38,
-      height: 38,
+      width: isCompactLandscape ? 34 : 36,
+      height: isCompactLandscape ? 34 : 36,
     },
-    brandText: {
-      color: theme.colors.info,
-      fontFamily: theme.fonts.heavy,
-      fontSize: 23,
-      letterSpacing: 0.3,
-    },
-    customerNamePanel: {
-      paddingVertical: 14,
-    },
-    customerTitleRow: {
-      flexDirection: "row",
-      alignItems: "flex-start",
-      justifyContent: "space-between",
-      gap: theme.spacing.sm,
-    },
-    customerTitleWrap: {
+    heroBrandWrap: {
       flex: 1,
       minWidth: 0,
-      gap: 4,
+      alignItems: "center",
+      gap: 1,
+    },
+    brandText: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.heavy,
+      fontSize: isTablet ? 24 : isCompactLandscape ? 20 : 22,
+      lineHeight: isTablet ? 30 : isCompactLandscape ? 24 : 27,
+      letterSpacing: 0.3,
+    },
+    heroSubtitle: {
+      color: "rgba(233,247,255,0.9)",
+      fontFamily: theme.fonts.semibold,
+      fontSize: isCompactLandscape ? 10 : 11,
+      textTransform: "uppercase",
+      letterSpacing: 0.7,
     },
     customerName: {
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.bold,
-      fontSize: 31,
-      lineHeight: 37,
+      color: "#ffffff",
+      fontFamily: theme.fonts.heavy,
+      fontSize: isTablet ? 34 : isCompactLandscape ? 24 : 29,
+      lineHeight: isTablet ? 40 : isCompactLandscape ? 29 : 35,
     },
-    customerNameCompact: {
-      fontSize: 27,
-      lineHeight: 33,
+    heroMetaRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 6,
     },
-    customerNameVeryCompact: {
-      fontSize: 23,
-      lineHeight: 29,
+    heroChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.3)",
+      borderRadius: theme.radii.pill,
+      backgroundColor: "rgba(255,255,255,0.14)",
+      paddingHorizontal: 9,
+      paddingVertical: 5,
+      maxWidth: "100%",
     },
-    customerNameTablet: {
-      fontSize: 35,
-      lineHeight: 42,
+    heroChipText: {
+      color: "#dff1ff",
+      fontFamily: theme.fonts.semibold,
+      fontSize: 10,
     },
-    customerRegistered: {
-      color: theme.colors.textMuted,
-      fontFamily: theme.fonts.medium,
-      fontSize: 12,
+    quickActionRow: {
+      flexDirection: "row",
+      gap: theme.spacing.xs,
     },
-    editButton: {
-      marginTop: 2,
-      width: 40,
-      height: 40,
-      borderRadius: 20,
+    quickActionButton: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: isCompactLandscape ? theme.radii.md : theme.radii.lg,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 11,
+      paddingVertical: 10,
+      gap: 4,
+      shadowColor: theme.shadows.color,
+      shadowOpacity: theme.mode === "dark" ? 0.18 : 0.08,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 1,
+    },
+    quickActionPressed: {
+      opacity: 0.94,
+      transform: [{ scale: 0.995 }],
+    },
+    quickActionIcon: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: theme.colors.primarySoft,
       borderWidth: 1,
-      borderColor: theme.colors.ring,
+    },
+    quickActionIconWa: {
+      borderColor: theme.mode === "dark" ? "rgba(56,211,133,0.46)" : "rgba(31,158,99,0.3)",
+      backgroundColor: theme.mode === "dark" ? "rgba(56,211,133,0.15)" : "rgba(31,158,99,0.1)",
+    },
+    quickActionIconTel: {
+      borderColor: theme.mode === "dark" ? "rgba(112,177,255,0.46)" : "rgba(42,124,226,0.3)",
+      backgroundColor: theme.mode === "dark" ? "rgba(112,177,255,0.17)" : "rgba(42,124,226,0.1)",
+    },
+    quickActionTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13,
+      lineHeight: 18,
+    },
+    quickActionSubtitle: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 15,
     },
     panel: {
       gap: theme.spacing.xs,
     },
-    sectionTitleRow: {
+    sectionHeader: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
@@ -308,60 +475,82 @@ function createStyles(theme: AppTheme) {
       fontSize: 17,
       lineHeight: 23,
     },
-    actionButtonsRow: {
+    expandButton: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 8,
+      gap: 2,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 9,
+      paddingVertical: 5,
     },
-    actionButton: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
+    expandLabel: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 10,
+      textTransform: "uppercase",
+      letterSpacing: 0.45,
+    },
+    infoRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 10,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
+    infoIconWrap: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
       alignItems: "center",
       justifyContent: "center",
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
-      backgroundColor: theme.colors.surfaceSoft,
+      backgroundColor: theme.colors.surface,
     },
-    infoRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-    },
-    infoText: {
+    infoTextWrap: {
       flex: 1,
+      gap: 1,
+      minWidth: 0,
+    },
+    infoLabel: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 10,
+      textTransform: "uppercase",
+      letterSpacing: 0.35,
+    },
+    infoValue: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.medium,
-      fontSize: 14,
-      lineHeight: 21,
+      fontSize: 13,
+      lineHeight: 19,
     },
-    infoTextMuted: {
+    infoValueMuted: {
       color: theme.colors.textMuted,
-    },
-    expandButton: {
-      marginTop: 2,
-      alignSelf: "center",
-      width: 34,
-      height: 34,
-      borderRadius: 17,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: theme.colors.surfaceSoft,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
     },
     financeRow: {
       flexDirection: "row",
       alignItems: "stretch",
-      justifyContent: "space-between",
-      gap: 8,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surfaceSoft,
+      overflow: "hidden",
     },
     financeItem: {
       flex: 1,
       alignItems: "center",
       justifyContent: "center",
+      paddingHorizontal: 8,
+      paddingVertical: 10,
       gap: 2,
-      paddingVertical: 6,
     },
     financeDivider: {
       width: 1,
@@ -369,22 +558,36 @@ function createStyles(theme: AppTheme) {
     },
     financeValue: {
       color: theme.colors.info,
-      fontFamily: theme.fonts.bold,
-      fontSize: 38,
-      lineHeight: 43,
+      fontFamily: theme.fonts.heavy,
+      fontSize: isCompactLandscape ? 22 : 25,
+      lineHeight: isCompactLandscape ? 27 : 30,
     },
     financeLabel: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 14,
+      fontSize: 12,
     },
-    emptyText: {
+    placeholderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+    },
+    placeholderText: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
-      fontSize: 15,
-      lineHeight: 22,
+      fontSize: 13,
+      lineHeight: 18,
     },
     errorWrap: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 7,
       borderWidth: 1,
       borderColor: theme.mode === "dark" ? "#6c3242" : "#f0bbc5",
       borderRadius: theme.radii.md,
@@ -393,10 +596,11 @@ function createStyles(theme: AppTheme) {
       paddingVertical: 9,
     },
     errorText: {
+      flex: 1,
       color: theme.colors.danger,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
-      lineHeight: 18,
+      lineHeight: 17,
     },
   });
 }

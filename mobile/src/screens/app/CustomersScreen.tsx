@@ -1,8 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useCallback, useMemo, useState } from "react";
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
@@ -19,8 +19,10 @@ import { useAppTheme } from "../../theme/useAppTheme";
 import type { Customer } from "../../types/customer";
 
 const INITIAL_LIMIT = 80;
+const SEARCH_DEBOUNCE_MS = 300;
 
 type SortMode = "az" | "latest";
+type LoadMode = "initial" | "refresh";
 
 function isNewCustomer(createdAt: string): boolean {
   const createdTime = new Date(createdAt).getTime();
@@ -28,8 +30,7 @@ function isNewCustomer(createdAt: string): boolean {
     return false;
   }
 
-  const diffMs = Date.now() - createdTime;
-  return diffMs <= 1000 * 60 * 60 * 24 * 7;
+  return Date.now() - createdTime <= 1000 * 60 * 60 * 24 * 7;
 }
 
 function customerInitials(name: string): string {
@@ -45,9 +46,20 @@ function customerInitials(name: string): string {
   return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
 }
 
+function resolveAvatarTone(name: string): string {
+  const tones = ["#f5a300", "#1fa3e8", "#35b76c", "#e08a1a", "#5b79f6"];
+  const seed = name.trim().toUpperCase().charCodeAt(0) || 0;
+  return tones[seed % tones.length];
+}
+
 export function CustomersScreen() {
   const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const { width, height } = useWindowDimensions();
+  const minEdge = Math.min(width, height);
+  const isLandscape = width > height;
+  const isTablet = minEdge >= 600;
+  const isCompactLandscape = isLandscape && !isTablet;
+  const styles = useMemo(() => createStyles(theme, isTablet, isLandscape, isCompactLandscape), [theme, isTablet, isLandscape, isCompactLandscape]);
   const navigation = useNavigation<NativeStackNavigationProp<AccountStackParamList, "Customers">>();
   const { session } = useSession();
   const roles = session?.roles ?? [];
@@ -55,94 +67,119 @@ export function CustomersScreen() {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("az");
+  const [queryInput, setQueryInput] = useState("");
+  const [submittedQuery, setSubmittedQuery] = useState("");
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const openCustomerDetail = useCallback(
-    (customer: Customer): void => {
-      navigation.navigate("CustomerDetail", { customer });
-    },
-    [navigation]
-  );
+  const firstFocusHandledRef = useRef(false);
+  const requestIdRef = useRef(0);
 
-  const openCustomerForm = useCallback(
-    (customer: Customer): void => {
-      navigation.navigate("CustomerForm", {
-        mode: "edit",
-        customer,
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setSubmittedQuery(queryInput.trim());
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => clearTimeout(timeout);
+  }, [queryInput]);
+
+  const loadCustomers = useCallback(async (mode: LoadMode, query: string): Promise<void> => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+
+    if (mode === "refresh") {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+
+    setErrorMessage(null);
+
+    try {
+      const data = await listCustomers({
+        limit: INITIAL_LIMIT,
+        query: query || undefined,
+        forceRefresh: mode === "refresh",
       });
-    },
-    [navigation]
-  );
 
-  const loadCustomers = useCallback(
-    async (isRefresh: boolean, query?: string): Promise<void> => {
-      if (isRefresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
+      if (requestId !== requestIdRef.current) {
+        return;
       }
 
-      setErrorMessage(null);
-
-      try {
-        const data = await listCustomers({
-          limit: INITIAL_LIMIT,
-          query: query?.trim() || undefined,
-          forceRefresh: isRefresh,
-        });
-        setCustomers(data);
-      } catch (error) {
-        setErrorMessage(getApiErrorMessage(error));
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
+      setCustomers(data);
+    } catch (error) {
+      if (requestId !== requestIdRef.current) {
+        return;
       }
-    },
-    []
-  );
+
+      setErrorMessage(getApiErrorMessage(error));
+    } finally {
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    firstFocusHandledRef.current = false;
+  }, [submittedQuery]);
+
+  useEffect(() => {
+    void loadCustomers("initial", submittedQuery);
+  }, [loadCustomers, submittedQuery]);
 
   useFocusEffect(
     useCallback(() => {
-      void loadCustomers(false, search);
-    }, [loadCustomers, search])
+      if (!firstFocusHandledRef.current) {
+        firstFocusHandledRef.current = true;
+        return;
+      }
+
+      void loadCustomers("refresh", submittedQuery);
+    }, [loadCustomers, submittedQuery])
   );
 
-  const visibleCustomers = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
-    const filtered = normalizedSearch
-      ? customers.filter((customer) => {
-          const meta = parseCustomerProfileMeta(customer.notes);
-          return (
-            customer.name.toLowerCase().includes(normalizedSearch) ||
-            customer.phone_normalized.toLowerCase().includes(normalizedSearch) ||
-            meta.note.toLowerCase().includes(normalizedSearch)
-          );
-        })
-      : customers;
+  const sortedCustomers = useMemo(() => {
+    const result = [...customers];
 
-    const sorted = [...filtered];
     if (sortMode === "latest") {
-      sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     } else {
-      sorted.sort((a, b) => a.name.localeCompare(b.name, "id-ID"));
+      result.sort((a, b) => a.name.localeCompare(b.name, "id-ID"));
     }
 
-    return sorted;
-  }, [customers, search, sortMode]);
+    return result;
+  }, [customers, sortMode]);
+
+  const newCustomersCount = useMemo(() => customers.filter((item) => isNewCustomer(item.created_at)).length, [customers]);
+
+  const sortLabel = sortMode === "az" ? "A-Z" : "Terbaru";
+
+  function openCustomerDetail(customer: Customer): void {
+    navigation.navigate("CustomerDetail", { customer });
+  }
+
+  function openCustomerForm(mode: "create" | "edit", customer?: Customer): void {
+    navigation.navigate("CustomerForm", {
+      mode,
+      customer,
+    });
+  }
 
   function renderSkeletonList() {
     return (
       <View style={styles.skeletonWrap}>
         {Array.from({ length: 5 }).map((_, index) => (
           <View key={`customer-skeleton-${index}`} style={styles.skeletonRow}>
-            <AppSkeletonBlock width={52} height={52} radius={26} />
+            <AppSkeletonBlock height={52} radius={26} width={52} />
             <View style={styles.skeletonTextWrap}>
-              <AppSkeletonBlock width="48%" height={14} />
-              <AppSkeletonBlock width="64%" height={12} />
+              <AppSkeletonBlock height={14} width="44%" />
+              <AppSkeletonBlock height={12} width="58%" />
+              <AppSkeletonBlock height={11} width="76%" />
             </View>
           </View>
         ))}
@@ -152,60 +189,63 @@ export function CustomersScreen() {
 
   function renderItem({ item }: { item: Customer }) {
     const meta = parseCustomerProfileMeta(item.notes);
-    const subtitle = meta.note || formatCustomerPhoneDisplay(item.phone_normalized);
+    const phoneText = formatCustomerPhoneDisplay(item.phone_normalized);
+    const noteText = meta.note || "Tanpa catatan";
     const isNew = isNewCustomer(item.created_at);
 
     return (
-      <View style={styles.customerRow}>
-        <View style={styles.avatar}>
+      <Pressable onPress={() => openCustomerDetail(item)} style={({ pressed }) => [styles.customerCard, pressed ? styles.customerCardPressed : null]}>
+        <View style={[styles.avatar, { backgroundColor: resolveAvatarTone(item.name) }]}>
           <Text style={styles.avatarText}>{customerInitials(item.name)}</Text>
         </View>
 
         <View style={styles.customerMain}>
           <View style={styles.customerNameRow}>
-            <Pressable onPress={() => openCustomerDetail(item)} style={({ pressed }) => [styles.namePressable, pressed ? styles.namePressed : null]}>
-              <Text numberOfLines={1} style={styles.customerName}>
-                {item.name}
-              </Text>
-            </Pressable>
+            <Text numberOfLines={1} style={styles.customerName}>
+              {item.name}
+            </Text>
+
             {isNew ? (
               <View style={styles.badgeNew}>
                 <Text style={styles.badgeNewText}>Baru</Text>
               </View>
             ) : null}
-            {canCreateOrEdit ? (
-              <Pressable onPress={() => openCustomerForm(item)} style={styles.editInlineButton}>
-                <Ionicons color={theme.colors.info} name="create-outline" size={18} />
-              </Pressable>
-            ) : null}
           </View>
-          <Pressable onPress={() => openCustomerDetail(item)} style={({ pressed }) => (pressed ? styles.subTextPressed : null)}>
+
+          <View style={styles.lineRow}>
+            <Ionicons color={theme.colors.textMuted} name="call-outline" size={13} />
             <Text numberOfLines={1} style={styles.customerPhone}>
-              {subtitle}
+              {phoneText}
             </Text>
-          </Pressable>
+          </View>
+
+          <View style={styles.lineRow}>
+            <Ionicons color={theme.colors.textMuted} name="document-text-outline" size={13} />
+            <Text numberOfLines={1} style={[styles.customerMeta, !meta.note ? styles.customerMetaMuted : null]}>
+              {noteText}
+            </Text>
+          </View>
         </View>
-      </View>
+
+        <View style={styles.trailingActions}>
+          {canCreateOrEdit ? (
+            <Pressable onPress={() => openCustomerForm("edit", item)} style={styles.editInlineButton}>
+              <Ionicons color={theme.colors.info} name="create-outline" size={17} />
+            </Pressable>
+          ) : null}
+          <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={17} />
+        </View>
+      </Pressable>
     );
   }
 
   function renderEmptyState() {
     return (
       <AppPanel style={styles.emptyPanel}>
+        <Ionicons color={theme.colors.info} name="people-outline" size={28} />
         <Text style={styles.emptyTitle}>Belum ada pelanggan</Text>
-        <Text style={styles.emptyText}>
-          {search.trim() ? "Tidak ada data yang cocok dengan pencarian." : "Tambah pelanggan pertama untuk mulai transaksi lebih cepat."}
-        </Text>
-        {canCreateOrEdit ? (
-          <AppButton
-            onPress={() =>
-              navigation.navigate("CustomerForm", {
-                mode: "create",
-              })
-            }
-            title="Tambah Pelanggan"
-          />
-        ) : null}
+        <Text style={styles.emptyText}>{queryInput.trim() ? "Tidak ada data sesuai kata kunci." : "Tambah pelanggan pertama untuk mempercepat transaksi harian."}</Text>
+        {canCreateOrEdit ? <AppButton onPress={() => openCustomerForm("create")} title="Tambah Pelanggan" /> : null}
       </AppPanel>
     );
   }
@@ -214,196 +254,276 @@ export function CustomersScreen() {
     <AppScreen scroll={false}>
       <FlatList
         contentContainerStyle={styles.content}
-        data={loading ? [] : visibleCustomers}
+        data={loading ? [] : sortedCustomers}
         keyExtractor={(item) => item.id}
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           <View style={styles.headerWrap}>
-            <View style={styles.topBar}>
-              <Pressable onPress={() => navigation.goBack()} style={styles.topIconButton}>
-                <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={22} />
-              </Pressable>
-              <Text style={styles.brandText}>Cuci Laundry</Text>
-              <Pressable onPress={() => setSortMode((mode) => (mode === "az" ? "latest" : "az"))} style={styles.topIconButton}>
-                <Ionicons color={theme.colors.info} name={sortMode === "az" ? "text" : "time-outline"} size={20} />
-              </Pressable>
+            <View style={styles.heroCard}>
+              <View style={styles.heroLayerPrimary} />
+              <View style={styles.heroLayerSecondary} />
+              <View style={styles.heroGlow} />
+
+              <View style={styles.heroContent}>
+                <View style={styles.heroTopRow}>
+                  <Pressable onPress={() => navigation.goBack()} style={styles.topIconButton}>
+                    <Ionicons color="#eaf6ff" name="arrow-back" size={21} />
+                  </Pressable>
+
+                  <View style={styles.heroBrandWrap}>
+                    <Text style={styles.brandText}>Cuci Laundry</Text>
+                    <Text style={styles.heroSubtitle}>Pelanggan</Text>
+                  </View>
+
+                  <Pressable onPress={() => setSortMode((mode) => (mode === "az" ? "latest" : "az"))} style={styles.sortPill}>
+                    <Ionicons color="#eaf6ff" name={sortMode === "az" ? "text-outline" : "time-outline"} size={13} />
+                    <Text style={styles.sortPillText}>{sortLabel}</Text>
+                  </Pressable>
+                </View>
+
+                <View style={styles.heroMetrics}>
+                  <View style={styles.heroMetricItem}>
+                    <Text style={styles.heroMetricValue}>{customers.length}</Text>
+                    <Text style={styles.heroMetricLabel}>Total</Text>
+                  </View>
+                  <View style={styles.heroDivider} />
+                  <View style={styles.heroMetricItem}>
+                    <Text style={styles.heroMetricValue}>{newCustomersCount}</Text>
+                    <Text style={styles.heroMetricLabel}>Baru</Text>
+                  </View>
+                  <View style={styles.heroDivider} />
+                  <View style={styles.heroMetricItem}>
+                    <Text style={styles.heroMetricValue}>{sortedCustomers.length}</Text>
+                    <Text style={styles.heroMetricLabel}>Tampil</Text>
+                  </View>
+                </View>
+              </View>
             </View>
 
-            <AppPanel style={styles.headerPanel}>
-              <View style={styles.headerTitleRow}>
-                <Text style={styles.headerTitle}>Pelanggan ({visibleCustomers.length})</Text>
-                <Pressable onPress={() => setSearchOpen((value) => !value)} style={styles.searchToggleButton}>
-                  <Ionicons color={theme.colors.textPrimary} name={searchOpen ? "close" : "search"} size={22} />
+            <View style={styles.searchWrap}>
+              <Ionicons color={theme.colors.textMuted} name="search-outline" size={18} />
+              <TextInput
+                onChangeText={setQueryInput}
+                onSubmitEditing={() => void loadCustomers("refresh", queryInput.trim())}
+                placeholder="Cari nama, nomor, atau catatan..."
+                placeholderTextColor={theme.colors.textMuted}
+                returnKeyType="search"
+                style={styles.searchInput}
+                value={queryInput}
+              />
+              {queryInput ? (
+                <Pressable onPress={() => setQueryInput("")} style={styles.clearButton}>
+                  <Ionicons color={theme.colors.textMuted} name="close-circle" size={18} />
                 </Pressable>
-              </View>
-
-              {searchOpen ? (
-                <View style={styles.searchRow}>
-                  <TextInput
-                    onChangeText={setSearch}
-                    onSubmitEditing={() => void loadCustomers(true, search)}
-                    placeholder="Cari nama / nomor..."
-                    placeholderTextColor={theme.colors.textMuted}
-                    returnKeyType="search"
-                    style={styles.searchInput}
-                    value={search}
-                  />
-                  <View style={styles.searchButtonWrap}>
-                    <AppButton onPress={() => void loadCustomers(true, search)} title="Cari" variant="secondary" />
-                  </View>
-                </View>
-              ) : (
-                <View style={styles.filterRow}>
-                  <View style={styles.filterChipActive}>
-                    <Text style={styles.filterChipActiveText}>Semua</Text>
-                  </View>
-                  <View style={styles.filterChip}>
-                    <Text style={styles.filterChipText}>{sortMode === "az" ? "A-Z" : "Terbaru"}</Text>
-                  </View>
-                </View>
-              )}
-            </AppPanel>
+              ) : null}
+            </View>
 
             {errorMessage ? (
               <View style={styles.errorWrap}>
+                <Ionicons color={theme.colors.danger} name="warning-outline" size={16} />
                 <Text style={styles.errorText}>{errorMessage}</Text>
               </View>
             ) : null}
           </View>
         }
         ListEmptyComponent={loading ? renderSkeletonList() : renderEmptyState()}
-        onRefresh={() => void loadCustomers(true, search)}
+        onRefresh={() => void loadCustomers("refresh", submittedQuery)}
         refreshing={refreshing}
         renderItem={renderItem}
         showsVerticalScrollIndicator={false}
       />
 
       {canCreateOrEdit ? (
-        <Pressable
-          onPress={() =>
-            navigation.navigate("CustomerForm", {
-              mode: "create",
-            })
-          }
-          style={styles.fabButton}
-        >
-          <Ionicons color={theme.colors.primaryContrast} name="add" size={32} />
+        <Pressable onPress={() => openCustomerForm("create")} style={styles.fabButton}>
+          <Ionicons color={theme.colors.primaryContrast} name="add" size={30} />
         </Pressable>
       ) : null}
     </AppScreen>
   );
 }
 
-function createStyles(theme: AppTheme) {
+function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, isCompactLandscape: boolean) {
   return StyleSheet.create({
     content: {
-      paddingHorizontal: theme.spacing.lg,
-      paddingTop: theme.spacing.md,
+      paddingHorizontal: isCompactLandscape ? theme.spacing.md : theme.spacing.lg,
+      paddingTop: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
       paddingBottom: 112,
       gap: theme.spacing.xs,
     },
     headerWrap: {
       gap: theme.spacing.sm,
     },
-    topBar: {
+    heroCard: {
+      position: "relative",
+      borderRadius: isTablet ? 28 : isCompactLandscape ? 20 : 24,
+      overflow: "hidden",
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? "rgba(91,174,255,0.35)" : "rgba(83,166,248,0.32)",
+      minHeight: isTablet ? 174 : isLandscape ? 156 : 172,
+      backgroundColor: "#1368bc",
+    },
+    heroLayerPrimary: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: "#1368bc",
+    },
+    heroLayerSecondary: {
+      position: "absolute",
+      top: 0,
+      right: -40,
+      bottom: 0,
+      width: "68%",
+      backgroundColor: "#1fa3e8",
+      opacity: 0.74,
+    },
+    heroGlow: {
+      position: "absolute",
+      right: -72,
+      top: -80,
+      width: 200,
+      height: 200,
+      borderRadius: 130,
+      borderWidth: 28,
+      borderColor: "rgba(255,255,255,0.12)",
+    },
+    heroContent: {
+      paddingHorizontal: isCompactLandscape ? theme.spacing.md : theme.spacing.lg,
+      paddingVertical: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
+      gap: isCompactLandscape ? 8 : theme.spacing.sm,
+    },
+    heroTopRow: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
+      gap: theme.spacing.xs,
     },
     topIconButton: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: theme.colors.surface,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-    },
-    brandText: {
-      color: theme.colors.info,
-      fontFamily: theme.fonts.heavy,
-      fontSize: 23,
-      letterSpacing: 0.3,
-    },
-    headerPanel: {
-      gap: theme.spacing.sm,
-    },
-    headerTitleRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: theme.spacing.sm,
-    },
-    headerTitle: {
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.bold,
-      fontSize: 20,
-      lineHeight: 26,
-    },
-    searchToggleButton: {
-      width: 36,
-      height: 36,
+      width: isCompactLandscape ? 34 : 36,
+      height: isCompactLandscape ? 34 : 36,
       borderRadius: 18,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: theme.colors.surfaceSoft,
       borderWidth: 1,
-      borderColor: theme.colors.border,
+      borderColor: "rgba(255,255,255,0.32)",
+      backgroundColor: "rgba(255,255,255,0.14)",
     },
-    searchRow: {
+    heroBrandWrap: {
+      flex: 1,
+      minWidth: 0,
+      alignItems: "center",
+      gap: 1,
+    },
+    brandText: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.heavy,
+      fontSize: isTablet ? 24 : isCompactLandscape ? 20 : 22,
+      lineHeight: isTablet ? 30 : isCompactLandscape ? 24 : 27,
+      letterSpacing: 0.3,
+    },
+    heroSubtitle: {
+      color: "rgba(233,247,255,0.9)",
+      fontFamily: theme.fonts.semibold,
+      fontSize: isCompactLandscape ? 10 : 11,
+      textTransform: "uppercase",
+      letterSpacing: 0.7,
+    },
+    sortPill: {
       flexDirection: "row",
       alignItems: "center",
-      gap: theme.spacing.xs,
+      gap: 4,
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.32)",
+      backgroundColor: "rgba(255,255,255,0.14)",
+      borderRadius: theme.radii.pill,
+      paddingHorizontal: 8,
+      paddingVertical: 5,
+      minWidth: 64,
+      justifyContent: "center",
     },
-    searchInput: {
+    sortPillText: {
+      color: "#eaf6ff",
+      fontFamily: theme.fonts.semibold,
+      fontSize: 10,
+    },
+    heroMetrics: {
+      flexDirection: "row",
+      alignItems: "stretch",
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.2)",
+      borderRadius: theme.radii.md,
+      backgroundColor: "rgba(5,32,61,0.16)",
+      overflow: "hidden",
+    },
+    heroMetricItem: {
       flex: 1,
+      alignItems: "center",
+      gap: 1,
+      paddingHorizontal: 10,
+      paddingVertical: isCompactLandscape ? 6 : 8,
+    },
+    heroMetricValue: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.heavy,
+      fontSize: isTablet ? 20 : isCompactLandscape ? 16 : 18,
+      lineHeight: isTablet ? 25 : isCompactLandscape ? 20 : 22,
+    },
+    heroMetricLabel: {
+      color: "rgba(228,244,255,0.9)",
+      fontFamily: theme.fonts.semibold,
+      fontSize: isCompactLandscape ? 9 : 10,
+      textTransform: "uppercase",
+      letterSpacing: 0.35,
+    },
+    heroDivider: {
+      width: 1,
+      backgroundColor: "rgba(255,255,255,0.2)",
+    },
+    searchWrap: {
+      flexDirection: "row",
+      alignItems: "center",
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
       borderRadius: theme.radii.md,
       backgroundColor: theme.colors.inputBg,
+      minHeight: isCompactLandscape ? 42 : 46,
+      paddingLeft: 10,
+      paddingRight: 8,
+      gap: 4,
+    },
+    searchInput: {
+      flex: 1,
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.medium,
-      fontSize: 13,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
+      fontSize: isCompactLandscape ? 12 : 13,
+      paddingVertical: isCompactLandscape ? 9 : 11,
+      paddingHorizontal: 6,
     },
-    searchButtonWrap: {
-      minWidth: 94,
-    },
-    filterRow: {
-      flexDirection: "row",
+    clearButton: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
       alignItems: "center",
-      gap: theme.spacing.xs,
+      justifyContent: "center",
     },
-    filterChipActive: {
+    errorWrap: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 7,
       borderWidth: 1,
-      borderColor: theme.colors.info,
-      borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.info,
-      paddingHorizontal: 16,
-      paddingVertical: 8,
+      borderColor: theme.mode === "dark" ? "#6c3242" : "#f0bbc5",
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.mode === "dark" ? "#482633" : "#fff1f4",
+      paddingHorizontal: 12,
+      paddingVertical: 9,
     },
-    filterChipActiveText: {
-      color: theme.colors.primaryContrast,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 13,
-    },
-    filterChip: {
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surfaceSoft,
-      paddingHorizontal: 16,
-      paddingVertical: 8,
-    },
-    filterChipText: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 13,
+    errorText: {
+      flex: 1,
+      color: theme.colors.danger,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 17,
     },
     skeletonWrap: {
-      gap: theme.spacing.xs,
+      gap: isCompactLandscape ? 8 : theme.spacing.xs,
     },
     skeletonRow: {
       flexDirection: "row",
@@ -411,77 +531,106 @@ function createStyles(theme: AppTheme) {
       gap: theme.spacing.sm,
       borderWidth: 1,
       borderColor: theme.colors.border,
-      borderRadius: theme.radii.lg,
+      borderRadius: isCompactLandscape ? theme.radii.md : theme.radii.lg,
       backgroundColor: theme.colors.surface,
-      paddingHorizontal: 11,
-      paddingVertical: 10,
+      paddingHorizontal: isCompactLandscape ? 10 : 11,
+      paddingVertical: isCompactLandscape ? 9 : 10,
     },
     skeletonTextWrap: {
       flex: 1,
       gap: 6,
     },
-    customerRow: {
+    customerCard: {
       flexDirection: "row",
       alignItems: "center",
       gap: theme.spacing.sm,
       borderWidth: 1,
       borderColor: theme.colors.border,
-      borderRadius: theme.radii.lg,
+      borderRadius: isCompactLandscape ? theme.radii.md : theme.radii.lg,
       backgroundColor: theme.colors.surface,
-      paddingHorizontal: 10,
-      paddingVertical: 10,
+      paddingHorizontal: isCompactLandscape ? 10 : 11,
+      paddingVertical: isCompactLandscape ? 9 : 10,
+      shadowColor: theme.shadows.color,
+      shadowOpacity: theme.mode === "dark" ? 0.18 : 0.08,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 1,
+      minHeight: isCompactLandscape ? 86 : 94,
+    },
+    customerCardPressed: {
+      opacity: 0.94,
+      transform: [{ scale: 0.995 }],
     },
     avatar: {
-      width: 50,
-      height: 50,
-      borderRadius: 25,
+      width: isCompactLandscape ? 46 : 50,
+      height: isCompactLandscape ? 46 : 50,
+      borderRadius: isCompactLandscape ? 23 : 25,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: "#f5a300",
     },
     avatarText: {
       color: "#ffffff",
       fontFamily: theme.fonts.bold,
-      fontSize: 16,
+      fontSize: isCompactLandscape ? 14 : 16,
     },
     customerMain: {
       flex: 1,
       minWidth: 0,
-      gap: 2,
+      gap: 3,
     },
     customerNameRow: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 8,
+      gap: 7,
       minWidth: 0,
-    },
-    namePressable: {
-      flexShrink: 1,
-      minWidth: 0,
-    },
-    namePressed: {
-      opacity: 0.72,
     },
     customerName: {
       flexShrink: 1,
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 16,
-      lineHeight: 22,
+      fontSize: isCompactLandscape ? 15 : 16,
+      lineHeight: isCompactLandscape ? 20 : 22,
     },
     badgeNew: {
       borderRadius: theme.radii.pill,
       backgroundColor: "#f4bf4f",
-      paddingHorizontal: 10,
-      paddingVertical: 3,
+      paddingHorizontal: 9,
+      paddingVertical: 2,
     },
     badgeNewText: {
       color: "#ffffff",
       fontFamily: theme.fonts.semibold,
-      fontSize: 11,
+      fontSize: 10,
+    },
+    lineRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+    },
+    customerPhone: {
+      flex: 1,
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: isCompactLandscape ? 11 : 12,
+      lineHeight: isCompactLandscape ? 14 : 16,
+    },
+    customerMeta: {
+      flex: 1,
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: isCompactLandscape ? 10.5 : 11,
+      lineHeight: isCompactLandscape ? 14 : 15,
+    },
+    customerMetaMuted: {
+      color: theme.colors.textMuted,
+    },
+    trailingActions: {
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 4,
+      marginLeft: 2,
     },
     editInlineButton: {
-      marginLeft: "auto",
       width: 30,
       height: 30,
       borderRadius: 15,
@@ -491,17 +640,10 @@ function createStyles(theme: AppTheme) {
       borderWidth: 1,
       borderColor: theme.colors.ring,
     },
-    subTextPressed: {
-      opacity: 0.72,
-    },
-    customerPhone: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.medium,
-      fontSize: 12,
-    },
     emptyPanel: {
-      gap: theme.spacing.xs,
       marginTop: 4,
+      alignItems: "center",
+      gap: theme.spacing.xs,
     },
     emptyTitle: {
       color: theme.colors.textPrimary,
@@ -513,28 +655,15 @@ function createStyles(theme: AppTheme) {
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 18,
-    },
-    errorWrap: {
-      borderWidth: 1,
-      borderColor: theme.mode === "dark" ? "#6c3242" : "#f0bbc5",
-      borderRadius: theme.radii.md,
-      backgroundColor: theme.mode === "dark" ? "#482633" : "#fff1f4",
-      paddingHorizontal: 12,
-      paddingVertical: 9,
-    },
-    errorText: {
-      color: theme.colors.danger,
-      fontFamily: theme.fonts.medium,
-      fontSize: 12,
-      lineHeight: 18,
+      textAlign: "center",
     },
     fabButton: {
       position: "absolute",
-      right: 24,
-      bottom: 24,
-      width: 66,
-      height: 66,
-      borderRadius: 33,
+      right: isCompactLandscape ? 18 : 24,
+      bottom: isCompactLandscape ? 18 : 24,
+      width: isCompactLandscape ? 60 : 66,
+      height: isCompactLandscape ? 60 : 66,
+      borderRadius: isCompactLandscape ? 30 : 33,
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: theme.colors.primaryStrong,

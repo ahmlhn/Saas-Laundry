@@ -1,7 +1,8 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
@@ -22,15 +23,34 @@ import { useAppTheme } from "../../theme/useAppTheme";
 interface AccountMenuItem {
   title: string;
   subtitle: string;
+  icon: keyof typeof Ionicons.glyphMap;
   badge?: "Hot" | "Soon";
   route?: Exclude<keyof AccountStackParamList, "CustomerForm" | "CustomerDetail">;
   allowedRoles?: UserRole[];
   locked?: boolean;
 }
 
+function userInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    return "U";
+  }
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 1).toUpperCase();
+  }
+
+  return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
+}
+
 export function AccountHubScreen() {
   const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const { width, height } = useWindowDimensions();
+  const minEdge = Math.min(width, height);
+  const isLandscape = width > height;
+  const isTablet = minEdge >= 600;
+  const isCompactLandscape = isLandscape && !isTablet;
+  const styles = useMemo(() => createStyles(theme, isTablet, isCompactLandscape), [theme, isTablet, isCompactLandscape]);
   const navigation = useNavigation<NativeStackNavigationProp<AccountStackParamList, "AccountHub">>();
   const { session, selectedOutlet, selectOutlet, logout, biometricAvailable, biometricEnabled, biometricLabel, setBiometricEnabled } = useSession();
   const [biometricSaving, setBiometricSaving] = useState(false);
@@ -45,16 +65,53 @@ export function AccountHubScreen() {
   const planKey = session.plan.key ?? null;
   const waAllowed = canOpenWaModule(roles);
   const waPlanAllowed = isWaPlanEligible(planKey);
+  const outletLabel = selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "Outlet belum dipilih";
+  const roleLabel = roles.join(", ") || "-";
+  const quotaLabel =
+    session.quota.orders_remaining === null
+      ? "tanpa batas"
+      : `${session.quota.orders_remaining} sisa dari ${session.quota.orders_limit ?? "-"}`;
 
   const rawMenuItems: AccountMenuItem[] = [
-    { title: "Pelanggan Saya", subtitle: "Daftar pelanggan yang terdaftar di outlet", route: "Customers", allowedRoles: ["owner", "admin", "cashier"] },
-    { title: "Kelola Outlet", subtitle: "Daftar outlet, outlet aktif, dan status arsip", route: "Outlets", allowedRoles: ["owner", "admin"] },
-    { title: "Zona Antar", subtitle: "Atur radius, biaya, dan ETA antar per outlet", route: "ShippingZones", allowedRoles: ["owner", "admin"] },
-    { title: "Kelola Layanan/Produk", subtitle: "Lihat layanan, harga dasar, dan arsip", route: "Services", allowedRoles: ["owner", "admin"] },
-    { title: "Kelola Pegawai", subtitle: "Daftar akun tim, role, dan status arsip", route: "Staff", allowedRoles: ["owner", "admin"] },
+    {
+      title: "Pelanggan Saya",
+      subtitle: "Daftar pelanggan yang terdaftar di outlet",
+      icon: "people-outline",
+      route: "Customers",
+      allowedRoles: ["owner", "admin", "cashier"],
+    },
+    {
+      title: "Kelola Outlet",
+      subtitle: "Daftar outlet, outlet aktif, dan status arsip",
+      icon: "business-outline",
+      route: "Outlets",
+      allowedRoles: ["owner", "admin"],
+    },
+    {
+      title: "Zona Antar",
+      subtitle: "Atur radius, biaya, dan ETA antar per outlet",
+      icon: "navigate-outline",
+      route: "ShippingZones",
+      allowedRoles: ["owner", "admin"],
+    },
+    {
+      title: "Kelola Layanan/Produk",
+      subtitle: "Lihat layanan, harga dasar, dan arsip",
+      icon: "cube-outline",
+      route: "Services",
+      allowedRoles: ["owner", "admin"],
+    },
+    {
+      title: "Kelola Pegawai",
+      subtitle: "Daftar akun tim, role, dan status arsip",
+      icon: "people-circle-outline",
+      route: "Staff",
+      allowedRoles: ["owner", "admin"],
+    },
     {
       title: "Kelola Keuangan",
       subtitle: "Cashbox, pendapatan, pengeluaran, koreksi",
+      icon: "wallet-outline",
       route: "FinanceTools",
       allowedRoles: ["owner", "admin"],
       locked: !canManageFinance(roles),
@@ -62,6 +119,7 @@ export function AccountHubScreen() {
     {
       title: "Printer & Nota",
       subtitle: "Profil nota, nomor nota, tampilan struk",
+      icon: "print-outline",
       route: "PrinterNote",
       allowedRoles: ["owner", "admin", "cashier"],
       locked: !canManagePrinterNote(roles),
@@ -69,15 +127,39 @@ export function AccountHubScreen() {
     {
       title: "Kirim WA",
       subtitle: waPlanAllowed ? "Sebarkan pesan dan notifikasi pelanggan" : "Butuh plan Premium/Pro untuk fitur WhatsApp.",
+      icon: "logo-whatsapp",
       badge: "Hot",
       route: waPlanAllowed ? "WhatsAppTools" : undefined,
       allowedRoles: ["owner", "admin"],
       locked: !waPlanAllowed || !waAllowed,
     },
-    { title: "Profil Pemilik", subtitle: "Profil, bank, preferensi akun", allowedRoles: ["owner", "admin"] },
-    { title: "Go Online", subtitle: "Fasilitas pelanggan untuk order online", badge: "Hot", allowedRoles: ["owner", "admin"], locked: true },
-    { title: "Riwayat Pembelian Saya", subtitle: "Lihat riwayat pembelian layanan", allowedRoles: ["owner", "admin", "cashier", "worker", "courier"] },
-    { title: "Bantuan & Informasi", subtitle: "Kontak, FAQ, syarat, kebijakan", route: "HelpInfo", allowedRoles: ["owner", "admin", "cashier", "worker", "courier"] },
+    {
+      title: "Profil Pemilik",
+      subtitle: "Profil, bank, preferensi akun",
+      icon: "person-outline",
+      allowedRoles: ["owner", "admin"],
+    },
+    {
+      title: "Go Online",
+      subtitle: "Fasilitas pelanggan untuk order online",
+      icon: "globe-outline",
+      badge: "Hot",
+      allowedRoles: ["owner", "admin"],
+      locked: true,
+    },
+    {
+      title: "Riwayat Pembelian Saya",
+      subtitle: "Lihat riwayat pembelian layanan",
+      icon: "time-outline",
+      allowedRoles: ["owner", "admin", "cashier", "worker", "courier"],
+    },
+    {
+      title: "Bantuan & Informasi",
+      subtitle: "Kontak, FAQ, syarat, kebijakan",
+      icon: "help-circle-outline",
+      route: "HelpInfo",
+      allowedRoles: ["owner", "admin", "cashier", "worker", "courier"],
+    },
   ];
 
   const menuItems = rawMenuItems.filter((item) => !item.allowedRoles || hasAnyRole(roles, item.allowedRoles));
@@ -105,35 +187,52 @@ export function AccountHubScreen() {
 
   return (
     <AppScreen contentContainerStyle={styles.content} scroll>
-      <View style={styles.header}>
-        <Text style={styles.title}>Akun & Pengaturan</Text>
-        <Text style={styles.subtitle}>{selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "-"}</Text>
-      </View>
-
       <AppPanel style={styles.profilePanel}>
         <View style={styles.profileTop}>
+          <View style={styles.avatarWrap}>
+            <Text style={styles.avatarText}>{userInitials(session.user.name)}</Text>
+          </View>
           <View style={styles.profileIdentity}>
-            <Text style={styles.profileName}>{session.user.name}</Text>
-            <Text style={styles.profileEmail}>{session.user.email}</Text>
+            <Text numberOfLines={1} style={styles.profileName}>
+              {session.user.name}
+            </Text>
+            <Text numberOfLines={1} style={styles.profileEmail}>
+              {session.user.email}
+            </Text>
           </View>
           <StatusPill label={(session.plan.key ?? "free").toUpperCase()} tone="info" />
         </View>
-        <Text style={styles.profileMeta}>Role: {(session.roles ?? []).join(", ") || "-"}</Text>
-        <Text style={styles.profileMeta}>
-          Kuota:{" "}
-          {session.quota.orders_remaining === null
-            ? "tanpa batas"
-            : `${session.quota.orders_remaining} sisa dari ${session.quota.orders_limit ?? "-"}`}
-        </Text>
+        <View style={styles.profileMetaRow}>
+          <Ionicons color={theme.colors.textMuted} name="storefront-outline" size={14} />
+          <Text numberOfLines={1} style={styles.profileMeta}>
+            {outletLabel}
+          </Text>
+        </View>
+        <View style={styles.profileMetaRow}>
+          <Ionicons color={theme.colors.textMuted} name="person-circle-outline" size={14} />
+          <Text numberOfLines={1} style={styles.profileMeta}>
+            Role: {roleLabel}
+          </Text>
+        </View>
+        <View style={styles.profileMetaRow}>
+          <Ionicons color={theme.colors.textMuted} name="speedometer-outline" size={14} />
+          <Text numberOfLines={1} style={styles.profileMeta}>
+            Kuota order: {quotaLabel}
+          </Text>
+        </View>
       </AppPanel>
 
       <AppPanel style={styles.settingsPanel}>
-        <Text style={styles.settingsTitle}>Keamanan Login</Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.settingsTitle}>Keamanan Login</Text>
+          <Ionicons color={theme.colors.info} name="shield-checkmark-outline" size={17} />
+        </View>
         {biometricAvailable ? (
           <>
             <Text style={styles.settingsHint}>Aktifkan autentikasi {biometricLabel} saat membuka ulang aplikasi.</Text>
             <AppButton
               disabled={biometricSaving}
+              leftElement={<Ionicons color={biometricEnabled ? theme.colors.textPrimary : theme.colors.info} name="finger-print-outline" size={18} />}
               loading={biometricSaving}
               onPress={() => void handleToggleBiometric()}
               title={biometricEnabled ? `Nonaktifkan ${biometricLabel}` : `Aktifkan ${biometricLabel}`}
@@ -146,8 +245,13 @@ export function AccountHubScreen() {
       </AppPanel>
 
       <AppPanel style={styles.menuPanel}>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.settingsTitle}>Menu Akun</Text>
+          <Text style={styles.menuCount}>{menuItems.length} item</Text>
+        </View>
         {menuItems.map((item) => {
           const disabled = !item.route || item.locked;
+          const iconColor = disabled ? theme.colors.textMuted : theme.colors.info;
 
           return (
             <Pressable
@@ -159,8 +263,15 @@ export function AccountHubScreen() {
                 }
                 navigation.navigate(item.route);
               }}
-              style={({ pressed }) => [styles.menuItem, disabled ? styles.menuItemDisabled : null, !disabled && pressed ? styles.menuItemPressed : null]}
+              style={({ pressed }) => [
+                styles.menuItem,
+                disabled ? styles.menuItemDisabled : null,
+                !disabled && pressed ? styles.menuItemPressed : null,
+              ]}
             >
+              <View style={[styles.menuIconWrap, disabled ? styles.menuIconWrapDisabled : null]}>
+                <Ionicons color={iconColor} name={item.icon} size={17} />
+              </View>
               <View style={styles.menuTextWrap}>
                 <View style={styles.menuTitleRow}>
                   <Text style={[styles.menuTitle, disabled ? styles.menuTextDisabled : null]}>{item.title}</Text>
@@ -169,7 +280,7 @@ export function AccountHubScreen() {
                 </View>
                 <Text style={[styles.menuSubtitle, disabled ? styles.menuTextDisabled : null]}>{item.subtitle}</Text>
               </View>
-              <Text style={[styles.menuArrow, disabled ? styles.menuTextDisabled : null]}>›</Text>
+              <Ionicons color={disabled ? theme.colors.textMuted : theme.colors.textSecondary} name="chevron-forward" size={17} />
             </Pressable>
           );
         })}
@@ -177,62 +288,74 @@ export function AccountHubScreen() {
 
       {actionMessage ? (
         <View style={styles.successWrap}>
+          <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={16} />
           <Text style={styles.successText}>{actionMessage}</Text>
         </View>
       ) : null}
       {errorMessage ? (
         <View style={styles.errorWrap}>
+          <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
           <Text style={styles.errorText}>{errorMessage}</Text>
         </View>
       ) : null}
 
-      <View style={styles.actionStack}>
-        <AppButton
-          onPress={() => {
-            selectOutlet(null);
-          }}
-          title="Ganti Outlet Aktif"
-          variant="secondary"
-        />
-        <AppButton onPress={() => void logout()} title="Logout" variant="ghost" />
+      <View style={[styles.actionStack, isTablet || isCompactLandscape ? styles.actionStackWide : null]}>
+        <View style={styles.actionButtonWrap}>
+          <AppButton
+            leftElement={<Ionicons color={theme.colors.info} name="swap-horizontal-outline" size={18} />}
+            onPress={() => {
+              selectOutlet(null);
+            }}
+            title="Ganti Outlet Aktif"
+            variant="secondary"
+          />
+        </View>
+        <View style={styles.actionButtonWrap}>
+          <AppButton
+            leftElement={<Ionicons color={theme.colors.textPrimary} name="log-out-outline" size={18} />}
+            onPress={() => void logout()}
+            title="Logout"
+            variant="ghost"
+          />
+        </View>
       </View>
     </AppScreen>
   );
 }
 
-function createStyles(theme: AppTheme) {
+function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: boolean) {
   return StyleSheet.create({
     content: {
       flexGrow: 1,
-      paddingHorizontal: theme.spacing.lg,
-      paddingTop: theme.spacing.lg,
+      paddingHorizontal: isTablet ? theme.spacing.xl : theme.spacing.lg,
+      paddingTop: isCompactLandscape ? theme.spacing.md : theme.spacing.lg,
       paddingBottom: theme.spacing.xxl,
-      gap: theme.spacing.md,
-    },
-    header: {
-      gap: 2,
-    },
-    title: {
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.heavy,
-      fontSize: 27,
-      lineHeight: 34,
-    },
-    subtitle: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.medium,
-      fontSize: 13,
+      gap: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
     },
     profilePanel: {
       gap: theme.spacing.xs,
-      backgroundColor: theme.colors.surfaceSoft,
+      backgroundColor: theme.mode === "dark" ? "#122d46" : "#f2faff",
       borderColor: theme.colors.borderStrong,
     },
     profileTop: {
       flexDirection: "row",
-      alignItems: "flex-start",
-      justifyContent: "space-between",
+      alignItems: "center",
       gap: theme.spacing.sm,
+    },
+    avatarWrap: {
+      width: isTablet ? 52 : 48,
+      height: isTablet ? 52 : 48,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.mode === "dark" ? "#1a4466" : "#d5efff",
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    avatarText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.heavy,
+      fontSize: isTablet ? 18 : 16,
     },
     profileIdentity: {
       flex: 1,
@@ -241,14 +364,20 @@ function createStyles(theme: AppTheme) {
     profileName: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
-      fontSize: 17,
+      fontSize: isTablet ? 18 : 16,
     },
     profileEmail: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
     },
+    profileMetaRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+    },
     profileMeta: {
+      flex: 1,
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
@@ -259,10 +388,16 @@ function createStyles(theme: AppTheme) {
       backgroundColor: theme.colors.surfaceSoft,
       borderColor: theme.colors.borderStrong,
     },
+    sectionHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
+    },
     settingsTitle: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
-      fontSize: 15,
+      fontSize: isTablet ? 16 : 15,
     },
     settingsHint: {
       color: theme.colors.textMuted,
@@ -274,21 +409,38 @@ function createStyles(theme: AppTheme) {
       gap: 0,
       paddingVertical: 4,
     },
+    menuCount: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+    },
     menuItem: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
       borderBottomWidth: 1,
       borderBottomColor: theme.colors.border,
-      paddingHorizontal: 2,
       paddingVertical: 11,
       gap: theme.spacing.sm,
     },
     menuItemDisabled: {
-      opacity: 0.6,
+      opacity: 0.62,
     },
     menuItemPressed: {
       opacity: 0.84,
+    },
+    menuIconWrap: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.03)" : "#edf7ff",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    menuIconWrapDisabled: {
+      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.02)" : "#f6f9fc",
     },
     menuTextWrap: {
       flex: 1,
@@ -297,8 +449,8 @@ function createStyles(theme: AppTheme) {
     menuTitleRow: {
       flexDirection: "row",
       alignItems: "center",
-      gap: theme.spacing.xs,
       flexWrap: "wrap",
+      gap: theme.spacing.xs,
     },
     menuTitle: {
       color: theme.colors.textPrimary,
@@ -314,14 +466,15 @@ function createStyles(theme: AppTheme) {
     menuTextDisabled: {
       color: theme.colors.textMuted,
     },
-    menuArrow: {
-      color: theme.colors.textMuted,
-      fontFamily: theme.fonts.bold,
-      fontSize: 22,
-      marginRight: 2,
-    },
     actionStack: {
       gap: theme.spacing.xs,
+    },
+    actionStackWide: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    actionButtonWrap: {
+      flex: 1,
     },
     successWrap: {
       borderWidth: 1,
@@ -329,9 +482,13 @@ function createStyles(theme: AppTheme) {
       borderRadius: theme.radii.md,
       backgroundColor: theme.mode === "dark" ? "#173f2d" : "#edf9f1",
       paddingHorizontal: 12,
-      paddingVertical: 9,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
     },
     successText: {
+      flex: 1,
       color: theme.colors.success,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
@@ -343,9 +500,13 @@ function createStyles(theme: AppTheme) {
       borderRadius: theme.radii.md,
       backgroundColor: theme.mode === "dark" ? "#482633" : "#fff1f4",
       paddingHorizontal: 12,
-      paddingVertical: 9,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
     },
     errorText: {
+      flex: 1,
       color: theme.colors.danger,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
