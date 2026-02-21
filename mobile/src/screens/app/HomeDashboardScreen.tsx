@@ -1,9 +1,9 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
-import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { StatusPill } from "../../components/ui/StatusPill";
 import { countOrdersByBucket, type OrderBucket } from "../../features/orders/orderBuckets";
@@ -21,28 +21,66 @@ interface ShortcutConfig {
   key: OrderBucket | null;
   label: string;
   subtitle: string;
+  icon: keyof typeof Ionicons.glyphMap;
 }
 
 const SHORTCUTS: ShortcutConfig[] = [
-  { key: "validasi", label: "Validasi", subtitle: "Perlu konfirmasi" },
-  { key: "antrian", label: "Antrian", subtitle: "Menunggu proses" },
-  { key: "proses", label: "Proses", subtitle: "Sedang dikerjakan" },
-  { key: "siap_ambil", label: "Siap Ambil", subtitle: "Siap pickup" },
-  { key: "siap_antar", label: "Siap Antar", subtitle: "Siap delivery" },
-  { key: null, label: "Semua", subtitle: "Seluruh pesanan" },
+  { key: "validasi", label: "Validasi", subtitle: "Perlu konfirmasi", icon: "shield-checkmark-outline" },
+  { key: "antrian", label: "Antrian", subtitle: "Menunggu proses", icon: "time-outline" },
+  { key: "proses", label: "Proses", subtitle: "Sedang dikerjakan", icon: "color-wand-outline" },
+  { key: "siap_ambil", label: "Siap Ambil", subtitle: "Sudah selesai", icon: "bag-check-outline" },
+  { key: "siap_antar", label: "Siap Antar", subtitle: "Delivery queue", icon: "bicycle-outline" },
+  { key: null, label: "Semua", subtitle: "Seluruh pesanan", icon: "layers-outline" },
 ];
 
 const currencyFormatter = new Intl.NumberFormat("id-ID");
+const compactFormatter = new Intl.NumberFormat("id-ID", { notation: "compact", maximumFractionDigits: 1 });
 
 function formatMoney(value: number): string {
   return `Rp ${currencyFormatter.format(value)}`;
 }
 
+function formatCompact(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "0";
+  }
+
+  return compactFormatter.format(Math.max(value, 0));
+}
+
+function getGreetingLabel(): string {
+  const hour = new Date().getHours();
+  if (hour < 11) {
+    return "Selamat Pagi";
+  }
+  if (hour < 15) {
+    return "Selamat Siang";
+  }
+  if (hour < 19) {
+    return "Selamat Sore";
+  }
+
+  return "Selamat Malam";
+}
+
+function getTodayLabel(): string {
+  return new Intl.DateTimeFormat("id-ID", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(new Date());
+}
+
 export function HomeDashboardScreen() {
   const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const { width, height } = useWindowDimensions();
+  const minEdge = Math.min(width, height);
+  const isLandscape = width > height;
+  const isTablet = minEdge >= 600;
+  const styles = useMemo(() => createStyles(theme, isTablet, isLandscape), [theme, isTablet, isLandscape]);
   const navigation = useNavigation<Navigation>();
-  const { selectedOutlet, session, logout, refreshSession, selectOutlet } = useSession();
+  const { selectedOutlet, session, refreshSession } = useSession();
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -51,7 +89,7 @@ export function HomeDashboardScreen() {
   useEffect(() => {
     Animated.timing(entranceProgress, {
       toValue: 1,
-      duration: 520,
+      duration: 460,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
@@ -92,7 +130,7 @@ export function HomeDashboardScreen() {
         {
           translateY: entranceProgress.interpolate({
             inputRange: [0, 1],
-            outputRange: [-14, 0],
+            outputRange: [-16, 0],
           }),
         },
       ],
@@ -104,7 +142,7 @@ export function HomeDashboardScreen() {
     () => ({
       opacity: entranceProgress.interpolate({
         inputRange: [0, 0.2, 1],
-        outputRange: [0, 0.32, 1],
+        outputRange: [0, 0.34, 1],
       }),
       transform: [
         {
@@ -127,13 +165,36 @@ export function HomeDashboardScreen() {
   const quotaRemaining = session?.quota.orders_remaining ?? null;
   const quotaSummary =
     quotaRemaining === null
-      ? "Tanpa batas"
+      ? "Tanpa Batas"
       : quotaLimit && quotaLimit > 0
         ? `${quotaRemaining}/${quotaLimit}`
         : `${quotaRemaining}`;
   const selectedOutletLabel = selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "Outlet belum dipilih";
   const outletMeta = selectedOutlet ? `Timezone ${selectedOutlet.timezone}` : "Pilih outlet untuk mulai operasional";
   const planLabel = session?.plan.key ? session.plan.key.toUpperCase() : "FREE";
+  const greeting = getGreetingLabel();
+  const todayLabel = getTodayLabel();
+
+  const metricCards = [
+    { label: "Total Order", value: formatCompact(orders.length), icon: "receipt-outline" as const, tone: "info" as const },
+    { label: "Perlu Aksi", value: formatCompact(pendingCount), icon: "flash-outline" as const, tone: "warning" as const },
+    { label: "Belum Lunas", value: formatCompact(dueCount), icon: "wallet-outline" as const, tone: "danger" as const },
+    { label: "Sisa Kuota", value: quotaSummary, icon: "layers-outline" as const, tone: "success" as const },
+  ];
+
+  function metricToneColor(tone: "info" | "warning" | "danger" | "success"): string {
+    if (tone === "warning") {
+      return theme.colors.warning;
+    }
+    if (tone === "danger") {
+      return theme.colors.danger;
+    }
+    if (tone === "success") {
+      return theme.colors.success;
+    }
+
+    return theme.colors.info;
+  }
 
   function handleOpenOrders(bucket: OrderBucket | null): void {
     navigation.navigate(
@@ -151,24 +212,30 @@ export function HomeDashboardScreen() {
 
   return (
     <AppScreen contentContainerStyle={styles.content} scroll>
-      <Animated.View style={[styles.heroShell, heroAnimatedStyle]}>
-        <View style={styles.heroBase} />
-        <View style={styles.heroLayer} />
-        <View style={styles.heroRing} />
-        <View style={styles.heroWaveMain} />
-        <View style={styles.heroWaveAccent} />
+      <Animated.View style={[styles.heroCard, heroAnimatedStyle]}>
+        <View style={styles.heroLayerPrimary} />
+        <View style={styles.heroLayerSecondary} />
+        <View style={styles.heroGlowLarge} />
+        <View style={styles.heroGlowSmall} />
 
         <View style={styles.heroContent}>
-          <View style={styles.brandRow}>
-            <View style={styles.brandBadge}>
-              <Text style={styles.brandBadgeText}>CL</Text>
+          <View style={styles.heroTopRow}>
+            <View style={styles.brandWrap}>
+              <View style={styles.brandBadge}>
+                <Ionicons color="#ffffff" name="water-outline" size={18} />
+              </View>
+              <View style={styles.brandTextWrap}>
+                <Text style={styles.brandTitle}>Cuci Laundry</Text>
+                <Text style={styles.brandSubtitle}>OPERASIONAL HARI INI</Text>
+              </View>
             </View>
-            <View style={styles.brandInfo}>
-              <Text style={styles.brandTitle}>Cuci Laundry</Text>
-              <Text style={styles.brandSubtitle}>Dashboard Operasional</Text>
+            <View style={styles.dateChip}>
+              <Ionicons color="#d5ecff" name="calendar-outline" size={12} />
+              <Text style={styles.dateChipText}>{todayLabel}</Text>
             </View>
           </View>
-          <Text style={styles.greeting}>Hai, {session?.user.name ?? "-"}</Text>
+
+          <Text style={styles.greeting}>{greeting}, {session?.user.name ?? "-"}</Text>
           <Text style={styles.outletLabel}>{selectedOutletLabel}</Text>
           <View style={styles.heroMetaRow}>
             <StatusPill label={`Plan ${planLabel}`} tone="info" />
@@ -177,8 +244,20 @@ export function HomeDashboardScreen() {
         </View>
       </Animated.View>
 
-      <Animated.View style={[styles.summaryWrap, bodyAnimatedStyle]}>
-        <AppPanel style={styles.summaryPanel}>
+      {errorMessage ? (
+        <Animated.View style={[styles.errorWrap, bodyAnimatedStyle]}>
+          <StatusPill label="Error API" tone="danger" />
+          <Text style={styles.errorText}>{errorMessage}</Text>
+        </Animated.View>
+      ) : null}
+
+      <Animated.View style={bodyAnimatedStyle}>
+        <AppPanel style={styles.sectionPanel}>
+          <View style={styles.sectionHead}>
+            <Text style={styles.sectionEyebrow}>Ringkasan</Text>
+            <Text style={styles.sectionTitle}>Kinerja Outlet</Text>
+          </View>
+
           {loading ? (
             <View style={styles.loadingWrap}>
               <ActivityIndicator color={theme.colors.info} />
@@ -186,31 +265,27 @@ export function HomeDashboardScreen() {
             </View>
           ) : (
             <>
-              <View style={styles.summaryGrid}>
-                <View style={styles.summaryCard}>
-                  <Text style={styles.summaryValue}>{orders.length}</Text>
-                  <Text style={styles.summaryLabel}>Total Order</Text>
-                </View>
-                <View style={styles.summaryCard}>
-                  <Text style={styles.summaryValue}>{pendingCount}</Text>
-                  <Text style={styles.summaryLabel}>Perlu Aksi</Text>
-                </View>
-                <View style={styles.summaryCard}>
-                  <Text style={styles.summaryValue}>{dueCount}</Text>
-                  <Text style={styles.summaryLabel}>Belum Lunas</Text>
-                </View>
-                <View style={styles.summaryCard}>
-                  <Text style={styles.summaryValue}>{quotaSummary}</Text>
-                  <Text style={styles.summaryLabel}>Sisa Kuota</Text>
-                </View>
+              <View style={styles.metricGrid}>
+                {metricCards.map((item) => (
+                  <View key={item.label} style={styles.metricCard}>
+                    <View style={styles.metricTopRow}>
+                      <View style={[styles.metricIconWrap, { backgroundColor: `${metricToneColor(item.tone)}19` }]}>
+                        <Ionicons color={metricToneColor(item.tone)} name={item.icon} size={16} />
+                      </View>
+                      <Text style={[styles.metricValue, { color: metricToneColor(item.tone) }]}>{item.value}</Text>
+                    </View>
+                    <Text style={styles.metricLabel}>{item.label}</Text>
+                  </View>
+                ))}
               </View>
-              <View style={styles.summaryDivider} />
-              <View style={styles.financeRow}>
-                <View style={styles.financeItem}>
+
+              <View style={styles.financeStrip}>
+                <View style={styles.financeBlock}>
                   <Text style={styles.financeLabel}>Nilai Transaksi</Text>
                   <Text style={styles.financeValue}>{formatMoney(totalSales)}</Text>
                 </View>
-                <View style={styles.financeItem}>
+                <View style={styles.financeDivider} />
+                <View style={styles.financeBlock}>
                   <Text style={styles.financeLabel}>Piutang Berjalan</Text>
                   <Text style={[styles.financeValue, dueAmountTotal > 0 ? styles.financeDanger : styles.financeSafe]}>{formatMoney(dueAmountTotal)}</Text>
                 </View>
@@ -222,7 +297,10 @@ export function HomeDashboardScreen() {
 
       <Animated.View style={bodyAnimatedStyle}>
         <AppPanel style={styles.sectionPanel}>
-          <Text style={styles.sectionTitle}>Akses Status Cepat</Text>
+          <View style={styles.sectionHead}>
+            <Text style={styles.sectionEyebrow}>Status</Text>
+            <Text style={styles.sectionTitle}>Akses Cepat</Text>
+          </View>
           <View style={styles.shortcutGrid}>
             {SHORTCUTS.map((item) => {
               const count = item.key ? bucketCounts[item.key] : orders.length;
@@ -232,8 +310,9 @@ export function HomeDashboardScreen() {
                   onPress={() => handleOpenOrders(item.key)}
                   style={({ pressed }) => [styles.shortcutItem, pressed ? styles.shortcutPressed : null]}
                 >
-                  <View style={styles.shortcutCountWrap}>
-                    <Text style={styles.shortcutCountText}>{count}</Text>
+                  <View style={styles.shortcutHeader}>
+                    <Ionicons color={theme.colors.info} name={item.icon} size={18} />
+                    <Text style={styles.shortcutCount}>{count}</Text>
                   </View>
                   <Text style={styles.shortcutLabel}>{item.label}</Text>
                   <Text style={styles.shortcutSubtitle}>{item.subtitle}</Text>
@@ -246,7 +325,10 @@ export function HomeDashboardScreen() {
 
       <Animated.View style={bodyAnimatedStyle}>
         <AppPanel style={styles.sectionPanel}>
-          <Text style={styles.sectionTitle}>Pintasan Analitik</Text>
+          <View style={styles.sectionHead}>
+            <Text style={styles.sectionEyebrow}>Analitik</Text>
+            <Text style={styles.sectionTitle}>Insight Cepat</Text>
+          </View>
           <Pressable
             onPress={() =>
               navigation.navigate("AccountTab", {
@@ -255,9 +337,16 @@ export function HomeDashboardScreen() {
             }
             style={({ pressed }) => [styles.quickLinkItem, pressed ? styles.quickLinkPressed : null]}
           >
-            <Text style={styles.quickLinkTitle}>Top Pelanggan</Text>
-            <Text style={styles.quickLinkSubtitle}>Lihat daftar pelanggan dan aktivitas transaksi terbaru.</Text>
+            <View style={styles.quickLinkIcon}>
+              <Ionicons color={theme.colors.info} name="people-outline" size={18} />
+            </View>
+            <View style={styles.quickLinkTextWrap}>
+              <Text style={styles.quickLinkTitle}>Pelanggan Aktif</Text>
+              <Text style={styles.quickLinkSubtitle}>Monitor profil pelanggan dan status terbaru.</Text>
+            </View>
+            <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={18} />
           </Pressable>
+
           <Pressable
             onPress={() =>
               navigation.navigate("AccountTab", {
@@ -266,35 +355,22 @@ export function HomeDashboardScreen() {
             }
             style={({ pressed }) => [styles.quickLinkItem, pressed ? styles.quickLinkPressed : null]}
           >
-            <Text style={styles.quickLinkTitle}>Top Layanan</Text>
-            <Text style={styles.quickLinkSubtitle}>Pantau layanan paling sering dipesan dari modul layanan.</Text>
+            <View style={styles.quickLinkIcon}>
+              <Ionicons color={theme.colors.warning} name="pricetags-outline" size={18} />
+            </View>
+            <View style={styles.quickLinkTextWrap}>
+              <Text style={styles.quickLinkTitle}>Layanan Favorit</Text>
+              <Text style={styles.quickLinkSubtitle}>Cek layanan terlaris dan update harga lebih cepat.</Text>
+            </View>
+            <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={18} />
           </Pressable>
         </AppPanel>
       </Animated.View>
-
-      <Animated.View style={[styles.actions, bodyAnimatedStyle]}>
-        <AppButton onPress={() => void loadDashboard()} title="Refresh Dashboard" variant="secondary" />
-        <AppButton
-          onPress={() => {
-            selectOutlet(null);
-          }}
-          title="Ganti Outlet"
-          variant="ghost"
-        />
-        <AppButton onPress={() => void logout()} title="Logout" variant="ghost" />
-      </Animated.View>
-
-      {errorMessage ? (
-        <Animated.View style={[styles.errorWrap, bodyAnimatedStyle]}>
-          <StatusPill label="Error API" tone="danger" />
-          <Text style={styles.errorText}>{errorMessage}</Text>
-        </Animated.View>
-      ) : null}
     </AppScreen>
   );
 }
 
-function createStyles(theme: AppTheme) {
+function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) {
   return StyleSheet.create({
     content: {
       flexGrow: 1,
@@ -303,108 +379,121 @@ function createStyles(theme: AppTheme) {
       paddingBottom: theme.spacing.xxl,
       gap: theme.spacing.md,
     },
-    heroShell: {
+    heroCard: {
       position: "relative",
-      height: 222,
-      borderRadius: 28,
+      borderRadius: isTablet ? 30 : 26,
       overflow: "hidden",
+      minHeight: isTablet ? 228 : isLandscape ? 196 : 214,
+      borderWidth: 1,
+      borderColor: "rgba(157,214,255,0.34)",
+      backgroundColor: "#0f5ea8",
     },
-    heroBase: {
+    heroLayerPrimary: {
       ...StyleSheet.absoluteFillObject,
-      backgroundColor: "#1f86e4",
+      backgroundColor: "#0f5ea8",
     },
-    heroLayer: {
+    heroLayerSecondary: {
       position: "absolute",
       top: 0,
       right: 0,
       bottom: 0,
-      width: "70%",
-      backgroundColor: "#0b67cc",
-      opacity: 0.57,
+      width: "68%",
+      backgroundColor: "#1f8fe8",
+      opacity: 0.68,
     },
-    heroRing: {
+    heroGlowLarge: {
       position: "absolute",
       top: -88,
-      right: -70,
-      width: 220,
-      height: 220,
-      borderRadius: 110,
+      right: -72,
+      width: 230,
+      height: 230,
+      borderRadius: 140,
       borderWidth: 34,
-      borderColor: "rgba(255,255,255,0.09)",
+      borderColor: "rgba(255,255,255,0.1)",
     },
-    heroWaveMain: {
+    heroGlowSmall: {
       position: "absolute",
-      left: -56,
-      right: -50,
-      bottom: -120,
-      height: 198,
-      borderRadius: 150,
-      backgroundColor: "#ffffff",
-    },
-    heroWaveAccent: {
-      position: "absolute",
-      right: -44,
-      bottom: -76,
-      width: 168,
-      height: 96,
-      borderRadius: 70,
-      backgroundColor: "rgba(61, 226, 236, 0.58)",
+      left: -64,
+      bottom: -110,
+      width: 188,
+      height: 188,
+      borderRadius: 120,
+      backgroundColor: "rgba(52, 214, 231, 0.28)",
     },
     heroContent: {
       paddingHorizontal: theme.spacing.lg,
       paddingTop: theme.spacing.lg,
+      paddingBottom: theme.spacing.md,
       gap: theme.spacing.xs,
     },
-    brandRow: {
+    heroTopRow: {
       flexDirection: "row",
       alignItems: "center",
+      justifyContent: "space-between",
       gap: theme.spacing.sm,
-      marginBottom: 2,
+    },
+    brandWrap: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.spacing.xs,
+      flex: 1,
+      minWidth: 0,
     },
     brandBadge: {
-      width: 48,
-      height: 48,
-      borderRadius: 25,
-      borderWidth: 2,
-      borderColor: "rgba(255,255,255,0.95)",
-      backgroundColor: "rgba(9, 81, 167, 0.42)",
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.74)",
       alignItems: "center",
       justifyContent: "center",
+      backgroundColor: "rgba(255,255,255,0.16)",
     },
-    brandBadgeText: {
-      color: "#ffffff",
-      fontFamily: theme.fonts.heavy,
-      fontSize: 17,
-      letterSpacing: 0.5,
-    },
-    brandInfo: {
+    brandTextWrap: {
       gap: 1,
+      minWidth: 0,
     },
     brandTitle: {
       color: "#ffffff",
       fontFamily: theme.fonts.heavy,
-      fontSize: 26,
-      lineHeight: 30,
+      fontSize: isTablet ? 25 : 22,
+      lineHeight: isTablet ? 30 : 26,
     },
     brandSubtitle: {
-      color: "rgba(255,255,255,0.84)",
+      color: "rgba(230,242,255,0.86)",
       fontFamily: theme.fonts.semibold,
-      fontSize: 11,
-      letterSpacing: 0.8,
+      fontSize: 10,
+      letterSpacing: 1,
       textTransform: "uppercase",
+    },
+    dateChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.3)",
+      backgroundColor: "rgba(255,255,255,0.12)",
+      paddingHorizontal: 9,
+      paddingVertical: 5,
+      borderRadius: 999,
+    },
+    dateChipText: {
+      color: "#e4f2ff",
+      fontFamily: theme.fonts.semibold,
+      fontSize: 10,
     },
     greeting: {
       color: "#ffffff",
       fontFamily: theme.fonts.bold,
-      fontSize: 19,
-      lineHeight: 24,
-      marginTop: 4,
+      fontSize: isTablet ? 26 : 22,
+      lineHeight: isTablet ? 31 : 27,
+      marginTop: 2,
     },
     outletLabel: {
-      color: "rgba(255,255,255,0.9)",
+      color: "rgba(240,247,255,0.93)",
       fontFamily: theme.fonts.medium,
-      fontSize: 12,
-      lineHeight: 18,
+      fontSize: 13,
+      lineHeight: 19,
     },
     heroMetaRow: {
       flexDirection: "row",
@@ -412,68 +501,98 @@ function createStyles(theme: AppTheme) {
       gap: theme.spacing.xs,
       marginTop: 2,
     },
-    summaryWrap: {
-      marginTop: -44,
-      paddingHorizontal: 2,
-    },
-    summaryPanel: {
-      borderRadius: 22,
+    sectionPanel: {
+      gap: theme.spacing.sm,
+      borderRadius: theme.radii.xl,
       borderColor: theme.colors.borderStrong,
       backgroundColor: theme.colors.surface,
-      gap: theme.spacing.sm,
-      shadowOpacity: theme.mode === "dark" ? 0.4 : 0.2,
-      shadowRadius: 14,
-      elevation: 6,
+    },
+    sectionHead: {
+      gap: 2,
+    },
+    sectionEyebrow: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 10,
+      textTransform: "uppercase",
+      letterSpacing: 1,
+    },
+    sectionTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 18,
+      lineHeight: 23,
     },
     loadingWrap: {
       flexDirection: "row",
       alignItems: "center",
       gap: theme.spacing.sm,
-      paddingVertical: 5,
+      paddingVertical: 4,
     },
     loadingText: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
     },
-    summaryGrid: {
+    metricGrid: {
       flexDirection: "row",
       flexWrap: "wrap",
+      justifyContent: "space-between",
       gap: theme.spacing.xs,
     },
-    summaryCard: {
-      width: "48.4%",
+    metricCard: {
+      width: isTablet ? "24%" : "48.3%",
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.md,
       backgroundColor: theme.colors.surfaceSoft,
       paddingHorizontal: 10,
       paddingVertical: 10,
-      gap: 1,
+      gap: 4,
     },
-    summaryValue: {
+    metricTopRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+    },
+    metricIconWrap: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    metricValue: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.heavy,
-      fontSize: 18,
-      lineHeight: 22,
+      fontSize: isTablet ? 18 : 16,
+      lineHeight: isTablet ? 23 : 20,
     },
-    summaryLabel: {
+    metricLabel: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.semibold,
       fontSize: 11,
-      letterSpacing: 0.2,
+      lineHeight: 15,
     },
-    summaryDivider: {
-      height: 1,
-      backgroundColor: theme.colors.border,
-    },
-    financeRow: {
+    financeStrip: {
       flexDirection: "row",
-      gap: theme.spacing.xs,
+      alignItems: "stretch",
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surfaceSoft,
+      overflow: "hidden",
     },
-    financeItem: {
+    financeBlock: {
       flex: 1,
-      gap: 2,
+      paddingHorizontal: 11,
+      paddingVertical: 9,
+      gap: 1,
+    },
+    financeDivider: {
+      width: 1,
+      backgroundColor: theme.colors.border,
     },
     financeLabel: {
       color: theme.colors.textMuted,
@@ -484,6 +603,7 @@ function createStyles(theme: AppTheme) {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
       fontSize: 13,
+      lineHeight: 18,
     },
     financeDanger: {
       color: theme.colors.danger,
@@ -491,51 +611,34 @@ function createStyles(theme: AppTheme) {
     financeSafe: {
       color: theme.colors.success,
     },
-    sectionPanel: {
-      gap: theme.spacing.sm,
-      borderRadius: theme.radii.lg,
-    },
-    sectionTitle: {
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.bold,
-      fontSize: 16,
-    },
     shortcutGrid: {
       flexDirection: "row",
       flexWrap: "wrap",
-      gap: theme.spacing.xs,
       justifyContent: "space-between",
+      gap: theme.spacing.xs,
     },
     shortcutItem: {
-      width: "48.3%",
+      width: isTablet ? "31.8%" : "48.3%",
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.md,
       backgroundColor: theme.colors.surfaceSoft,
-      paddingHorizontal: 11,
+      paddingHorizontal: 10,
       paddingVertical: 10,
-      gap: 4,
+      gap: 3,
     },
     shortcutPressed: {
-      opacity: 0.82,
+      opacity: 0.84,
     },
-    shortcutCountWrap: {
-      alignSelf: "flex-start",
-      minWidth: 38,
-      borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.primarySoft,
-      paddingHorizontal: 10,
-      paddingVertical: 5,
+    shortcutHeader: {
+      flexDirection: "row",
       alignItems: "center",
-      justifyContent: "center",
+      justifyContent: "space-between",
     },
-    shortcutCountText: {
+    shortcutCount: {
       color: theme.colors.info,
       fontFamily: theme.fonts.heavy,
       fontSize: 14,
-      lineHeight: 16,
     },
     shortcutLabel: {
       color: theme.colors.textPrimary,
@@ -547,33 +650,48 @@ function createStyles(theme: AppTheme) {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
       fontSize: 11,
-      lineHeight: 16,
+      lineHeight: 15,
     },
     quickLinkItem: {
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.md,
       backgroundColor: theme.colors.surfaceSoft,
-      paddingHorizontal: 12,
-      paddingVertical: 11,
-      gap: 2,
+      paddingHorizontal: 11,
+      paddingVertical: 10,
+      gap: 8,
+      flexDirection: "row",
+      alignItems: "center",
     },
     quickLinkPressed: {
       opacity: 0.84,
+    },
+    quickLinkIcon: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: theme.colors.surface,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+    },
+    quickLinkTextWrap: {
+      flex: 1,
+      gap: 1,
+      minWidth: 0,
     },
     quickLinkTitle: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.semibold,
       fontSize: 14,
+      lineHeight: 19,
     },
     quickLinkSubtitle: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
-      fontSize: 12,
-      lineHeight: 18,
-    },
-    actions: {
-      gap: theme.spacing.xs,
+      fontSize: 11,
+      lineHeight: 16,
     },
     errorWrap: {
       borderWidth: 1,

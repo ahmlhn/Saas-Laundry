@@ -13,6 +13,7 @@ export const ORDER_BUCKETS: Array<{ key: OrderBucket; label: string }> = [
 export function resolveOrderBucket(order: OrderSummary): OrderBucket {
   const laundryStatus = (order.laundry_status || "").toLowerCase();
   const courierStatus = (order.courier_status || "").toLowerCase();
+  const isPickupDelivery = Boolean(order.is_pickup_delivery);
 
   if (laundryStatus === "received") {
     return "validasi";
@@ -27,14 +28,14 @@ export function resolveOrderBucket(order: OrderSummary): OrderBucket {
   }
 
   if (laundryStatus === "ready") {
-    return order.is_pickup_delivery ? "siap_antar" : "siap_ambil";
+    return isPickupDelivery ? "siap_antar" : "siap_ambil";
   }
 
   if (laundryStatus === "completed") {
-    return order.is_pickup_delivery ? "siap_antar" : "siap_ambil";
+    return isPickupDelivery ? "siap_antar" : "siap_ambil";
   }
 
-  if (["delivery_pending", "delivery_on_the_way", "delivered"].includes(courierStatus)) {
+  if (isPickupDelivery && ["delivery_pending", "delivery_on_the_way", "delivered"].includes(courierStatus)) {
     return "siap_antar";
   }
 

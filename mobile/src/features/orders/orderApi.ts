@@ -17,6 +17,7 @@ interface CreateOrderResponse {
 interface ListOrdersParams {
   outletId: string;
   limit?: number;
+  query?: string;
   forceRefresh?: boolean;
 }
 
@@ -45,7 +46,8 @@ interface CreateOrderPayload {
 
 export async function listOrders(params: ListOrdersParams): Promise<OrderSummary[]> {
   const limit = params.limit ?? 30;
-  const cacheKey = `orders:list:${params.outletId}:${limit}`;
+  const query = params.query?.trim() ?? "";
+  const cacheKey = `orders:list:${params.outletId}:${limit}:${query}`;
 
   if (!params.forceRefresh) {
     const cached = getCachedValue<OrderSummary[]>(cacheKey);
@@ -58,6 +60,7 @@ export async function listOrders(params: ListOrdersParams): Promise<OrderSummary
     params: {
       outlet_id: params.outletId,
       limit,
+      q: query || undefined,
     },
   });
 

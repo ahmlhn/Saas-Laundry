@@ -40,6 +40,7 @@ class OrderController extends Controller
         $validated = $request->validate([
             'outlet_id' => ['required', 'uuid'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'q' => ['nullable', 'string', 'max:100'],
         ]);
 
         $query = Order::query()
@@ -47,6 +48,34 @@ class OrderController extends Controller
             ->where('tenant_id', $user->tenant_id)
             ->where('outlet_id', $validated['outlet_id'])
             ->latest('created_at');
+
+        if (! empty($validated['q'])) {
+            $search = trim((string) $validated['q']);
+            $phoneDigits = preg_replace('/\D+/', '', $search) ?? '';
+            $phoneCandidates = [];
+
+            if ($phoneDigits !== '') {
+                $phoneCandidates[] = $phoneDigits;
+
+                if (str_starts_with($phoneDigits, '0')) {
+                    $phoneCandidates[] = '62'.ltrim(substr($phoneDigits, 1), '0');
+                } elseif (str_starts_with($phoneDigits, '8')) {
+                    $phoneCandidates[] = '62'.$phoneDigits;
+                }
+            }
+
+            $query->where(function ($q) use ($search, $phoneCandidates): void {
+                $q->where('order_code', 'like', "%{$search}%")
+                    ->orWhere('invoice_no', 'like', "%{$search}%")
+                    ->orWhereHas('customer', function ($qc) use ($search, $phoneCandidates): void {
+                        $qc->where('name', 'like', "%{$search}%");
+
+                        foreach (array_unique($phoneCandidates) as $candidate) {
+                            $qc->orWhere('phone_normalized', 'like', "%{$candidate}%");
+                        }
+                    });
+            });
+        }
 
         $limit = $validated['limit'] ?? 30;
 

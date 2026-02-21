@@ -71,7 +71,6 @@ export function CustomerDetailScreen() {
   const canCreateOrEdit = hasAnyRole(roles, ["owner", "admin", "cashier"]);
   const meta = useMemo(() => parseCustomerProfileMeta(customer.notes), [customer.notes]);
   const [expanded, setExpanded] = useState(false);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const minEdge = Math.min(width, height);
   const isTablet = minEdge >= 600;
@@ -82,27 +81,22 @@ export function CustomerDetailScreen() {
     const normalizedPhone = extractCustomerPhoneDigits(customer.phone_normalized);
     if (!normalizedPhone) {
       setErrorMessage("Nomor telepon pelanggan belum tersedia.");
-      setActionMessage(null);
       return;
     }
 
-    const targetUrl = action === "wa" ? `https://wa.me/${normalizedPhone}` : `tel:+${normalizedPhone}`;
-    const successLabel = action === "wa" ? "Membuka WhatsApp..." : "Membuka aplikasi telepon...";
+    const targetUrl = action === "wa" ? `https://wa.me/${normalizedPhone}` : `tel:${normalizedPhone}`;
 
     try {
       const supported = await Linking.canOpenURL(targetUrl);
       if (!supported) {
         setErrorMessage(action === "wa" ? "WhatsApp tidak tersedia di perangkat ini." : "Aplikasi telepon tidak tersedia di perangkat ini.");
-        setActionMessage(null);
         return;
       }
 
       await Linking.openURL(targetUrl);
-      setActionMessage(successLabel);
       setErrorMessage(null);
     } catch {
       setErrorMessage("Gagal menjalankan aksi pelanggan.");
-      setActionMessage(null);
     }
   }
 
@@ -205,11 +199,6 @@ export function CustomerDetailScreen() {
         <Text style={styles.emptyText}>Belum mempunyai paket</Text>
       </AppPanel>
 
-      {actionMessage ? (
-        <View style={styles.successWrap}>
-          <Text style={styles.successText}>{actionMessage}</Text>
-        </View>
-      ) : null}
       {errorMessage ? (
         <View style={styles.errorWrap}>
           <Text style={styles.errorText}>{errorMessage}</Text>
@@ -394,20 +383,6 @@ function createStyles(theme: AppTheme) {
       fontFamily: theme.fonts.medium,
       fontSize: 15,
       lineHeight: 22,
-    },
-    successWrap: {
-      borderWidth: 1,
-      borderColor: theme.mode === "dark" ? "#1d5b3f" : "#bde7cd",
-      borderRadius: theme.radii.md,
-      backgroundColor: theme.mode === "dark" ? "#173f2d" : "#edf9f1",
-      paddingHorizontal: 12,
-      paddingVertical: 9,
-    },
-    successText: {
-      color: theme.colors.success,
-      fontFamily: theme.fonts.medium,
-      fontSize: 12,
-      lineHeight: 18,
     },
     errorWrap: {
       borderWidth: 1,

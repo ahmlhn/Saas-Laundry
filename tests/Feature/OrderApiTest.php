@@ -332,6 +332,51 @@ class OrderApiTest extends TestCase
         ]);
     }
 
+    public function test_order_index_supports_search_query(): void
+    {
+        $this->apiAs($this->cashier)->postJson('/api/orders', [
+            'outlet_id' => $this->outlet->id,
+            'order_code' => 'ORD-SRC01',
+            'customer' => [
+                'name' => 'Andi Search',
+                'phone' => '081200001111',
+            ],
+            'items' => [
+                [
+                    'service_id' => $this->kgService->id,
+                    'weight_kg' => 2.4,
+                ],
+            ],
+        ])->assertCreated();
+
+        $this->apiAs($this->cashier)->postJson('/api/orders', [
+            'outlet_id' => $this->outlet->id,
+            'order_code' => 'ORD-SRC02',
+            'customer' => [
+                'name' => 'Budi Target',
+                'phone' => '081200002222',
+            ],
+            'items' => [
+                [
+                    'service_id' => $this->kgService->id,
+                    'weight_kg' => 1.6,
+                ],
+            ],
+        ])->assertCreated();
+
+        $this->apiAs($this->cashier)
+            ->getJson('/api/orders?outlet_id='.$this->outlet->id.'&q=Target')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.order_code', 'ORD-SRC02');
+
+        $this->apiAs($this->cashier)
+            ->getJson('/api/orders?outlet_id='.$this->outlet->id.'&q=081200002222')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.order_code', 'ORD-SRC02');
+    }
+
     private function createOrder(string $orderCode, bool $pickupDelivery = false): Order
     {
         $response = $this->apiAs($this->cashier)->postJson('/api/orders', [
