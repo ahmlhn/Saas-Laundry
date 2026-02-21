@@ -657,31 +657,45 @@ class OrderController extends Controller
 
     private function normalizePhone(string $phone): ?string
     {
-        $digits = preg_replace('/\D+/', '', $phone) ?? '';
+        $trimmed = trim($phone);
+        $digits = preg_replace('/\D+/', '', $trimmed) ?? '';
 
         if ($digits === '') {
             return null;
         }
 
-        if (Str::startsWith($digits, '00')) {
-            $digits = substr($digits, 2);
+        if (str_starts_with($trimmed, '+')) {
+            return $this->isValidInternationalPhone($digits) ? $digits : null;
         }
 
-        if (Str::startsWith($digits, '0')) {
-            $digits = '62'.substr($digits, 1);
-        } elseif (Str::startsWith($digits, '8')) {
+        if (str_starts_with($digits, '00')) {
+            $international = substr($digits, 2);
+
+            return $this->isValidInternationalPhone($international) ? $international : null;
+        }
+
+        if (str_starts_with($digits, '0')) {
+            $digits = '62'.ltrim(substr($digits, 1), '0');
+        } elseif (str_starts_with($digits, '8')) {
             $digits = '62'.$digits;
         }
 
-        if (! Str::startsWith($digits, '62')) {
-            return null;
+        return $this->isValidInternationalPhone($digits) ? $digits : null;
+    }
+
+    private function isValidInternationalPhone(string $digits): bool
+    {
+        if (! preg_match('/^\d+$/', $digits)) {
+            return false;
         }
 
-        if (strlen($digits) < 9 || strlen($digits) > 16) {
-            return null;
+        if (str_starts_with($digits, '0')) {
+            return false;
         }
 
-        return $digits;
+        $length = strlen($digits);
+
+        return $length >= 8 && $length <= 16;
     }
 
     private function generateOrderCode(): string

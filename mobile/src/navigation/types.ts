@@ -1,5 +1,6 @@
 import type { NavigatorScreenParams } from "@react-navigation/native";
 import type { OrderBucket } from "../features/orders/orderBuckets";
+import type { Customer } from "../types/customer";
 
 export type AuthStackParamList = {
   Login: undefined;
@@ -19,6 +20,13 @@ export type OrdersStackParamList = {
 export type AccountStackParamList = {
   AccountHub: undefined;
   Customers: undefined;
+  CustomerDetail: {
+    customer: Customer;
+  };
+  CustomerForm: {
+    mode: "create" | "edit";
+    customer?: Customer;
+  };
   Services: undefined;
   Staff: undefined;
   Outlets: undefined;

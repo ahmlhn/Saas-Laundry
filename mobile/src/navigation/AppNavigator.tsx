@@ -13,6 +13,8 @@ import { QuickActionScreen } from "../screens/app/QuickActionScreen";
 import { ReportsScreen } from "../screens/app/ReportsScreen";
 import { AccountHubScreen } from "../screens/app/AccountHubScreen";
 import { CustomersScreen } from "../screens/app/CustomersScreen";
+import { CustomerDetailScreen } from "../screens/app/CustomerDetailScreen";
+import { CustomerFormScreen } from "../screens/app/CustomerFormScreen";
 import { FinanceToolsScreen } from "../screens/app/FinanceToolsScreen";
 import { PrinterNoteScreen } from "../screens/app/PrinterNoteScreen";
 import { HelpInfoScreen } from "../screens/app/HelpInfoScreen";
@@ -42,6 +44,8 @@ function AccountTabNavigator() {
     <AccountStack.Navigator screenOptions={{ headerShown: false }}>
       <AccountStack.Screen name="AccountHub" component={AccountHubScreen} />
       <AccountStack.Screen name="Customers" component={CustomersScreen} />
+      <AccountStack.Screen name="CustomerDetail" component={CustomerDetailScreen} />
+      <AccountStack.Screen name="CustomerForm" component={CustomerFormScreen} />
       <AccountStack.Screen name="Services" component={ServicesScreen} />
       <AccountStack.Screen name="Staff" component={StaffScreen} />
       <AccountStack.Screen name="Outlets" component={OutletsScreen} />
@@ -136,7 +140,7 @@ function MainTabsNavigator() {
         component={HomeDashboardScreen}
         options={{
           tabBarLabel: "Beranda",
-          tabBarIcon: ({ color, focused }) => <Ionicons color={color} name={focused ? "home" : "home-outline"} size={iconSize} />,
+          tabBarIcon: ({ color, focused }) => <Ionicons color={color} name={focused ? "home-sharp" : "home"} size={iconSize + 1} />,
         }}
       />
       <Tab.Screen

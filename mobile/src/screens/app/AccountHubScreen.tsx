@@ -23,7 +23,7 @@ interface AccountMenuItem {
   title: string;
   subtitle: string;
   badge?: "Hot" | "Soon";
-  route?: keyof AccountStackParamList;
+  route?: Exclude<keyof AccountStackParamList, "CustomerForm" | "CustomerDetail">;
   allowedRoles?: UserRole[];
   locked?: boolean;
 }
