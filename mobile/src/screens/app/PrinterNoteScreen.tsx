@@ -1,11 +1,14 @@
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import * as ImagePicker from "expo-image-picker";
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
+import { uploadPrinterLogo } from "../../features/settings/printerNoteApi";
 import { getPrinterNoteSettings, setPrinterNoteSettings } from "../../features/settings/printerNoteStorage";
+import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AccountStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
@@ -22,6 +25,7 @@ export function PrinterNoteScreen() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [form, setForm] = useState<PrinterNoteSettings | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -95,6 +99,60 @@ export function PrinterNoteScreen() {
     }
   }
 
+  async function handleUploadLogo(): Promise<void> {
+    if (!form || uploadingLogo) {
+      return;
+    }
+
+    if (!selectedOutlet) {
+      setErrorMessage("Pilih outlet aktif sebelum upload logo.");
+      return;
+    }
+
+    setUploadingLogo(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setErrorMessage("Izin akses galeri diperlukan untuk upload logo.");
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (result.canceled || result.assets.length === 0) {
+        return;
+      }
+
+      const asset = result.assets[0];
+      const uploadResult = await uploadPrinterLogo({
+        outletId: selectedOutlet.id,
+        uri: asset.uri,
+        fileName: asset.fileName ?? undefined,
+        mimeType: asset.mimeType ?? undefined,
+      });
+
+      const nextForm: PrinterNoteSettings = {
+        ...form,
+        logoUrl: uploadResult.url,
+      };
+
+      await setPrinterNoteSettings(nextForm);
+      setForm(nextForm);
+      setSuccessMessage("Logo nota berhasil diunggah dan disimpan.");
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error));
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
+
   function buildPreviewNumber(): string {
     if (!form) {
       return "-";
@@ -131,10 +189,24 @@ export function PrinterNoteScreen() {
           <View style={styles.rowBetween}>
             <View style={styles.logoInfo}>
               <Text style={styles.label}>Logo Nota</Text>
-              <Text style={styles.helper}>Mode MVP: upload logo akan diaktifkan setelah endpoint media tersedia.</Text>
+              <Text style={styles.helper}>Upload logo tersimpan di server agar konsisten lintas perangkat.</Text>
             </View>
-            <AppButton disabled onPress={() => undefined} title="Upload" variant="secondary" />
+            <AppButton
+              disabled={uploadingLogo || !selectedOutlet}
+              loading={uploadingLogo}
+              onPress={() => void handleUploadLogo()}
+              title={form.logoUrl ? "Ganti Logo" : "Upload"}
+              variant="secondary"
+            />
           </View>
+
+          {form.logoUrl ? (
+            <Image source={{ uri: form.logoUrl }} style={styles.logoPreview} />
+          ) : (
+            <View style={styles.logoPlaceholder}>
+              <Text style={styles.logoPlaceholderText}>Belum ada logo. Upload dari galeri perangkat.</Text>
+            </View>
+          )}
 
           <Text style={styles.label}>Profil Nota</Text>
           <TextInput
@@ -292,7 +364,7 @@ function createStyles(theme: AppTheme) {
     },
     rowBetween: {
       flexDirection: "row",
-      alignItems: "center",
+      alignItems: "flex-start",
       justifyContent: "space-between",
       gap: theme.spacing.sm,
     },
@@ -301,6 +373,30 @@ function createStyles(theme: AppTheme) {
       gap: 2,
     },
     helper: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 16,
+    },
+    logoPreview: {
+      width: "100%",
+      height: 132,
+      borderRadius: theme.radii.md,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surfaceSoft,
+      resizeMode: "contain",
+    },
+    logoPlaceholder: {
+      borderWidth: 1,
+      borderStyle: "dashed",
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 11,
+      paddingVertical: 14,
+    },
+    logoPlaceholderText: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
       fontSize: 11,

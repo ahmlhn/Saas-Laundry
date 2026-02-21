@@ -1,10 +1,11 @@
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { StatusPill } from "../../components/ui/StatusPill";
+import { clearQueryCache } from "../../lib/queryCache";
 import type { AccountStackParamList } from "../../navigation/types";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
@@ -15,24 +16,25 @@ interface HelpItem {
   key: string;
   title: string;
   description: string;
+  link?: string;
 }
 
 const HELP_ITEMS: HelpItem[] = [
   { key: "reset", title: "Reset Data", description: "Reset cache sinkronisasi lokal perangkat." },
   { key: "clear-cache", title: "Hapus Cache", description: "Bersihkan data cache untuk muat ulang API." },
-  { key: "check-update", title: "Cek Update", description: "Periksa versi app terbaru untuk tenant kamu." },
-  { key: "latest", title: "Terbaru di Bilas", description: "Lihat fitur baru dan catatan rilis terbaru." },
-  { key: "trial", title: "Perpanjang Masa Trial", description: "Hubungi tim sales untuk perpanjangan trial." },
+  { key: "check-update", title: "Cek Update", description: "Periksa versi app terbaru untuk tenant kamu.", link: "https://saas.daratlaut.com/mobile/latest" },
+  { key: "latest", title: "Terbaru di Cuci Laundry", description: "Lihat fitur baru dan catatan rilis terbaru.", link: "https://saas.daratlaut.com/changelog" },
+  { key: "trial", title: "Perpanjang Masa Trial", description: "Hubungi tim sales untuk perpanjangan trial.", link: "https://saas.daratlaut.com/pricing" },
 ];
 
 const INFO_ITEMS: HelpItem[] = [
-  { key: "training", title: "Training Aplikasi", description: "Materi onboarding pemilik, kasir, dan operator." },
-  { key: "faq", title: "Sering Ditanyakan", description: "Kumpulan jawaban masalah operasional umum." },
-  { key: "video", title: "Video Tutorial", description: "Panduan video ringkas penggunaan aplikasi." },
-  { key: "support", title: "Pusat Bantuan", description: "Buka tiket bantuan saat ada kendala operasional." },
-  { key: "privacy", title: "Kebijakan Privasi", description: "Ketentuan pengelolaan data pengguna dan tenant." },
-  { key: "tos", title: "Syarat dan Ketentuan", description: "Aturan penggunaan layanan SaaS Laundry." },
-  { key: "contact", title: "Hubungi Kami", description: "Kontak tim support dan customer success." },
+  { key: "training", title: "Training Aplikasi", description: "Materi onboarding pemilik, kasir, dan operator.", link: "https://saas.daratlaut.com/docs/training" },
+  { key: "faq", title: "Sering Ditanyakan", description: "Kumpulan jawaban masalah operasional umum.", link: "https://saas.daratlaut.com/docs/faq" },
+  { key: "video", title: "Video Tutorial", description: "Panduan video ringkas penggunaan aplikasi.", link: "https://saas.daratlaut.com/docs/tutorial-video" },
+  { key: "support", title: "Pusat Bantuan", description: "Buka tiket bantuan saat ada kendala operasional.", link: "https://saas.daratlaut.com/support" },
+  { key: "privacy", title: "Kebijakan Privasi", description: "Ketentuan pengelolaan data pengguna dan tenant.", link: "https://saas.daratlaut.com/privacy" },
+  { key: "tos", title: "Syarat dan Ketentuan", description: "Aturan penggunaan layanan SaaS Laundry.", link: "https://saas.daratlaut.com/terms" },
+  { key: "contact", title: "Hubungi Kami", description: "Kontak tim support dan customer success.", link: "mailto:support@daratlaut.com" },
   { key: "about", title: "Tentang Aplikasi", description: "Informasi versi, build, dan lisensi aplikasi." },
 ];
 
@@ -42,8 +44,34 @@ export function HelpInfoScreen() {
   const navigation = useNavigation<Navigation>();
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
-  function handlePress(item: HelpItem): void {
-    setActionMessage(`${item.title} akan dihubungkan ke konten detail pada iterasi utilitas berikutnya.`);
+  async function openLink(item: HelpItem): Promise<void> {
+    if (!item.link) {
+      setActionMessage(`${item.title}: detail info akan tampil di versi berikutnya.`);
+      return;
+    }
+
+    try {
+      const canOpen = await Linking.canOpenURL(item.link);
+      if (!canOpen) {
+        setActionMessage(`Tidak bisa membuka ${item.title} dari perangkat ini.`);
+        return;
+      }
+
+      await Linking.openURL(item.link);
+      setActionMessage(`${item.title} dibuka di browser/aplikasi terkait.`);
+    } catch {
+      setActionMessage(`Gagal membuka ${item.title}.`);
+    }
+  }
+
+  async function handlePress(item: HelpItem): Promise<void> {
+    if (item.key === "reset" || item.key === "clear-cache") {
+      clearQueryCache();
+      setActionMessage("Cache lokal berhasil dibersihkan. Silakan refresh data pada halaman operasional.");
+      return;
+    }
+
+    await openLink(item);
   }
 
   return (
@@ -60,7 +88,7 @@ export function HelpInfoScreen() {
         <Text style={styles.sectionTitle}>Bantuan</Text>
         <View style={styles.listWrap}>
           {HELP_ITEMS.map((item) => (
-            <Pressable key={item.key} onPress={() => handlePress(item)} style={styles.itemRow}>
+            <Pressable key={item.key} onPress={() => void handlePress(item)} style={styles.itemRow}>
               <View style={styles.iconChip}>
                 <Text style={styles.iconText}>i</Text>
               </View>
@@ -77,7 +105,7 @@ export function HelpInfoScreen() {
         <Text style={styles.sectionTitle}>Informasi</Text>
         <View style={styles.listWrap}>
           {INFO_ITEMS.map((item) => (
-            <Pressable key={item.key} onPress={() => handlePress(item)} style={styles.itemRow}>
+            <Pressable key={item.key} onPress={() => void handlePress(item)} style={styles.itemRow}>
               <View style={styles.iconChip}>
                 <Text style={styles.iconText}>i</Text>
               </View>

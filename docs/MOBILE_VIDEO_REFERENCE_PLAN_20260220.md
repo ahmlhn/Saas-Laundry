@@ -173,17 +173,17 @@ Referensi frame yang dianalisis:
 - Target outcome:
   - Seluruh fitur terasa konsisten dan tetap nyaman dipakai lintas ukuran/orientasi layar.
 
-## 5.1) Status Implementasi (Update 2026-02-21 - Fase 4)
+## 5.1) Status Implementasi (Update 2026-02-20 - Fase 13)
 - Fase 1: selesai.
   - Bottom tab 5 menu aktif.
   - Beranda + Pesanan + Akun hub sudah inline dengan referensi.
 - Fase 2: selesai.
   - Modul pelanggan mobile (list/search/create/edit/archive/restore) sudah aktif dari tab Akun.
-- Fase 3: sebagian besar selesai.
+- Fase 3: selesai.
   - `Kelola Keuangan`: snapshot quota (`/billing/quota`) + snapshot transaksi (`/orders`) aktif.
-  - `Printer & Nota`: konfigurasi profil nota + nomor nota + toggle tampilan aktif (persist lokal perangkat).
-  - `Bantuan & Informasi`: utility hub aktif.
-  - Catatan: write API finance detail (pendapatan/pengeluaran/koreksi) masih menunggu endpoint backend dedicated.
+  - Input jurnal non-order (`pendapatan`/`pengeluaran`/`koreksi`) sudah aktif via endpoint dedicated `/billing/entries`.
+  - `Printer & Nota`: konfigurasi profil nota + nomor nota + toggle tampilan aktif, termasuk upload logo nota ke server.
+  - `Bantuan & Informasi`: utility hub aktif dengan deep-link resource support + aksi reset cache lokal.
 - Fase 4: selesai (iterasi UI + flow utama).
   - Biometric re-login aktif:
     - Toggle aktivasi dari tab Akun.
@@ -270,6 +270,9 @@ Referensi frame yang dianalisis:
   - `POST /api/shipping-zones`
 - Billing/WA:
   - `GET /api/billing/quota`
+  - `GET /api/billing/entries`
+  - `POST /api/billing/entries`
+  - `POST /api/printer-note/logo`
   - `GET /api/wa/providers`
   - `GET /api/wa/messages`
 

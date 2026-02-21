@@ -67,11 +67,14 @@ Catatan orientasi:
 - Modul `Kelola Keuangan` dari tab Akun:
   - Snapshot billing quota via `/api/billing/quota` (owner/admin)
   - Snapshot kas operasional dari data `/api/orders` outlet aktif
-  - Daftar aksi finance sesuai referensi UI (siap disambung endpoint detail)
+  - Jurnal non-order (pendapatan/pengeluaran/koreksi) via `GET/POST /api/billing/entries`
 - Modul `Printer & Nota` dari tab Akun:
+  - Upload logo nota ke server via `POST /api/printer-note/logo`
   - Pengaturan profil nota, format nomor, dan toggle tampilan
   - Persist lokal perangkat via `expo-secure-store`
-- Modul `Bantuan & Informasi` dari tab Akun sebagai utility hub (entry point konten support)
+- Modul `Bantuan & Informasi` dari tab Akun:
+  - Shortcut deep-link ke resource support/training/FAQ/changelog
+  - Aksi reset/hapus cache lokal aplikasi
 - Modul `Kirim WA`:
   - Tampil untuk role owner/admin
   - Gate plan: hanya plan `Premium`/`Pro`

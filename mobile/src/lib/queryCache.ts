@@ -33,3 +33,7 @@ export function invalidateCache(prefix: string): void {
     }
   }
 }
+
+export function clearQueryCache(): void {
+  cacheStore.clear();
+}

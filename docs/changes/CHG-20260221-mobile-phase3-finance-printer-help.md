@@ -29,9 +29,9 @@
     - Struktur menu bantuan + informasi sesuai referensi UX.
   - Update menu tab Akun agar modul baru dapat diakses.
 - Out of scope:
-  - Persist finance entries (pendapatan/pengeluaran/koreksi) ke backend karena endpoint belum tersedia.
-  - Upload logo nota ke server.
-  - Deep-link ke konten FAQ/training eksternal.
+  - Persist finance entries (pendapatan/pengeluaran/koreksi) ke backend karena endpoint belum tersedia. (ditutup pada `CHG-20260220-mobile-phase3-finance-write-api-closure`)
+  - Upload logo nota ke server. (ditutup pada `CHG-20260220-mobile-phase3-finance-write-api-closure`)
+  - Deep-link ke konten FAQ/training eksternal. (ditutup pada `CHG-20260220-mobile-phase3-finance-write-api-closure`)
 
 ## 3) Acceptance Criteria
 1. Dari tab Akun, user bisa membuka halaman `Kelola Keuangan`, `Printer & Nota`, dan `Bantuan & Informasi`.

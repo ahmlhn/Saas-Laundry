@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\OutletManagementController;
 use App\Http\Controllers\Api\OutletContextController;
 use App\Http\Controllers\Api\OutletServiceController;
 use App\Http\Controllers\Api\OrderController;
+use App\Http\Controllers\Api\PrinterNoteController;
 use App\Http\Controllers\Api\ServiceCatalogController;
 use App\Http\Controllers\Api\ShippingZoneController;
 use App\Http\Controllers\Api\SyncController;
@@ -75,4 +76,7 @@ Route::middleware(['auth:sanctum'])->group(function (): void {
     Route::get('/wa/messages', [WaController::class, 'messages']);
 
     Route::get('/billing/quota', [BillingController::class, 'quota']);
+    Route::get('/billing/entries', [BillingController::class, 'entries']);
+    Route::post('/billing/entries', [BillingController::class, 'storeEntry']);
+    Route::post('/printer-note/logo', [PrinterNoteController::class, 'uploadLogo']);
 });

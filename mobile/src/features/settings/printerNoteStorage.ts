@@ -4,6 +4,7 @@ import type { PrinterNoteSettings } from "../../types/printerNote";
 const PRINTER_NOTE_SETTINGS_KEY = "saas_laundry_printer_note_settings_v1";
 
 export const DEFAULT_PRINTER_NOTE_SETTINGS: PrinterNoteSettings = {
+  logoUrl: "",
   profileName: "",
   descriptionLine: "",
   phone: "",

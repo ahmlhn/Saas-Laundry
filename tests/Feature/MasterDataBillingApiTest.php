@@ -13,7 +13,9 @@ use App\Models\TenantSubscription;
 use App\Models\User;
 use Database\Seeders\RolesAndPlansSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class MasterDataBillingApiTest extends TestCase
@@ -453,6 +455,151 @@ class MasterDataBillingApiTest extends TestCase
             ->getJson('/api/billing/quota')
             ->assertStatus(403)
             ->assertJsonPath('reason_code', 'ROLE_ACCESS_DENIED');
+    }
+
+    public function test_billing_entries_endpoint_supports_create_and_summary_snapshot(): void
+    {
+        $entryDate = now()->format('Y-m-d');
+
+        $this->apiAs($this->admin)
+            ->postJson('/api/billing/entries', [
+                'outlet_id' => $this->outletA->id,
+                'type' => 'income',
+                'amount' => 250000,
+                'category' => 'Pendapatan Laundry',
+                'notes' => 'Pemasukan tambahan shift pagi',
+                'entry_date' => $entryDate,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.type', 'income')
+            ->assertJsonPath('data.amount', 250000);
+
+        $this->apiAs($this->admin)
+            ->postJson('/api/billing/entries', [
+                'outlet_id' => $this->outletA->id,
+                'type' => 'expense',
+                'amount' => 70000,
+                'category' => 'Operasional',
+                'entry_date' => $entryDate,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.type', 'expense')
+            ->assertJsonPath('data.amount', 70000);
+
+        $this->apiAs($this->admin)
+            ->postJson('/api/billing/entries', [
+                'outlet_id' => $this->outletA->id,
+                'type' => 'adjustment',
+                'amount' => -5000,
+                'category' => 'Koreksi Kas',
+                'entry_date' => $entryDate,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.type', 'adjustment')
+            ->assertJsonPath('data.amount', -5000);
+
+        $this->assertDatabaseHas('finance_entries', [
+            'tenant_id' => $this->tenant->id,
+            'outlet_id' => $this->outletA->id,
+            'type' => 'income',
+            'amount' => 250000,
+            'source_channel' => 'web',
+        ]);
+
+        $this->apiAs($this->admin)
+            ->getJson('/api/billing/entries?outlet_id='.$this->outletA->id.'&start_date='.$entryDate.'&end_date='.$entryDate)
+            ->assertOk()
+            ->assertJsonCount(3, 'data')
+            ->assertJsonPath('meta.summary.total_income', 250000)
+            ->assertJsonPath('meta.summary.total_expense', 70000)
+            ->assertJsonPath('meta.summary.total_adjustment', -5000)
+            ->assertJsonPath('meta.summary.net_amount', 175000)
+            ->assertJsonPath('meta.summary.entries_count', 3);
+
+        $this->assertDatabaseHas('audit_events', [
+            'tenant_id' => $this->tenant->id,
+            'event_key' => 'FINANCE_ENTRY_CREATED',
+            'entity_type' => 'finance_entry',
+            'channel' => 'api',
+        ]);
+    }
+
+    public function test_billing_entries_endpoint_enforces_role_and_outlet_access(): void
+    {
+        $this->apiAs($this->cashier)
+            ->postJson('/api/billing/entries', [
+                'outlet_id' => $this->outletA->id,
+                'type' => 'income',
+                'amount' => 10000,
+                'category' => 'Kasir Test',
+            ])
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'ROLE_ACCESS_DENIED');
+
+        $this->apiAs($this->admin)
+            ->postJson('/api/billing/entries', [
+                'outlet_id' => $this->outletB->id,
+                'type' => 'income',
+                'amount' => 10000,
+                'category' => 'Out of scope',
+            ])
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'OUTLET_ACCESS_DENIED');
+
+        $this->apiAs($this->admin)
+            ->postJson('/api/billing/entries', [
+                'outlet_id' => $this->outletA->id,
+                'type' => 'income',
+                'amount' => -10000,
+                'category' => 'Invalid',
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['amount']);
+    }
+
+    public function test_printer_note_logo_upload_endpoint_supports_upload_and_access_guard(): void
+    {
+        Storage::fake('public');
+
+        $uploadResponse = $this->apiAs($this->cashier)->post('/api/printer-note/logo', [
+            'outlet_id' => $this->outletA->id,
+            'logo' => UploadedFile::fake()->create('logo.png', 120, 'image/png'),
+        ], [
+            'Accept' => 'application/json',
+        ]);
+
+        $uploadResponse
+            ->assertCreated()
+            ->assertJsonPath('data.filename', fn (string $value): bool => str_ends_with($value, '.png'));
+
+        $storedPath = $uploadResponse->json('data.path');
+        $this->assertIsString($storedPath);
+        Storage::disk('public')->assertExists($storedPath);
+
+        $this->assertDatabaseHas('audit_events', [
+            'tenant_id' => $this->tenant->id,
+            'event_key' => 'PRINTER_NOTE_LOGO_UPLOADED',
+            'entity_type' => 'printer_logo',
+            'channel' => 'api',
+        ]);
+
+        $this->apiAs($this->worker)->post('/api/printer-note/logo', [
+            'outlet_id' => $this->outletA->id,
+            'logo' => UploadedFile::fake()->create('logo2.png', 120, 'image/png'),
+        ], [
+            'Accept' => 'application/json',
+        ])
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'ROLE_ACCESS_DENIED');
+
+        $this->apiAs($this->admin)->post('/api/printer-note/logo', [
+            'outlet_id' => $this->outletB->id,
+            'logo' => UploadedFile::fake()->create('logo3.png', 120, 'image/png'),
+        ], [
+            'Accept' => 'application/json',
+        ])
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'OUTLET_ACCESS_DENIED');
     }
 
     private function createUserWithRole(string $email, string $roleKey, array $outletIds): User

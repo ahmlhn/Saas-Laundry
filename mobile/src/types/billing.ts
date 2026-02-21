@@ -26,3 +26,43 @@ export interface BillingQuotaPayload {
   quota: BillingQuotaSnapshot;
   subscription: BillingSubscription | null;
 }
+
+export type BillingEntryType = "income" | "expense" | "adjustment";
+
+export interface BillingEntry {
+  id: string;
+  tenant_id: string;
+  outlet_id: string;
+  entry_date: string;
+  type: BillingEntryType;
+  amount: number;
+  category: string;
+  notes: string | null;
+  created_by: number | null;
+  created_by_name: string | null;
+  source_channel: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface BillingEntriesSummary {
+  total_income: number;
+  total_expense: number;
+  total_adjustment: number;
+  net_amount: number;
+  entries_count: number;
+}
+
+export interface BillingEntriesFilters {
+  outlet_id: string;
+  type: BillingEntryType | null;
+  start_date: string | null;
+  end_date: string | null;
+  limit: number;
+}
+
+export interface BillingEntriesPayload {
+  data: BillingEntry[];
+  summary: BillingEntriesSummary;
+  filters: BillingEntriesFilters;
+}
