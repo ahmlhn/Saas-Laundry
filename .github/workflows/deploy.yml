@@ -168,8 +168,14 @@ jobs:
               fi
 
               NPM_BIN="$NPM_FOUND"
+              NODE_DIR="$(dirname "$NODE_BIN")"
+              export PATH="$NODE_DIR:$PATH"
+              hash -r || true
               echo "Node binary: $NODE_BIN"
               echo "Npm binary : $NPM_BIN"
+              echo "Node dir   : $NODE_DIR"
+              "$NODE_BIN" -v
+              "$NPM_BIN" -v
             fi
 
             NEED_UP=0
@@ -189,6 +195,7 @@ jobs:
 
             if [ -f "$APP_PATH/package.json" ] && [ "$BUILD_FRONTEND" = "true" ]; then
               export NODE_ENV=development
+              export npm_config_scripts_prepend_node_path=true
               "$NPM_BIN" ci --no-audit --no-fund
               "$NPM_BIN" run build
             elif [ -f "$APP_PATH/package.json" ]; then
