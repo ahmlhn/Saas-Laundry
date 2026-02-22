@@ -18,6 +18,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
 
@@ -347,11 +348,20 @@ class AuthController extends Controller
         ]);
 
         $loginInput = trim((string) ($validated['login'] ?? $validated['email'] ?? ''));
+        $mailDriver = strtolower((string) config('mail.default', 'log'));
+        $debugMode = (bool) config('app.debug', false);
 
         if ($loginInput === '') {
             throw ValidationException::withMessages([
                 'login' => ['The login field is required.'],
             ]);
+        }
+
+        if ($mailDriver === 'log' && ! $debugMode) {
+            return response()->json([
+                'reason_code' => 'MAIL_CHANNEL_INACTIVE',
+                'message' => 'Layanan kirim kode belum aktif. Hubungi admin.',
+            ], 503);
         }
 
         $user = $this->resolveUserByLogin($loginInput);
@@ -372,14 +382,40 @@ class AuthController extends Controller
             $recipient = (string) $user->email;
             $expiresMinutes = 30;
 
-            Mail::raw(
-                "Kode reset password {$tenantName}: {$otp}. Kode berlaku {$expiresMinutes} menit.",
-                static function ($message) use ($recipient, $tenantName): void {
-                    $message
-                        ->to($recipient)
-                        ->subject("[{$tenantName}] Kode Reset Password");
+            if ($mailDriver === 'log') {
+                Log::info('auth_password_reset_debug_code', [
+                    'email' => strtolower((string) $user->email),
+                    'tenant_id' => (string) $user->tenant_id,
+                    'otp' => $otp,
+                ]);
+            } else {
+                try {
+                    Mail::raw(
+                        "Kode reset password {$tenantName}: {$otp}. Kode berlaku {$expiresMinutes} menit.",
+                        static function ($message) use ($recipient, $tenantName): void {
+                            $message
+                                ->to($recipient)
+                                ->subject("[{$tenantName}] Kode Reset Password");
+                        }
+                    );
+                } catch (\Throwable $error) {
+                    DB::table('password_reset_tokens')
+                        ->where('email', strtolower((string) $user->email))
+                        ->delete();
+
+                    Log::warning('auth_password_reset_send_failed', [
+                        'email' => strtolower((string) $user->email),
+                        'tenant_id' => (string) $user->tenant_id,
+                        'mail_driver' => $mailDriver,
+                        'error' => $error->getMessage(),
+                    ]);
+
+                    return response()->json([
+                        'reason_code' => 'PASSWORD_RESET_SEND_FAILED',
+                        'message' => 'Gagal mengirim kode verifikasi. Coba lagi nanti.',
+                    ], 503);
                 }
-            );
+            }
 
             $this->auditTrail->record(
                 eventKey: AuditEventKeys::AUTH_PASSWORD_RESET_REQUESTED,
@@ -392,6 +428,13 @@ class AuthController extends Controller
                 channel: 'api',
                 request: $request,
             );
+
+            if ($mailDriver === 'log' && $debugMode) {
+                return response()->json([
+                    'message' => 'Mode debug aktif: kode verifikasi dicatat di log server.',
+                    'debug_code' => $otp,
+                ]);
+            }
         }
 
         return response()->json([

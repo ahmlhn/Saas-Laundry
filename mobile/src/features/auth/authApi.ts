@@ -22,6 +22,11 @@ interface ForgotPasswordPayload {
   login: string;
 }
 
+interface ForgotPasswordResponse {
+  message: string;
+  debug_code?: string;
+}
+
 interface ResetPasswordPayload {
   login: string;
   code: string;
@@ -54,8 +59,8 @@ export async function registerAccount(payload: RegisterPayload): Promise<LoginRe
   return response.data;
 }
 
-export async function requestPasswordReset(payload: ForgotPasswordPayload): Promise<{ message: string }> {
-  const response = await httpClient.post<{ message: string }>("/auth/password/forgot", {
+export async function requestPasswordReset(payload: ForgotPasswordPayload): Promise<ForgotPasswordResponse> {
+  const response = await httpClient.post<ForgotPasswordResponse>("/auth/password/forgot", {
     login: payload.login,
   });
 

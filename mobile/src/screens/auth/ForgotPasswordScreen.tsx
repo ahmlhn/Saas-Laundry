@@ -14,6 +14,11 @@ type AuthNavigation = NativeStackNavigationProp<AuthStackParamList>;
 
 function resolveForgotErrorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
+    const responseMessage = (error.response?.data as { message?: string } | undefined)?.message;
+    if (typeof responseMessage === "string" && responseMessage.trim().length > 0) {
+      return responseMessage.trim();
+    }
+
     if (!error.response) {
       return "Tidak bisa terhubung ke server. Cek internet atau status API.";
     }
@@ -47,6 +52,7 @@ export function ForgotPasswordScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [errorSummary, setErrorSummary] = useState<string | null>(null);
   const [successSummary, setSuccessSummary] = useState<string | null>(null);
+  const [debugCode, setDebugCode] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showPasswordConfirmation, setShowPasswordConfirmation] = useState(false);
 
@@ -68,6 +74,7 @@ export function ForgotPasswordScreen() {
     setSubmitting(true);
     setErrorSummary(null);
     setSuccessSummary(null);
+    setDebugCode(null);
 
     try {
       const response = await requestPasswordReset({
@@ -76,6 +83,7 @@ export function ForgotPasswordScreen() {
 
       setStep("reset");
       setSuccessSummary(response.message);
+      setDebugCode(response.debug_code ?? null);
     } catch (error) {
       setErrorSummary(resolveForgotErrorMessage(error));
     } finally {
@@ -101,6 +109,7 @@ export function ForgotPasswordScreen() {
       });
 
       setSuccessSummary(response.message);
+      setDebugCode(null);
       setCode("");
       setPassword("");
       setPasswordConfirmation("");
@@ -237,6 +246,7 @@ export function ForgotPasswordScreen() {
           <View style={styles.successWrap}>
             <Text style={styles.successTitle}>Berhasil</Text>
             <Text style={styles.successText}>{successSummary}</Text>
+            {debugCode ? <Text style={styles.debugCodeText}>Kode verifikasi: {debugCode}</Text> : null}
           </View>
         ) : null}
 
@@ -437,6 +447,13 @@ function createStyles(theme: AppTheme) {
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 18,
+    },
+    debugCodeText: {
+      color: "#1f9a59",
+      fontFamily: theme.fonts.bold,
+      fontSize: 13,
+      lineHeight: 18,
+      marginTop: 2,
     },
   });
 }
