@@ -22,10 +22,19 @@ const configuredFallbacks = process.env.EXPO_PUBLIC_API_URL_FALLBACKS?.split(","
 
 export const API_BASE_URL = configuredApiUrl;
 
+function withIndexPhpFallback(url: string): string[] {
+  const trimmed = normalizeApiBaseUrl(url);
+  if (/\/index\.php$/i.test(trimmed)) {
+    return [trimmed];
+  }
+
+  return [trimmed, `${trimmed}/index.php`];
+}
+
 export const API_BASE_URL_CANDIDATES = Array.from(
   new Set(
     [API_BASE_URL, ...configuredFallbacks, ...DEFAULT_API_FALLBACKS]
-      .map((url) => normalizeApiBaseUrl(url))
+      .flatMap((url) => withIndexPhpFallback(url))
       .filter((url) => /^https?:\/\//i.test(url))
   )
 );
