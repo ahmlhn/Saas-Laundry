@@ -49,71 +49,14 @@ jobs:
             exit 1
           fi
 
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref_name }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Build frontend assets
-        run: |
-          npm ci
-          npm run build
-          tar -czf build-artifacts.tar.gz public/build
-
-      - name: Upload built assets to server (attempt 1)
-        id: upload_assets_attempt_1
-        continue-on-error: true
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          port: ${{ secrets.DEPLOY_PORT }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          passphrase: ${{ secrets.DEPLOY_SSH_PASSPHRASE }}
-          password: ${{ secrets.DEPLOY_PASSWORD }}
-          timeout: 90s
-          command_timeout: 15m
-          source: build-artifacts.tar.gz
-          target: /tmp
-          overwrite: true
-
-      - name: Upload built assets to server (attempt 2)
-        id: upload_assets_attempt_2
-        if: ${{ steps.upload_assets_attempt_1.outcome == 'failure' }}
-        continue-on-error: true
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          port: ${{ secrets.DEPLOY_PORT }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          passphrase: ${{ secrets.DEPLOY_SSH_PASSPHRASE }}
-          password: ${{ secrets.DEPLOY_PASSWORD }}
-          timeout: 90s
-          command_timeout: 15m
-          source: build-artifacts.tar.gz
-          target: /tmp
-          overwrite: true
-
-      - name: Stop if SCP upload failed after retries
-        if: ${{ steps.upload_assets_attempt_1.outcome == 'failure' && steps.upload_assets_attempt_2.outcome == 'failure' }}
-        run: |
-          echo "Upload assets ke server gagal 2x (timeout jaringan SSH)."
-          echo "Cek DEPLOY_HOST/DEPLOY_PORT, status SSH hosting, dan firewall/rate-limit host."
-          exit 1
-
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         env:
           APP_PATH: ${{ vars.DEPLOY_PATH }}
           PHP_BIN: ${{ vars.DEPLOY_PHP_BIN }}
           COMPOSER_BIN: ${{ vars.DEPLOY_COMPOSER_BIN }}
+          NODE_BIN: ${{ vars.DEPLOY_NODE_BIN }}
+          NPM_BIN: ${{ vars.DEPLOY_NPM_BIN }}
           REPO_URL: ${{ vars.DEPLOY_REPO_URL }}
           DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref_name }}
           RUN_MIGRATIONS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_migrations || 'true' }}
@@ -126,8 +69,8 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           passphrase: ${{ secrets.DEPLOY_SSH_PASSPHRASE }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
-          timeout: 90s
-          envs: APP_PATH,PHP_BIN,COMPOSER_BIN,REPO_URL,DEPLOY_REF,RUN_MIGRATIONS,MAINTENANCE_MODE,GIT_REPOSITORY
+          timeout: 180s
+          envs: APP_PATH,PHP_BIN,COMPOSER_BIN,NODE_BIN,NPM_BIN,REPO_URL,DEPLOY_REF,RUN_MIGRATIONS,MAINTENANCE_MODE,GIT_REPOSITORY
           command_timeout: 45m
           script_stop: true
           script: |
@@ -136,6 +79,8 @@ jobs:
             APP_PATH="${APP_PATH:-$HOME/domains/daratlaut.com/public_html/laundry}"
             PHP_BIN="${PHP_BIN:-php}"
             COMPOSER_BIN="${COMPOSER_BIN:-composer}"
+            NODE_BIN="${NODE_BIN:-node}"
+            NPM_BIN="${NPM_BIN:-npm}"
             REPO_URL="${REPO_URL:-https://github.com/${GIT_REPOSITORY}.git}"
             DEPLOY_REF="${DEPLOY_REF:-main}"
             RUN_MIGRATIONS="$(echo "${RUN_MIGRATIONS:-true}" | tr '[:upper:]' '[:lower:]')"
@@ -168,6 +113,18 @@ jobs:
               exit 1
             fi
 
+            if [ -f "$APP_PATH/package.json" ]; then
+              if ! command -v "$NODE_BIN" >/dev/null 2>&1; then
+                echo "Node.js tidak ditemukan. Set DEPLOY_NODE_BIN atau install Node.js di server."
+                exit 1
+              fi
+
+              if ! command -v "$NPM_BIN" >/dev/null 2>&1; then
+                echo "npm tidak ditemukan. Set DEPLOY_NPM_BIN atau install npm di server."
+                exit 1
+              fi
+            fi
+
             NEED_UP=0
             cleanup() {
               if [ "$NEED_UP" -eq 1 ]; then
@@ -183,9 +140,10 @@ jobs:
 
             "$COMPOSER_BIN" install --no-dev --optimize-autoloader --no-interaction --prefer-dist
 
-            if [ -f /tmp/build-artifacts.tar.gz ]; then
-              tar -xzf /tmp/build-artifacts.tar.gz -C "$APP_PATH"
-              rm -f /tmp/build-artifacts.tar.gz
+            if [ -f "$APP_PATH/package.json" ]; then
+              export NODE_ENV=development
+              "$NPM_BIN" ci --no-audit --no-fund
+              "$NPM_BIN" run build
             fi
 
             if [ -f "$APP_PATH/.env" ]; then
