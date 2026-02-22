@@ -35,8 +35,8 @@ export function LoginScreen() {
   const isTablet = Math.min(viewportWidth, viewportHeight) >= 600;
   const styles = useMemo(() => createStyles(theme, { isLandscape, isTablet }), [theme, isLandscape, isTablet]);
   const { login, biometricLogin, hasStoredSession, biometricAvailable, biometricEnabled, biometricLabel } = useSession();
-  const [email, setEmail] = useState("cashier@demo.local");
-  const [password, setPassword] = useState("password");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [biometricSubmitting, setBiometricSubmitting] = useState(false);

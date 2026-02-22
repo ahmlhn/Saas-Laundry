@@ -9,7 +9,12 @@ interface RetryableRequestConfig extends InternalAxiosRequestConfig {
 let activeApiBaseUrl = API_BASE_URL;
 
 function buildApiBaseUrl(baseUrl: string): string {
-  return `${baseUrl}/api`;
+  const trimmed = baseUrl.replace(/\/+$/, "");
+  if (/\/api$/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  return `${trimmed}/api`;
 }
 
 function normalizeCandidateFromBaseUrl(raw: string | undefined): string | null {

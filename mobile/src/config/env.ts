@@ -10,17 +10,22 @@ function trimTrailingSlash(url: string): string {
   return url.replace(/\/+$/, "");
 }
 
-const configuredApiUrl = process.env.EXPO_PUBLIC_API_URL?.trim() || FALLBACK_API_URL;
+function normalizeApiBaseUrl(url: string): string {
+  const trimmed = trimTrailingSlash(url.trim());
+  return trimmed.replace(/\/api$/i, "");
+}
+
+const configuredApiUrl = normalizeApiBaseUrl(process.env.EXPO_PUBLIC_API_URL?.trim() || FALLBACK_API_URL);
 const configuredFallbacks = process.env.EXPO_PUBLIC_API_URL_FALLBACKS?.split(",")
-  .map((item: string) => item.trim())
+  .map((item: string) => normalizeApiBaseUrl(item))
   .filter((item: string) => item.length > 0) ?? [];
 
-export const API_BASE_URL = trimTrailingSlash(configuredApiUrl);
+export const API_BASE_URL = configuredApiUrl;
 
 export const API_BASE_URL_CANDIDATES = Array.from(
   new Set(
     [API_BASE_URL, ...configuredFallbacks, ...DEFAULT_API_FALLBACKS]
-      .map((url) => trimTrailingSlash(url))
+      .map((url) => normalizeApiBaseUrl(url))
       .filter((url) => /^https?:\/\//i.test(url))
   )
 );
