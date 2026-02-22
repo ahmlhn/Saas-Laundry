@@ -85,7 +85,7 @@ export function HomeDashboardScreen() {
   const isCompactLandscape = isLandscape && !isTablet;
   const styles = useMemo(() => createStyles(theme, isTablet, isLandscape, isCompactLandscape), [theme, isTablet, isLandscape, isCompactLandscape]);
   const navigation = useNavigation<Navigation>();
-  const { selectedOutlet, session, refreshSession } = useSession();
+  const { selectedOutlet, session } = useSession();
   const outletId = selectedOutlet?.id;
   const outletTimezone = selectedOutlet?.timezone;
   const [loading, setLoading] = useState(true);
@@ -117,7 +117,6 @@ export function HomeDashboardScreen() {
       setErrorMessage(null);
 
       try {
-        await refreshSession();
         const data = await listOrders({
           outletId,
           limit: 60,
@@ -133,7 +132,7 @@ export function HomeDashboardScreen() {
         setLoading(false);
       }
     },
-    [refreshSession, outletId, outletTimezone]
+    [outletId, outletTimezone]
   );
 
   useEffect(() => {
