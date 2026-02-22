@@ -51,6 +51,34 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
+        RateLimiter::for('auth-password-forgot', function (Request $request): Limit {
+            $login = strtolower(trim((string) $request->input('login', (string) $request->input('email', 'unknown'))));
+            $ip = (string) $request->ip();
+
+            return Limit::perMinute(5)
+                ->by($login.'|'.$ip)
+                ->response(function (): \Illuminate\Http\JsonResponse {
+                    return response()->json([
+                        'reason_code' => 'TOO_MANY_REQUESTS',
+                        'message' => 'Too many reset requests. Please try again later.',
+                    ], 429);
+                });
+        });
+
+        RateLimiter::for('auth-password-reset', function (Request $request): Limit {
+            $login = strtolower(trim((string) $request->input('login', (string) $request->input('email', 'unknown'))));
+            $ip = (string) $request->ip();
+
+            return Limit::perMinute(10)
+                ->by($login.'|'.$ip)
+                ->response(function (): \Illuminate\Http\JsonResponse {
+                    return response()->json([
+                        'reason_code' => 'TOO_MANY_REQUESTS',
+                        'message' => 'Too many password reset attempts. Please try again later.',
+                    ], 429);
+                });
+        });
+
         RateLimiter::for('sync-push', function (Request $request): Limit {
             $userId = (string) ($request->user()?->id ?? 'guest');
             $deviceId = (string) $request->input('device_id', 'unknown');

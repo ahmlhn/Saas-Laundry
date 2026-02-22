@@ -356,7 +356,14 @@ export function LoginScreen() {
             </View>
           </View>
 
-          <Text style={styles.forgotHint}>Lupa password? Hubungi owner/admin tenant untuk reset akun.</Text>
+          <Pressable
+            accessibilityRole="button"
+            disabled={inputDisabled}
+            onPress={() => navigation.navigate("ForgotPassword")}
+            style={({ pressed }) => [styles.forgotHintButton, pressed ? styles.forgotHintButtonPressed : null]}
+          >
+            <Text style={styles.forgotHint}>Lupa password? Reset di sini.</Text>
+          </Pressable>
           <View style={styles.registerRow}>
             <Text style={styles.registerLabel}>Belum punya akun?</Text>
             <Pressable
@@ -735,8 +742,17 @@ function createStyles(theme: AppTheme, layout: LoginLayoutMode) {
       color: "#20b6cf",
       fontFamily: theme.fonts.semibold,
       fontSize: 13,
+    },
+    forgotHintButton: {
+      alignSelf: "flex-start",
       marginTop: -2,
-      marginLeft: 4,
+      marginLeft: 2,
+      paddingHorizontal: 4,
+      paddingVertical: 2,
+      borderRadius: 8,
+    },
+    forgotHintButtonPressed: {
+      opacity: 0.74,
     },
     registerRow: {
       flexDirection: "row",

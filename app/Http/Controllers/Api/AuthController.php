@@ -12,10 +12,13 @@ use App\Models\Role;
 use App\Models\Tenant;
 use App\Models\TenantSubscription;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
@@ -336,6 +339,135 @@ class AuthController extends Controller
         ], 201);
     }
 
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'login' => ['nullable', 'string', 'max:255'],
+            'email' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $loginInput = trim((string) ($validated['login'] ?? $validated['email'] ?? ''));
+
+        if ($loginInput === '') {
+            throw ValidationException::withMessages([
+                'login' => ['The login field is required.'],
+            ]);
+        }
+
+        $user = $this->resolveUserByLogin($loginInput);
+
+        if ($user && $user->status === 'active') {
+            $otp = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+            $hash = Hash::make($otp);
+
+            DB::table('password_reset_tokens')->updateOrInsert(
+                ['email' => strtolower((string) $user->email)],
+                [
+                    'token' => $hash,
+                    'created_at' => now(),
+                ]
+            );
+
+            $tenantName = (string) ($user->tenant?->name ?? 'Laundry App');
+            $recipient = (string) $user->email;
+            $expiresMinutes = 30;
+
+            Mail::raw(
+                "Kode reset password {$tenantName}: {$otp}. Kode berlaku {$expiresMinutes} menit.",
+                static function ($message) use ($recipient, $tenantName): void {
+                    $message
+                        ->to($recipient)
+                        ->subject("[{$tenantName}] Kode Reset Password");
+                }
+            );
+
+            $this->auditTrail->record(
+                eventKey: AuditEventKeys::AUTH_PASSWORD_RESET_REQUESTED,
+                actor: $user,
+                tenantId: $user->tenant_id,
+                metadata: [
+                    'email' => strtolower((string) $user->email),
+                    'login' => $loginInput,
+                ],
+                channel: 'api',
+                request: $request,
+            );
+        }
+
+        return response()->json([
+            'message' => 'Jika akun ditemukan, kode reset sudah dikirim ke email terdaftar.',
+        ]);
+    }
+
+    public function resetPassword(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'login' => ['nullable', 'string', 'max:255'],
+            'email' => ['nullable', 'string', 'max:255'],
+            'code' => ['required', 'digits:6'],
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        $loginInput = trim((string) ($validated['login'] ?? $validated['email'] ?? ''));
+        if ($loginInput === '') {
+            throw ValidationException::withMessages([
+                'login' => ['The login field is required.'],
+            ]);
+        }
+
+        $user = $this->resolveUserByLogin($loginInput);
+        if (! $user) {
+            throw ValidationException::withMessages([
+                'code' => ['Kode reset tidak valid atau sudah kedaluwarsa.'],
+            ]);
+        }
+
+        $tokenRow = DB::table('password_reset_tokens')
+            ->where('email', strtolower((string) $user->email))
+            ->first();
+
+        if (! $tokenRow || ! is_string($tokenRow->token)) {
+            throw ValidationException::withMessages([
+                'code' => ['Kode reset tidak valid atau sudah kedaluwarsa.'],
+            ]);
+        }
+
+        $createdAt = $this->parseTokenCreatedAt($tokenRow->created_at);
+        $isExpired = $createdAt->addMinutes(30)->isPast();
+
+        if ($isExpired || ! Hash::check((string) $validated['code'], $tokenRow->token)) {
+            throw ValidationException::withMessages([
+                'code' => ['Kode reset tidak valid atau sudah kedaluwarsa.'],
+            ]);
+        }
+
+        $user->forceFill([
+            'password' => (string) $validated['password'],
+        ])->save();
+
+        DB::table('password_reset_tokens')
+            ->where('email', strtolower((string) $user->email))
+            ->delete();
+
+        $user->tokens()->delete();
+
+        $this->auditTrail->record(
+            eventKey: AuditEventKeys::AUTH_PASSWORD_RESET_COMPLETED,
+            actor: $user,
+            tenantId: $user->tenant_id,
+            metadata: [
+                'email' => strtolower((string) $user->email),
+                'login' => $loginInput,
+            ],
+            channel: 'api',
+            request: $request,
+        );
+
+        return response()->json([
+            'message' => 'Password berhasil direset. Silakan login dengan password baru.',
+        ]);
+    }
+
     public function me(Request $request): JsonResponse
     {
         /** @var User $user */
@@ -429,6 +561,30 @@ class AuthController extends Controller
         return $digits;
     }
 
+    private function resolveUserByLogin(string $loginInput): ?User
+    {
+        $normalizedEmail = $this->normalizeEmail($loginInput);
+        $phoneCandidates = $this->buildPhoneCandidates($loginInput);
+        $canResolveUser = $normalizedEmail !== null || $phoneCandidates !== [];
+
+        if (! $canResolveUser) {
+            return null;
+        }
+
+        return User::query()
+            ->with(['tenant:id,name'])
+            ->where(function ($query) use ($normalizedEmail, $phoneCandidates): void {
+                if ($normalizedEmail !== null) {
+                    $query->orWhereRaw('LOWER(email) = ?', [$normalizedEmail]);
+                }
+
+                if ($phoneCandidates !== []) {
+                    $query->orWhereIn('phone', $phoneCandidates);
+                }
+            })
+            ->first();
+    }
+
     private function generateUniqueOutletCode(string $tenantId, string $sourceName): string
     {
         $alphanumeric = preg_replace('/[^A-Za-z0-9]/', '', strtoupper($sourceName)) ?? '';
@@ -449,5 +605,22 @@ class AuthController extends Controller
         }
 
         return substr($candidate, 0, 8);
+    }
+
+    private function parseTokenCreatedAt(mixed $createdAt): CarbonImmutable
+    {
+        if ($createdAt instanceof \DateTimeInterface) {
+            return CarbonImmutable::instance($createdAt);
+        }
+
+        if (is_string($createdAt) && trim($createdAt) !== '') {
+            try {
+                return CarbonImmutable::parse($createdAt);
+            } catch (\Throwable) {
+                // fallback to past date so token is considered expired.
+            }
+        }
+
+        return CarbonImmutable::instance(Date::now())->subDays(1);
     }
 }

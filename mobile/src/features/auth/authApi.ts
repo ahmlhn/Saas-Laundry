@@ -18,6 +18,17 @@ interface RegisterPayload {
   deviceName: string;
 }
 
+interface ForgotPasswordPayload {
+  login: string;
+}
+
+interface ResetPasswordPayload {
+  login: string;
+  code: string;
+  password: string;
+  passwordConfirmation: string;
+}
+
 export async function loginWithCredential(payload: LoginPayload): Promise<LoginResponse> {
   const response = await httpClient.post<LoginResponse>("/auth/login", {
     login: payload.login,
@@ -38,6 +49,25 @@ export async function registerAccount(payload: RegisterPayload): Promise<LoginRe
     password: payload.password,
     password_confirmation: payload.passwordConfirmation,
     device_name: payload.deviceName,
+  });
+
+  return response.data;
+}
+
+export async function requestPasswordReset(payload: ForgotPasswordPayload): Promise<{ message: string }> {
+  const response = await httpClient.post<{ message: string }>("/auth/password/forgot", {
+    login: payload.login,
+  });
+
+  return response.data;
+}
+
+export async function resetPasswordWithCode(payload: ResetPasswordPayload): Promise<{ message: string }> {
+  const response = await httpClient.post<{ message: string }>("/auth/password/reset", {
+    login: payload.login,
+    code: payload.code,
+    password: payload.password,
+    password_confirmation: payload.passwordConfirmation,
   });
 
   return response.data;

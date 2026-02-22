@@ -11,6 +11,7 @@ use App\Models\TenantSubscription;
 use App\Models\User;
 use Database\Seeders\RolesAndPlansSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
@@ -150,6 +151,52 @@ class AuthApiTest extends TestCase
             ->where('period', now()->format('Y-m'))
             ->first();
         $this->assertNotNull($subscription);
+    }
+
+    public function test_forgot_password_creates_reset_token_with_generic_response(): void
+    {
+        $response = $this->postJson('/api/auth/password/forgot', [
+            'login' => '081234567890',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertHeader('X-Request-Id')
+            ->assertJsonPath('message', 'Jika akun ditemukan, kode reset sudah dikirim ke email terdaftar.');
+
+        $tokenRow = DB::table('password_reset_tokens')
+            ->where('email', 'admin@example.com')
+            ->first();
+
+        $this->assertNotNull($tokenRow);
+        $this->assertIsString($tokenRow->token);
+        $this->assertNotSame('', trim($tokenRow->token));
+    }
+
+    public function test_reset_password_updates_password_and_clears_token(): void
+    {
+        DB::table('password_reset_tokens')->insert([
+            'email' => 'admin@example.com',
+            'token' => Hash::make('123456'),
+            'created_at' => now(),
+        ]);
+
+        $response = $this->postJson('/api/auth/password/reset', [
+            'login' => 'admin@example.com',
+            'code' => '123456',
+            'password' => 'new-password-123',
+            'password_confirmation' => 'new-password-123',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertHeader('X-Request-Id')
+            ->assertJsonPath('message', 'Password berhasil direset. Silakan login dengan password baru.');
+
+        $this->assertTrue(Hash::check('new-password-123', (string) $this->user->fresh()->password));
+        $this->assertDatabaseMissing('password_reset_tokens', [
+            'email' => 'admin@example.com',
+        ]);
     }
 
     public function test_outlet_scope_rejects_unassigned_outlet(): void
