@@ -75,6 +75,12 @@ jobs:
           command_timeout: 45m
           script: |
             set -euo pipefail
+            on_error() {
+              local exit_code=$?
+              echo "Deploy gagal pada command: ${BASH_COMMAND} (exit ${exit_code})."
+              exit "${exit_code}"
+            }
+            trap on_error ERR
 
             [ -f "$HOME/.bash_profile" ] && . "$HOME/.bash_profile" || true
             [ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc" || true
@@ -138,44 +144,50 @@ jobs:
 
               if [ -z "$NODE_FOUND" ]; then
                 echo "Node.js tidak ditemukan."
-                echo "Set DEPLOY_NODE_BIN/DEPLOY_NPM_BIN ke path binary server, atau set DEPLOY_BUILD_FRONTEND=false untuk skip build frontend sementara."
-                exit 1
+                echo "Set DEPLOY_NODE_BIN/DEPLOY_NPM_BIN ke path binary server. Frontend build akan di-skip untuk deploy ini."
+                BUILD_FRONTEND="false"
               fi
 
-              NODE_BIN="$NODE_FOUND"
-
-              NPM_FOUND=""
-              if command -v "$NPM_BIN" >/dev/null 2>&1; then
-                NPM_FOUND="$(command -v "$NPM_BIN")"
-              elif [ -x "$NPM_BIN" ]; then
-                NPM_FOUND="$NPM_BIN"
+              if [ "$BUILD_FRONTEND" = "true" ]; then
+                NODE_BIN="$NODE_FOUND"
               fi
 
-              if [ -z "$NPM_FOUND" ]; then
-                for CANDIDATE in npm /usr/local/bin/npm /usr/bin/npm /opt/alt/alt-nodejs20/root/usr/bin/npm /opt/alt/alt-nodejs18/root/usr/bin/npm /opt/alt/alt-nodejs16/root/usr/bin/npm "$(dirname "$NODE_BIN")/npm"
-                do
-                  if [ -x "$CANDIDATE" ]; then
-                    NPM_FOUND="$CANDIDATE"
-                    break
-                  fi
-                done
+              if [ "$BUILD_FRONTEND" = "true" ]; then
+                NPM_FOUND=""
+                if command -v "$NPM_BIN" >/dev/null 2>&1; then
+                  NPM_FOUND="$(command -v "$NPM_BIN")"
+                elif [ -x "$NPM_BIN" ]; then
+                  NPM_FOUND="$NPM_BIN"
+                fi
+
+                if [ -z "$NPM_FOUND" ]; then
+                  for CANDIDATE in npm /usr/local/bin/npm /usr/bin/npm /opt/alt/alt-nodejs20/root/usr/bin/npm /opt/alt/alt-nodejs18/root/usr/bin/npm /opt/alt/alt-nodejs16/root/usr/bin/npm "$(dirname "$NODE_BIN")/npm"
+                  do
+                    if [ -x "$CANDIDATE" ]; then
+                      NPM_FOUND="$CANDIDATE"
+                      break
+                    fi
+                  done
+                fi
               fi
 
-              if [ -z "$NPM_FOUND" ]; then
+              if [ "$BUILD_FRONTEND" = "true" ] && [ -z "$NPM_FOUND" ]; then
                 echo "npm tidak ditemukan."
-                echo "Set DEPLOY_NPM_BIN ke path npm di server, atau set DEPLOY_BUILD_FRONTEND=false untuk skip build frontend sementara."
-                exit 1
+                echo "Set DEPLOY_NPM_BIN ke path npm di server. Frontend build akan di-skip untuk deploy ini."
+                BUILD_FRONTEND="false"
               fi
 
-              NPM_BIN="$NPM_FOUND"
-              NODE_DIR="$(dirname "$NODE_BIN")"
-              export PATH="$NODE_DIR:$PATH"
-              hash -r || true
-              echo "Node binary: $NODE_BIN"
-              echo "Npm binary : $NPM_BIN"
-              echo "Node dir   : $NODE_DIR"
-              "$NODE_BIN" -v
-              "$NPM_BIN" -v
+              if [ "$BUILD_FRONTEND" = "true" ]; then
+                NPM_BIN="$NPM_FOUND"
+                NODE_DIR="$(dirname "$NODE_BIN")"
+                export PATH="$NODE_DIR:$PATH"
+                hash -r || true
+                echo "Node binary: $NODE_BIN"
+                echo "Npm binary : $NPM_BIN"
+                echo "Node dir   : $NODE_DIR"
+                "$NODE_BIN" -v
+                "$NPM_BIN" -v
+              fi
             fi
 
             NEED_UP=0
@@ -196,8 +208,11 @@ jobs:
             if [ -f "$APP_PATH/package.json" ] && [ "$BUILD_FRONTEND" = "true" ]; then
               export NODE_ENV=development
               export npm_config_scripts_prepend_node_path=true
-              "$NPM_BIN" ci --no-audit --no-fund
-              "$NPM_BIN" run build
+              if "$NPM_BIN" ci --no-audit --no-fund; then
+                "$NPM_BIN" run build
+              else
+                echo "npm ci gagal, skip npm build dan lanjut deploy backend."
+              fi
             elif [ -f "$APP_PATH/package.json" ]; then
               echo "DEPLOY_BUILD_FRONTEND=false -> skip npm build."
             fi
