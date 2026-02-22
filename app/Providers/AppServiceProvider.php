@@ -37,6 +37,19 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
+        RateLimiter::for('auth-google', function (Request $request): Limit {
+            $ip = (string) $request->ip();
+
+            return Limit::perMinute(20)
+                ->by('google|'.$ip)
+                ->response(function (): \Illuminate\Http\JsonResponse {
+                    return response()->json([
+                        'reason_code' => 'TOO_MANY_REQUESTS',
+                        'message' => 'Too many Google login attempts. Please try again later.',
+                    ], 429);
+                });
+        });
+
         RateLimiter::for('auth-register', function (Request $request): Limit {
             $email = strtolower(trim((string) $request->input('email', 'unknown')));
             $ip = (string) $request->ip();

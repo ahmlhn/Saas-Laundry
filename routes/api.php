@@ -23,6 +23,7 @@ Route::get('/health', static fn () => response()->json([
 
 Route::prefix('auth')->group(function (): void {
     Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:auth-register');
+    Route::post('/google', [AuthController::class, 'google'])->middleware('throttle:auth-google');
     Route::post('/password/forgot', [AuthController::class, 'forgotPassword'])->middleware('throttle:auth-password-forgot');
     Route::post('/password/reset', [AuthController::class, 'resetPassword'])->middleware('throttle:auth-password-reset');
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:auth-login');

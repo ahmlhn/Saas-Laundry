@@ -7,6 +7,11 @@ interface LoginPayload {
   deviceName: string;
 }
 
+interface GoogleLoginPayload {
+  idToken: string;
+  deviceName: string;
+}
+
 interface RegisterPayload {
   name: string;
   tenantName: string;
@@ -38,6 +43,15 @@ export async function loginWithCredential(payload: LoginPayload): Promise<LoginR
   const response = await httpClient.post<LoginResponse>("/auth/login", {
     login: payload.login,
     password: payload.password,
+    device_name: payload.deviceName,
+  });
+
+  return response.data;
+}
+
+export async function loginWithGoogleIdToken(payload: GoogleLoginPayload): Promise<LoginResponse> {
+  const response = await httpClient.post<LoginResponse>("/auth/google", {
+    id_token: payload.idToken,
     device_name: payload.deviceName,
   });
 

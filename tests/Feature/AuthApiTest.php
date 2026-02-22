@@ -13,6 +13,7 @@ use Database\Seeders\RolesAndPlansSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class AuthApiTest extends TestCase
@@ -115,6 +116,50 @@ class AuthApiTest extends TestCase
             ->assertJsonPath('data.user.phone', '6281234567890');
 
         $this->assertNotEmpty($response->json('access_token'));
+    }
+
+    public function test_google_login_returns_token_for_registered_email(): void
+    {
+        config(['services.google.client_ids' => ['android-client-id']]);
+
+        Http::fake([
+            'https://oauth2.googleapis.com/tokeninfo*' => Http::response([
+                'aud' => 'android-client-id',
+                'sub' => 'google-sub-123',
+                'email' => 'admin@example.com',
+                'email_verified' => 'true',
+            ], 200),
+        ]);
+
+        $response = $this->postJson('/api/auth/google', [
+            'id_token' => 'mock-google-id-token',
+            'device_name' => 'android-device',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertHeader('X-Request-Id')
+            ->assertJsonPath('data.user.email', 'admin@example.com');
+
+        $this->assertNotEmpty($response->json('access_token'));
+    }
+
+    public function test_google_login_rejects_unregistered_email(): void
+    {
+        config(['services.google.client_ids' => ['android-client-id']]);
+
+        Http::fake([
+            'https://oauth2.googleapis.com/tokeninfo*' => Http::response([
+                'aud' => 'android-client-id',
+                'sub' => 'google-sub-unknown',
+                'email' => 'not.registered@example.com',
+                'email_verified' => 'true',
+            ], 200),
+        ]);
+
+        $this->postJson('/api/auth/google', [
+            'id_token' => 'mock-google-id-token',
+        ])->assertStatus(403)->assertJsonPath('reason_code', 'GOOGLE_ACCOUNT_NOT_REGISTERED');
     }
 
     public function test_register_creates_owner_tenant_and_returns_token(): void

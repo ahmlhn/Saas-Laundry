@@ -35,4 +35,11 @@ return [
         ],
     ],
 
+    'google' => [
+        'client_ids' => array_values(array_filter(array_map(
+            static fn (string $value): string => trim($value),
+            explode(',', (string) env('GOOGLE_CLIENT_IDS', ''))
+        ))),
+    ],
+
 ];

@@ -18,6 +18,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
@@ -206,6 +207,137 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => 'Logged out successfully.',
+        ]);
+    }
+
+    public function google(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'id_token' => ['required', 'string', 'max:4096'],
+            'device_name' => ['nullable', 'string', 'max:100'],
+        ]);
+
+        $googleIdentity = $this->fetchGoogleIdentity((string) $validated['id_token']);
+
+        if (! $googleIdentity) {
+            $this->auditTrail->record(
+                eventKey: AuditEventKeys::AUTH_LOGIN_FAILED,
+                actor: null,
+                tenantId: null,
+                metadata: [
+                    'reason' => 'google_token_invalid',
+                ],
+                channel: 'api',
+                request: $request,
+            );
+
+            throw ValidationException::withMessages([
+                'id_token' => ['Google token tidak valid.'],
+            ]);
+        }
+
+        $allowedClientIds = $this->allowedGoogleClientIds();
+        if ($allowedClientIds === []) {
+            return response()->json([
+                'reason_code' => 'APP_CONFIG_INVALID',
+                'message' => 'Google login belum dikonfigurasi di server.',
+            ], 503);
+        }
+
+        if (! in_array($googleIdentity['aud'], $allowedClientIds, true)) {
+            $this->auditTrail->record(
+                eventKey: AuditEventKeys::AUTH_LOGIN_FAILED,
+                actor: null,
+                tenantId: null,
+                metadata: [
+                    'reason' => 'google_audience_invalid',
+                    'aud' => $googleIdentity['aud'],
+                    'email' => $googleIdentity['email'],
+                ],
+                channel: 'api',
+                request: $request,
+            );
+
+            return response()->json([
+                'reason_code' => 'GOOGLE_AUDIENCE_INVALID',
+                'message' => 'Google token tidak cocok dengan konfigurasi aplikasi.',
+            ], 403);
+        }
+
+        if (! $googleIdentity['email_verified']) {
+            return response()->json([
+                'reason_code' => 'GOOGLE_EMAIL_NOT_VERIFIED',
+                'message' => 'Email Google belum terverifikasi.',
+            ], 403);
+        }
+
+        $email = strtolower($googleIdentity['email']);
+
+        $user = User::query()
+            ->with(['tenant.currentPlan', 'roles:id,key,name', 'outlets:id,tenant_id,name,code,timezone'])
+            ->whereRaw('LOWER(email) = ?', [$email])
+            ->first();
+
+        if (! $user) {
+            $this->auditTrail->record(
+                eventKey: AuditEventKeys::AUTH_LOGIN_FAILED,
+                actor: null,
+                tenantId: null,
+                metadata: [
+                    'reason' => 'google_account_not_registered',
+                    'email' => $email,
+                    'google_sub' => $googleIdentity['sub'],
+                ],
+                channel: 'api',
+                request: $request,
+            );
+
+            return response()->json([
+                'reason_code' => 'GOOGLE_ACCOUNT_NOT_REGISTERED',
+                'message' => 'Akun Google belum terdaftar. Login dulu dengan email/password.',
+            ], 403);
+        }
+
+        if ($user->status !== 'active') {
+            $this->auditTrail->record(
+                eventKey: AuditEventKeys::AUTH_LOGIN_INACTIVE,
+                actor: $user,
+                tenantId: $user->tenant_id,
+                metadata: [
+                    'email' => strtolower((string) $user->email),
+                    'reason' => 'inactive_account',
+                    'provider' => 'google',
+                ],
+                channel: 'api',
+                request: $request,
+            );
+
+            return response()->json([
+                'reason_code' => 'USER_INACTIVE',
+                'message' => 'Your account is inactive.',
+            ], 403);
+        }
+
+        $token = $user->createToken($validated['device_name'] ?? 'api-device')->plainTextToken;
+
+        $this->auditTrail->record(
+            eventKey: AuditEventKeys::AUTH_LOGIN_SUCCESS,
+            actor: $user,
+            tenantId: $user->tenant_id,
+            metadata: [
+                'email' => strtolower((string) $user->email),
+                'device_name' => $validated['device_name'] ?? 'api-device',
+                'provider' => 'google',
+                'google_sub' => $googleIdentity['sub'],
+            ],
+            channel: 'api',
+            request: $request,
+        );
+
+        return response()->json([
+            'token_type' => 'Bearer',
+            'access_token' => $token,
+            'data' => $this->buildUserContext($user),
         ]);
     }
 
@@ -602,6 +734,79 @@ class AuthController extends Controller
         }
 
         return $digits;
+    }
+
+    /**
+     * @return array{email: string, sub: string, aud: string, email_verified: bool}|null
+     */
+    private function fetchGoogleIdentity(string $idToken): ?array
+    {
+        try {
+            $response = Http::timeout(10)
+                ->acceptJson()
+                ->get('https://oauth2.googleapis.com/tokeninfo', [
+                    'id_token' => $idToken,
+                ]);
+
+            if (! $response->ok()) {
+                return null;
+            }
+
+            $payload = $response->json();
+            if (! is_array($payload)) {
+                return null;
+            }
+
+            $email = strtolower(trim((string) ($payload['email'] ?? '')));
+            $sub = trim((string) ($payload['sub'] ?? ''));
+            $aud = trim((string) ($payload['aud'] ?? ''));
+            $emailVerified = $this->toBooleanValue($payload['email_verified'] ?? false);
+
+            if ($email === '' || ! filter_var($email, FILTER_VALIDATE_EMAIL) || $sub === '' || $aud === '') {
+                return null;
+            }
+
+            return [
+                'email' => $email,
+                'sub' => $sub,
+                'aud' => $aud,
+                'email_verified' => $emailVerified,
+            ];
+        } catch (\Throwable $error) {
+            Log::warning('auth_google_token_validation_failed', [
+                'error' => $error->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function allowedGoogleClientIds(): array
+    {
+        $ids = config('services.google.client_ids', []);
+
+        if (! is_array($ids)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter(array_map(
+            static fn ($value): string => trim((string) $value),
+            $ids
+        ))));
+    }
+
+    private function toBooleanValue(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        $normalized = strtolower(trim((string) $value));
+
+        return in_array($normalized, ['1', 'true', 'yes'], true);
     }
 
     private function resolveUserByLogin(string $loginInput): ?User

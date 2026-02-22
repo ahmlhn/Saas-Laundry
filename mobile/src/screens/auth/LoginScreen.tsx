@@ -2,6 +2,7 @@ import axios from "axios";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import * as Google from "expo-auth-session/providers/google";
 import {
   ActivityIndicator,
   Animated,
@@ -18,6 +19,13 @@ import {
 } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppPanel } from "../../components/ui/AppPanel";
+import {
+  GOOGLE_ANDROID_CLIENT_ID,
+  GOOGLE_EXPO_CLIENT_ID,
+  GOOGLE_IOS_CLIENT_ID,
+  GOOGLE_LOGIN_ENABLED,
+  GOOGLE_WEB_CLIENT_ID,
+} from "../../config/env";
 import { checkApiHealth } from "../../features/auth/authApi";
 import type { AuthStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
@@ -37,6 +45,11 @@ function resolveLoginErrorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
     if (!error.response) {
       return "Tidak bisa terhubung ke server. Cek internet atau status API.";
+    }
+
+    const responseData = error.response.data as { message?: unknown } | undefined;
+    if (responseData && typeof responseData.message === "string" && responseData.message.trim().length > 0) {
+      return responseData.message.trim();
     }
 
     if (error.response.status === 401) {
@@ -66,12 +79,13 @@ export function LoginScreen() {
   const isLandscape = viewportWidth > viewportHeight;
   const isTablet = Math.min(viewportWidth, viewportHeight) >= 600;
   const styles = useMemo(() => createStyles(theme, { isLandscape, isTablet }), [theme, isLandscape, isTablet]);
-  const { login, biometricLogin, hasStoredSession, biometricAvailable, biometricEnabled, biometricLabel } = useSession();
+  const { login, loginWithGoogle, biometricLogin, hasStoredSession, biometricAvailable, biometricEnabled, biometricLabel } = useSession();
   const [loginCredential, setLoginCredential] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [biometricSubmitting, setBiometricSubmitting] = useState(false);
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
   const [errorSummary, setErrorSummary] = useState<string | null>(null);
   const [apiStatus, setApiStatus] = useState<ApiStatus>("offline");
   const [focusedField, setFocusedField] = useState<FocusedField>(null);
@@ -85,6 +99,12 @@ export function LoginScreen() {
   const keyboardHeightRef = useRef(0);
   const keyboardRaisedRef = useRef(false);
   const entranceProgress = useRef(new Animated.Value(0)).current;
+  const [googleAuthRequest, , promptGoogleAuth] = Google.useIdTokenAuthRequest({
+    clientId: GOOGLE_WEB_CLIENT_ID || GOOGLE_EXPO_CLIENT_ID || undefined,
+    androidClientId: GOOGLE_ANDROID_CLIENT_ID || undefined,
+    iosClientId: GOOGLE_IOS_CLIENT_ID || undefined,
+    webClientId: GOOGLE_WEB_CLIENT_ID || undefined,
+  });
 
   useEffect(() => {
     Animated.timing(entranceProgress, {
@@ -179,7 +199,9 @@ export function LoginScreen() {
 
   const canSubmit = !submitting && loginCredential.trim().length > 0 && password.length > 0;
   const canBiometricLogin = hasStoredSession && biometricAvailable && biometricEnabled && !biometricSubmitting && !submitting;
-  const inputDisabled = submitting || biometricSubmitting;
+  const googleFeatureReady = GOOGLE_LOGIN_ENABLED && !!googleAuthRequest;
+  const canGooglePress = !googleSubmitting && !submitting && !biometricSubmitting;
+  const inputDisabled = submitting || biometricSubmitting || googleSubmitting;
   const focusMode = keyboardVisible || focusedField !== null;
 
   function clearErrorState(): void {
@@ -226,6 +248,43 @@ export function LoginScreen() {
       setErrorSummary(resolveLoginErrorMessage(error));
     } finally {
       setBiometricSubmitting(false);
+    }
+  }
+
+  async function handleGoogleLogin(): Promise<void> {
+    if (!canGooglePress) {
+      return;
+    }
+
+    if (!googleFeatureReady) {
+      if (!GOOGLE_LOGIN_ENABLED) {
+        setErrorSummary("Login Google belum dikonfigurasi pada aplikasi mobile.");
+      } else {
+        setErrorSummary("Google login belum siap. Coba lagi beberapa detik.");
+      }
+      return;
+    }
+
+    setGoogleSubmitting(true);
+    clearErrorState();
+
+    try {
+      const result = await promptGoogleAuth();
+      if (result.type !== "success") {
+        return;
+      }
+
+      const idToken = result.params?.id_token;
+      if (!idToken) {
+        setErrorSummary("Google tidak mengembalikan token login.");
+        return;
+      }
+
+      await loginWithGoogle({ idToken });
+    } catch (error) {
+      setErrorSummary(resolveLoginErrorMessage(error));
+    } finally {
+      setGoogleSubmitting(false);
     }
   }
 
@@ -439,6 +498,29 @@ export function LoginScreen() {
               </Pressable>
             ) : null}
           </View>
+
+          <Pressable
+            accessibilityRole="button"
+            disabled={!canGooglePress}
+            onPress={() => void handleGoogleLogin()}
+            style={({ pressed }) => [
+              styles.googleButton,
+              !googleFeatureReady ? styles.googleButtonNotReady : null,
+              !canGooglePress ? styles.googleButtonDisabled : null,
+              pressed && canGooglePress ? styles.googleButtonPressed : null,
+            ]}
+          >
+            {googleSubmitting ? (
+              <ActivityIndicator color={theme.colors.textPrimary} size="small" />
+            ) : (
+              <>
+                <View style={styles.googleBadge}>
+                  <Text style={styles.googleBadgeText}>G</Text>
+                </View>
+                <Text style={styles.googleButtonText}>Masuk dengan Google</Text>
+              </>
+            )}
+          </Pressable>
 
           {hasStoredSession && (!biometricAvailable || !biometricEnabled) ? (
             <View style={styles.biometricHintWrap}>
@@ -804,6 +886,51 @@ function createStyles(theme: AppTheme, layout: LoginLayoutMode) {
       flexDirection: "row",
       gap: theme.spacing.sm,
       marginTop: 3,
+    },
+    googleButton: {
+      marginTop: 8,
+      minHeight: 50,
+      borderRadius: theme.radii.pill,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      backgroundColor: theme.colors.surface,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 10,
+      paddingHorizontal: 14,
+    },
+    googleButtonDisabled: {
+      opacity: 0.52,
+    },
+    googleButtonNotReady: {
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surfaceSoft,
+    },
+    googleButtonPressed: {
+      opacity: 0.86,
+    },
+    googleBadge: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      backgroundColor: "#ffffff",
+      borderWidth: 1,
+      borderColor: "#e2e5ea",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    googleBadgeText: {
+      color: "#ea4335",
+      fontFamily: theme.fonts.heavy,
+      fontSize: 14,
+      lineHeight: 16,
+    },
+    googleButtonText: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 14,
+      letterSpacing: 0.2,
     },
     submitPrimaryButton: {
       flex: 1,
