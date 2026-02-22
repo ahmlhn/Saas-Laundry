@@ -1,3 +1,4 @@
+import axios from "axios";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -15,6 +16,7 @@ import {
 } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppPanel } from "../../components/ui/AppPanel";
+import { checkApiHealth } from "../../features/auth/authApi";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
@@ -22,10 +24,77 @@ import { useAppTheme } from "../../theme/useAppTheme";
 
 type FocusedField = "email" | "password" | null;
 type LoginViewRole = "owner" | "staff";
+type ApiStatus = "checking" | "online" | "offline";
 
 interface LoginLayoutMode {
   isLandscape: boolean;
   isTablet: boolean;
+}
+
+interface LoginErrorState {
+  summary: string;
+  details: string;
+}
+
+function resolveLoginErrorState(error: unknown): LoginErrorState {
+  const details = getApiErrorMessage(error);
+  const normalized = details.toLowerCase();
+
+  if (axios.isAxiosError(error)) {
+    if (!error.response) {
+      return {
+        summary: "Tidak bisa terhubung ke server. Cek internet atau status API.",
+        details,
+      };
+    }
+
+    if (error.response.status === 401) {
+      return {
+        summary: "Email atau kata sandi tidak sesuai.",
+        details,
+      };
+    }
+
+    if (error.response.status === 403) {
+      return {
+        summary: "Akun belum diizinkan login. Hubungi admin tenant.",
+        details,
+      };
+    }
+
+    if (error.response.status === 422) {
+      return {
+        summary: "Data login belum valid. Periksa lagi email dan kata sandi.",
+        details,
+      };
+    }
+
+    if (error.response.status >= 500) {
+      return {
+        summary: "Server sedang bermasalah. Coba lagi beberapa saat.",
+        details,
+      };
+    }
+  }
+
+  if (normalized.includes("network error") || normalized.includes("err_network")) {
+    return {
+      summary: "Tidak bisa terhubung ke server. Cek internet atau status API.",
+      details,
+    };
+  }
+
+  if (normalized.includes("credential") || normalized.includes("password") || normalized.includes("unauthenticated")) {
+    return {
+      summary: "Email atau kata sandi tidak sesuai.",
+      details,
+    };
+  }
+
+  return {
+    summary: "Login gagal. Silakan coba lagi.",
+    details,
+  };
 }
 
 export function LoginScreen() {
@@ -40,7 +109,11 @@ export function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [biometricSubmitting, setBiometricSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorSummary, setErrorSummary] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
+  const [showErrorDetails, setShowErrorDetails] = useState(false);
+  const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
+  const [checkingApiHealth, setCheckingApiHealth] = useState(false);
   const [focusedField, setFocusedField] = useState<FocusedField>(null);
   const [viewRole, setViewRole] = useState<LoginViewRole>("owner");
   const [keyboardVisible, setKeyboardVisible] = useState(false);
@@ -62,6 +135,10 @@ export function LoginScreen() {
       useNativeDriver: true,
     }).start();
   }, [entranceProgress]);
+
+  useEffect(() => {
+    void runApiHealthCheck();
+  }, []);
 
   function scrollFormIntoView(targetField: FocusedField = focusedFieldRef.current, keyboardHeightPx?: number): void {
     const baseOffset = Math.max(panelTopRef.current - 20, 0);
@@ -147,6 +224,27 @@ export function LoginScreen() {
     viewRole === "owner"
       ? "Mode pemilik untuk monitoring KPI, billing, dan kontrol lintas outlet."
       : "Mode pegawai untuk operasional harian: order, status laundry, dan serah-terima.";
+  const apiStatusLabel = apiStatus === "online" ? "API Online" : apiStatus === "offline" ? "API Offline" : "Memeriksa API...";
+
+  function clearErrorState(): void {
+    setErrorSummary(null);
+    setErrorDetails(null);
+    setShowErrorDetails(false);
+  }
+
+  async function runApiHealthCheck(): Promise<void> {
+    setCheckingApiHealth(true);
+    setApiStatus("checking");
+
+    try {
+      const health = await checkApiHealth();
+      setApiStatus(health.ok === false ? "offline" : "online");
+    } catch {
+      setApiStatus("offline");
+    } finally {
+      setCheckingApiHealth(false);
+    }
+  }
 
   async function handleSubmit(): Promise<void> {
     if (!canSubmit) {
@@ -154,12 +252,14 @@ export function LoginScreen() {
     }
 
     setSubmitting(true);
-    setErrorMessage(null);
+    clearErrorState();
 
     try {
       await login({ email, password });
     } catch (error) {
-      setErrorMessage(getApiErrorMessage(error));
+      const resolved = resolveLoginErrorState(error);
+      setErrorSummary(resolved.summary);
+      setErrorDetails(resolved.details);
     } finally {
       setSubmitting(false);
     }
@@ -171,12 +271,14 @@ export function LoginScreen() {
     }
 
     setBiometricSubmitting(true);
-    setErrorMessage(null);
+    clearErrorState();
 
     try {
       await biometricLogin();
     } catch (error) {
-      setErrorMessage(getApiErrorMessage(error));
+      const resolved = resolveLoginErrorState(error);
+      setErrorSummary(resolved.summary);
+      setErrorDetails(resolved.details);
     } finally {
       setBiometricSubmitting(false);
     }
@@ -215,6 +317,41 @@ export function LoginScreen() {
             </View>
             <Text style={styles.heroTitle}>Masuk untuk kendalikan workflow outlet setiap hari.</Text>
             <Text style={styles.heroSubtitle}>Satu aplikasi untuk kasir, progress laundry, kurir, dan rekap cepat operasional.</Text>
+            <View style={styles.apiStatusRow}>
+              <View
+                style={[
+                  styles.apiStatusBadge,
+                  apiStatus === "online" ? styles.apiStatusBadgeOnline : null,
+                  apiStatus === "offline" ? styles.apiStatusBadgeOffline : null,
+                  apiStatus === "checking" ? styles.apiStatusBadgeChecking : null,
+                ]}
+              >
+                {apiStatus === "checking" ? (
+                  <ActivityIndicator color="#ffffff" size="small" />
+                ) : (
+                  <View
+                    style={[
+                      styles.apiStatusDot,
+                      apiStatus === "online" ? styles.apiStatusDotOnline : styles.apiStatusDotOffline,
+                    ]}
+                  />
+                )}
+                <Text style={styles.apiStatusText}>{apiStatusLabel}</Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                disabled={checkingApiHealth}
+                onPress={() => void runApiHealthCheck()}
+                style={({ pressed }) => [
+                  styles.apiStatusRetryButton,
+                  checkingApiHealth ? styles.apiStatusRetryButtonDisabled : null,
+                  pressed && !checkingApiHealth ? styles.apiStatusRetryButtonPressed : null,
+                ]}
+              >
+                <Text style={styles.apiStatusRetryText}>Cek Ulang</Text>
+              </Pressable>
+            </View>
+            {apiStatus === "offline" ? <Text style={styles.apiStatusHint}>API belum terjangkau dari perangkat ini. Login bisa gagal sampai API online.</Text> : null}
           </View>
         </Animated.View>
 
@@ -335,10 +472,20 @@ export function LoginScreen() {
 
           <Text style={styles.forgotHint}>Lupa password? Hubungi owner/admin tenant untuk reset akun.</Text>
 
-          {errorMessage ? (
+          {errorSummary ? (
             <View style={styles.errorWrap}>
               <Text style={styles.errorTitle}>Login gagal</Text>
-              <Text style={styles.errorText}>{errorMessage}</Text>
+              <Text style={styles.errorText}>{errorSummary}</Text>
+              {errorDetails ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setShowErrorDetails((value) => !value)}
+                  style={({ pressed }) => [styles.errorDetailsToggle, pressed ? styles.errorDetailsTogglePressed : null]}
+                >
+                  <Text style={styles.errorDetailsToggleText}>{showErrorDetails ? "Sembunyikan detail teknis" : "Lihat detail teknis"}</Text>
+                </Pressable>
+              ) : null}
+              {showErrorDetails && errorDetails ? <Text style={styles.errorDetailsText}>{errorDetails}</Text> : null}
             </View>
           ) : null}
 
@@ -552,6 +699,80 @@ function createStyles(theme: AppTheme, layout: LoginLayoutMode) {
       lineHeight: 18,
       maxWidth: layout.isLandscape ? 520 : 340,
     },
+    apiStatusRow: {
+      marginTop: theme.spacing.xs,
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: theme.spacing.xs,
+    },
+    apiStatusBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+      borderWidth: 1,
+      borderRadius: theme.radii.pill,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      backgroundColor: "rgba(255,255,255,0.16)",
+    },
+    apiStatusBadgeOnline: {
+      borderColor: "rgba(136, 244, 191, 0.7)",
+      backgroundColor: "rgba(19, 128, 77, 0.3)",
+    },
+    apiStatusBadgeOffline: {
+      borderColor: "rgba(255, 162, 181, 0.7)",
+      backgroundColor: "rgba(151, 34, 70, 0.35)",
+    },
+    apiStatusBadgeChecking: {
+      borderColor: "rgba(255,255,255,0.55)",
+      backgroundColor: "rgba(255,255,255,0.2)",
+    },
+    apiStatusDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+    },
+    apiStatusDotOnline: {
+      backgroundColor: "#72f0b5",
+    },
+    apiStatusDotOffline: {
+      backgroundColor: "#ffc0cf",
+    },
+    apiStatusText: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
+      letterSpacing: 0.2,
+    },
+    apiStatusRetryButton: {
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.55)",
+      borderRadius: theme.radii.pill,
+      backgroundColor: "rgba(255,255,255,0.14)",
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+    },
+    apiStatusRetryButtonDisabled: {
+      opacity: 0.6,
+    },
+    apiStatusRetryButtonPressed: {
+      opacity: 0.84,
+    },
+    apiStatusRetryText: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.semibold,
+      fontSize: 10,
+      letterSpacing: 0.3,
+      textTransform: "uppercase",
+    },
+    apiStatusHint: {
+      color: "rgba(255,255,255,0.9)",
+      fontFamily: theme.fonts.medium,
+      fontSize: 10,
+      lineHeight: 14,
+      maxWidth: 380,
+    },
     panelWrap: {
       marginTop: layout.isLandscape ? -34 : -72,
       paddingHorizontal: 2,
@@ -745,6 +966,26 @@ function createStyles(theme: AppTheme, layout: LoginLayoutMode) {
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 18,
+    },
+    errorDetailsToggle: {
+      alignSelf: "flex-start",
+      marginTop: 2,
+    },
+    errorDetailsTogglePressed: {
+      opacity: 0.8,
+    },
+    errorDetailsToggleText: {
+      color: theme.colors.danger,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
+      textDecorationLine: "underline",
+    },
+    errorDetailsText: {
+      color: theme.mode === "dark" ? "#ffc0ce" : "#9b3c53",
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 16,
+      marginTop: 2,
     },
     submitRow: {
       flexDirection: "row",
