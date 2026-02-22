@@ -124,14 +124,7 @@ jobs:
               fi
 
               if [ -z "$NODE_FOUND" ]; then
-                for CANDIDATE in \
-                  node \
-                  /usr/local/bin/node \
-                  /usr/bin/node \
-                  /opt/alt/alt-nodejs20/root/usr/bin/node \
-                  /opt/alt/alt-nodejs18/root/usr/bin/node \
-                  /opt/alt/alt-nodejs16/root/usr/bin/node \
-                  "$HOME/.local/bin/node"
+                for CANDIDATE in node /usr/local/bin/node /usr/bin/node /opt/alt/alt-nodejs20/root/usr/bin/node /opt/alt/alt-nodejs18/root/usr/bin/node /opt/alt/alt-nodejs16/root/usr/bin/node "$HOME/.local/bin/node"
                 do
                   if [ -x "$CANDIDATE" ]; then
                     NODE_FOUND="$CANDIDATE"
@@ -156,14 +149,7 @@ jobs:
               fi
 
               if [ -z "$NPM_FOUND" ]; then
-                for CANDIDATE in \
-                  npm \
-                  /usr/local/bin/npm \
-                  /usr/bin/npm \
-                  /opt/alt/alt-nodejs20/root/usr/bin/npm \
-                  /opt/alt/alt-nodejs18/root/usr/bin/npm \
-                  /opt/alt/alt-nodejs16/root/usr/bin/npm \
-                  "$(dirname "$NODE_BIN")/npm"
+                for CANDIDATE in npm /usr/local/bin/npm /usr/bin/npm /opt/alt/alt-nodejs20/root/usr/bin/npm /opt/alt/alt-nodejs18/root/usr/bin/npm /opt/alt/alt-nodejs16/root/usr/bin/npm "$(dirname "$NODE_BIN")/npm"
                 do
                   if [ -x "$CANDIDATE" ]; then
                     NPM_FOUND="$CANDIDATE"
