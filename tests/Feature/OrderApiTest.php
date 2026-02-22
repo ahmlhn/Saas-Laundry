@@ -11,6 +11,7 @@ use App\Models\Role;
 use App\Models\Service;
 use App\Models\Tenant;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Database\Seeders\RolesAndPlansSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
@@ -375,6 +376,38 @@ class OrderApiTest extends TestCase
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.order_code', 'ORD-SRC02');
+    }
+
+    public function test_order_index_can_filter_today_by_outlet_timezone(): void
+    {
+        $orderA = $this->createOrder('ORD-DATE-A');
+        $orderB = $this->createOrder('ORD-DATE-B');
+        $orderC = $this->createOrder('ORD-DATE-C');
+
+        $orderA->forceFill([
+            'created_at' => CarbonImmutable::parse('2026-02-22 03:00:00', 'UTC'),
+            'updated_at' => CarbonImmutable::parse('2026-02-22 03:00:00', 'UTC'),
+        ])->save();
+
+        $orderB->forceFill([
+            'created_at' => CarbonImmutable::parse('2026-02-21 15:30:00', 'UTC'),
+            'updated_at' => CarbonImmutable::parse('2026-02-21 15:30:00', 'UTC'),
+        ])->save();
+
+        $orderC->forceFill([
+            'created_at' => CarbonImmutable::parse('2026-02-21 18:30:00', 'UTC'),
+            'updated_at' => CarbonImmutable::parse('2026-02-21 18:30:00', 'UTC'),
+        ])->save();
+
+        $response = $this->apiAs($this->cashier)
+            ->getJson('/api/orders?outlet_id='.$this->outlet->id.'&date=2026-02-22&timezone=Asia/Jakarta&limit=100')
+            ->assertOk()
+            ->assertJsonCount(2, 'data');
+
+        $codes = collect($response->json('data'))->pluck('order_code')->all();
+
+        $this->assertSame(['ORD-DATE-A', 'ORD-DATE-C'], $codes);
+        $this->assertNotContains('ORD-DATE-B', $codes);
     }
 
     private function createOrder(string $orderCode, bool $pickupDelivery = false): Order

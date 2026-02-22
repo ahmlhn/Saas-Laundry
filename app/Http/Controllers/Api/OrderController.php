@@ -16,6 +16,7 @@ use App\Models\OutletService;
 use App\Models\Payment;
 use App\Models\Service;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -41,6 +42,8 @@ class OrderController extends Controller
             'outlet_id' => ['required', 'uuid'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
             'q' => ['nullable', 'string', 'max:100'],
+            'date' => ['nullable', 'date_format:Y-m-d'],
+            'timezone' => ['nullable', 'timezone'],
         ]);
 
         $query = Order::query()
@@ -75,6 +78,20 @@ class OrderController extends Controller
                         }
                     });
             });
+        }
+
+        if (! empty($validated['date'])) {
+            $requestedTimezone = $validated['timezone'] ?? config('app.timezone', 'UTC');
+            $appTimezone = config('app.timezone', 'UTC');
+            $requestedDate = (string) $validated['date'];
+
+            $startOfDay = CarbonImmutable::createFromFormat('Y-m-d', $requestedDate, $requestedTimezone)->startOfDay();
+            $endOfDay = $startOfDay->endOfDay();
+
+            $query->whereBetween('created_at', [
+                $startOfDay->setTimezone($appTimezone),
+                $endOfDay->setTimezone($appTimezone),
+            ]);
         }
 
         $limit = $validated['limit'] ?? 30;

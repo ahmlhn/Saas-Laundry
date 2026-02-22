@@ -12,6 +12,7 @@ import { StatusPill } from "../../components/ui/StatusPill";
 import { listOrders } from "../../features/orders/orderApi";
 import { ORDER_BUCKETS, type OrderBucket, resolveOrderBucket } from "../../features/orders/orderBuckets";
 import { formatStatusLabel, resolveLaundryTone } from "../../features/orders/orderStatus";
+import { toDateToken } from "../../lib/dateTime";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { OrdersStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
@@ -79,6 +80,7 @@ export function OrdersTodayScreen() {
   const navigation = useNavigation<Navigation>();
   const route = useRoute<OrdersRoute>();
   const { selectedOutlet } = useSession();
+  const outletTimezone = selectedOutlet?.timezone;
 
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -155,6 +157,8 @@ export function OrdersTodayScreen() {
           outletId,
           limit: targetLimit,
           query,
+          date: toDateToken(new Date(), outletTimezone),
+          timezone: outletTimezone,
           forceRefresh,
         });
 
@@ -182,7 +186,7 @@ export function OrdersTodayScreen() {
         setIsLoadingMore(false);
       }
     },
-    [selectedOutlet?.id]
+    [selectedOutlet?.id, outletTimezone]
   );
 
   useEffect(() => {

@@ -18,6 +18,8 @@ interface ListOrdersParams {
   outletId: string;
   limit?: number;
   query?: string;
+  date?: string;
+  timezone?: string;
   forceRefresh?: boolean;
 }
 
@@ -47,7 +49,9 @@ interface CreateOrderPayload {
 export async function listOrders(params: ListOrdersParams): Promise<OrderSummary[]> {
   const limit = params.limit ?? 30;
   const query = params.query?.trim() ?? "";
-  const cacheKey = `orders:list:${params.outletId}:${limit}:${query}`;
+  const date = params.date?.trim() ?? "";
+  const timezone = params.timezone?.trim() ?? "";
+  const cacheKey = `orders:list:${params.outletId}:${limit}:${query}:${date}:${timezone}`;
 
   if (!params.forceRefresh) {
     const cached = getCachedValue<OrderSummary[]>(cacheKey);
@@ -61,6 +65,8 @@ export async function listOrders(params: ListOrdersParams): Promise<OrderSummary
       outlet_id: params.outletId,
       limit,
       q: query || undefined,
+      date: date || undefined,
+      timezone: timezone || undefined,
     },
   });
 

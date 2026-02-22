@@ -8,6 +8,7 @@ import { AppPanel } from "../../components/ui/AppPanel";
 import { StatusPill } from "../../components/ui/StatusPill";
 import { countOrdersByBucket, type OrderBucket } from "../../features/orders/orderBuckets";
 import { listOrders } from "../../features/orders/orderApi";
+import { formatDateLabel, formatTimeLabel, toDateToken } from "../../lib/dateTime";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AppTabParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
@@ -63,24 +64,16 @@ function getGreetingLabel(): string {
   return "Selamat Malam";
 }
 
-function getTodayLabel(): string {
-  return new Intl.DateTimeFormat("id-ID", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(new Date());
+function getTodayLabel(timezone?: string): string {
+  return formatDateLabel(new Date(), timezone);
 }
 
-function getUpdatedLabel(date: Date | null): string {
+function getUpdatedLabel(date: Date | null, timezone?: string): string {
   if (!date) {
     return "-";
   }
 
-  return new Intl.DateTimeFormat("id-ID", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  return formatTimeLabel(date, timezone);
 }
 
 export function HomeDashboardScreen() {
@@ -94,6 +87,7 @@ export function HomeDashboardScreen() {
   const navigation = useNavigation<Navigation>();
   const { selectedOutlet, session, refreshSession } = useSession();
   const outletId = selectedOutlet?.id;
+  const outletTimezone = selectedOutlet?.timezone;
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -127,6 +121,8 @@ export function HomeDashboardScreen() {
         const data = await listOrders({
           outletId,
           limit: 60,
+          date: toDateToken(new Date(), outletTimezone),
+          timezone: outletTimezone,
           forceRefresh,
         });
         setOrders(data);
@@ -137,7 +133,7 @@ export function HomeDashboardScreen() {
         setLoading(false);
       }
     },
-    [refreshSession, outletId]
+    [refreshSession, outletId, outletTimezone]
   );
 
   useEffect(() => {
@@ -210,8 +206,8 @@ export function HomeDashboardScreen() {
   const outletMeta = selectedOutlet ? `Timezone ${selectedOutlet.timezone}` : "Pilih outlet untuk mulai operasional";
   const planLabel = session?.plan.key ? session.plan.key.toUpperCase() : "FREE";
   const greeting = getGreetingLabel();
-  const todayLabel = getTodayLabel();
-  const updatedLabel = getUpdatedLabel(lastUpdatedAt);
+  const todayLabel = getTodayLabel(outletTimezone);
+  const updatedLabel = getUpdatedLabel(lastUpdatedAt, outletTimezone);
 
   const metricCards = [
     { label: "Total Order", value: formatCompact(orders.length), icon: "receipt-outline" as const, tone: "info" as const },
