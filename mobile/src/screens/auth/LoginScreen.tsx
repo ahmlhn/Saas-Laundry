@@ -22,7 +22,6 @@ import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
 
 type FocusedField = "email" | "password" | null;
-type LoginViewRole = "owner" | "staff";
 type ApiStatus = "online" | "offline";
 
 interface LoginLayoutMode {
@@ -71,7 +70,6 @@ export function LoginScreen() {
   const [errorSummary, setErrorSummary] = useState<string | null>(null);
   const [apiStatus, setApiStatus] = useState<ApiStatus>("offline");
   const [focusedField, setFocusedField] = useState<FocusedField>(null);
-  const [viewRole, setViewRole] = useState<LoginViewRole>("owner");
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const passwordInputRef = useRef<TextInput | null>(null);
   const focusedFieldRef = useRef<FocusedField>(null);
@@ -176,10 +174,6 @@ export function LoginScreen() {
   const canBiometricLogin = hasStoredSession && biometricAvailable && biometricEnabled && !biometricSubmitting && !submitting;
   const inputDisabled = submitting || biometricSubmitting;
   const focusMode = keyboardVisible || focusedField !== null;
-  const roleHint =
-    viewRole === "owner"
-      ? "Mode pemilik untuk monitoring KPI, billing, dan kontrol lintas outlet."
-      : "Mode pegawai untuk operasional harian: order, status laundry, dan serah-terima.";
 
   function clearErrorState(): void {
     setErrorSummary(null);
@@ -272,32 +266,7 @@ export function LoginScreen() {
           style={[styles.panelWrap, focusMode ? styles.panelWrapFocused : null, panelAnimatedStyle]}
         >
           <AppPanel style={styles.panel}>
-          <Text style={styles.loginAsLabel}>Login sebagai</Text>
-          <View style={styles.roleSwitchRow}>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setViewRole("owner")}
-              style={({ pressed }) => [
-                styles.roleChip,
-                viewRole === "owner" ? styles.roleChipActive : null,
-                pressed ? styles.roleChipPressed : null,
-              ]}
-            >
-              <Text style={[styles.roleChipText, viewRole === "owner" ? styles.roleChipTextActive : null]}>PEMILIK</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setViewRole("staff")}
-              style={({ pressed }) => [
-                styles.roleChip,
-                viewRole === "staff" ? styles.roleChipActive : null,
-                pressed ? styles.roleChipPressed : null,
-              ]}
-            >
-              <Text style={[styles.roleChipText, viewRole === "staff" ? styles.roleChipTextActive : null]}>PEGAWAI</Text>
-            </Pressable>
-          </View>
-          <Text style={styles.roleHintText}>{roleHint}</Text>
+          <Text style={styles.autoRoleHint}>Role akun dideteksi otomatis saat tombol Masuk ditekan.</Text>
 
           <View style={styles.fieldGroup}>
             <TextInput
@@ -634,50 +603,11 @@ function createStyles(theme: AppTheme, layout: LoginLayoutMode) {
       shadowRadius: 16,
       elevation: 7,
     },
-    loginAsLabel: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 13,
-      textAlign: "center",
-    },
-    roleSwitchRow: {
-      flexDirection: "row",
-      justifyContent: "center",
-      alignItems: "center",
-      gap: theme.spacing.xs,
-      marginTop: -2,
-    },
-    roleChip: {
-      minWidth: 112,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surfaceSoft,
-      alignItems: "center",
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-    },
-    roleChipActive: {
-      borderColor: "#0b8de4",
-      backgroundColor: "#d9f3ff",
-    },
-    roleChipPressed: {
-      opacity: 0.84,
-    },
-    roleChipText: {
-      color: theme.colors.textMuted,
-      fontFamily: theme.fonts.bold,
-      fontSize: 12,
-      letterSpacing: 0.5,
-    },
-    roleChipTextActive: {
-      color: "#0877cc",
-    },
-    roleHintText: {
+    autoRoleHint: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
-      fontSize: 11,
-      lineHeight: 16,
+      fontSize: 12,
+      lineHeight: 17,
       textAlign: "center",
       marginBottom: 2,
     },
