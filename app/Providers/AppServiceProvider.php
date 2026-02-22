@@ -23,11 +23,12 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         RateLimiter::for('auth-login', function (Request $request): Limit {
-            $email = strtolower((string) $request->input('email', 'unknown'));
+            $login = trim((string) $request->input('login', (string) $request->input('email', 'unknown')));
+            $identifier = strtolower($login !== '' ? $login : 'unknown');
             $ip = (string) $request->ip();
 
             return Limit::perMinute(10)
-                ->by($email.'|'.$ip)
+                ->by($identifier.'|'.$ip)
                 ->response(function (): \Illuminate\Http\JsonResponse {
                     return response()->json([
                         'reason_code' => 'TOO_MANY_REQUESTS',

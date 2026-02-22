@@ -2,14 +2,14 @@ import { httpClient } from "../../lib/httpClient";
 import type { LoginResponse, MeResponse } from "../../types/auth";
 
 interface LoginPayload {
-  email: string;
+  login: string;
   password: string;
   deviceName: string;
 }
 
-export async function loginWithEmailPassword(payload: LoginPayload): Promise<LoginResponse> {
+export async function loginWithCredential(payload: LoginPayload): Promise<LoginResponse> {
   const response = await httpClient.post<LoginResponse>("/auth/login", {
-    email: payload.email,
+    login: payload.login,
     password: payload.password,
     device_name: payload.deviceName,
   });

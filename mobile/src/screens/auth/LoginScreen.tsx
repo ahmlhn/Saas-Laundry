@@ -21,7 +21,7 @@ import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
 
-type FocusedField = "email" | "password" | null;
+type FocusedField = "credential" | "password" | null;
 type ApiStatus = "online" | "offline";
 
 interface LoginLayoutMode {
@@ -36,7 +36,7 @@ function resolveLoginErrorMessage(error: unknown): string {
     }
 
     if (error.response.status === 401) {
-      return "Email atau kata sandi tidak sesuai.";
+      return "Email/nomor HP atau kata sandi tidak sesuai.";
     }
 
     if (error.response.status === 403) {
@@ -44,7 +44,7 @@ function resolveLoginErrorMessage(error: unknown): string {
     }
 
     if (error.response.status === 422) {
-      return "Data login belum valid. Periksa lagi email dan kata sandi.";
+      return "Data login belum valid. Periksa lagi email/nomor HP dan kata sandi.";
     }
 
     if (error.response.status >= 500) {
@@ -62,7 +62,7 @@ export function LoginScreen() {
   const isTablet = Math.min(viewportWidth, viewportHeight) >= 600;
   const styles = useMemo(() => createStyles(theme, { isLandscape, isTablet }), [theme, isLandscape, isTablet]);
   const { login, biometricLogin, hasStoredSession, biometricAvailable, biometricEnabled, biometricLabel } = useSession();
-  const [email, setEmail] = useState("");
+  const [loginCredential, setLoginCredential] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -98,7 +98,7 @@ export function LoginScreen() {
     const baseOffset = Math.max(panelTopRef.current - 20, 0);
     const effectiveKeyboardHeight = keyboardHeightPx ?? keyboardHeightRef.current;
     const keyboardBoost = effectiveKeyboardHeight > 0 ? Math.min(Math.max(effectiveKeyboardHeight * 0.3, 56), 120) : 0;
-    const fieldBoost = targetField === "password" ? 160 : targetField === "email" ? 110 : 90;
+    const fieldBoost = targetField === "password" ? 160 : targetField === "credential" ? 110 : 90;
 
     screenScrollRef.current?.scrollTo({
       y: Math.max(baseOffset + keyboardBoost + fieldBoost, 0),
@@ -172,7 +172,7 @@ export function LoginScreen() {
     [entranceProgress]
   );
 
-  const canSubmit = !submitting && email.trim().length > 0 && password.length > 0;
+  const canSubmit = !submitting && loginCredential.trim().length > 0 && password.length > 0;
   const canBiometricLogin = hasStoredSession && biometricAvailable && biometricEnabled && !biometricSubmitting && !submitting;
   const inputDisabled = submitting || biometricSubmitting;
   const focusMode = keyboardVisible || focusedField !== null;
@@ -199,7 +199,7 @@ export function LoginScreen() {
     clearErrorState();
 
     try {
-      await login({ email, password });
+      await login({ login: loginCredential, password });
     } catch (error) {
       setErrorSummary(resolveLoginErrorMessage(error));
     } finally {
@@ -273,29 +273,29 @@ export function LoginScreen() {
           <View style={styles.fieldGroup}>
             <TextInput
               autoCapitalize="none"
-              autoComplete="email"
+              autoComplete="username"
               autoCorrect={false}
               editable={!inputDisabled}
-              keyboardType="email-address"
+              keyboardType="default"
               onBlur={() => {
                 focusedFieldRef.current = null;
-                setFocusedField((field) => (field === "email" ? null : field));
+                setFocusedField((field) => (field === "credential" ? null : field));
               }}
-              onChangeText={setEmail}
+              onChangeText={setLoginCredential}
               onFocus={() => {
-                focusedFieldRef.current = "email";
-                setFocusedField("email");
+                focusedFieldRef.current = "credential";
+                setFocusedField("credential");
                 setTimeout(() => {
-                  scrollFormIntoView("email");
+                  scrollFormIntoView("credential");
                 }, 70);
               }}
               onSubmitEditing={() => passwordInputRef.current?.focus()}
-              placeholder="Email"
+              placeholder="Email atau nomor HP"
               placeholderTextColor={theme.colors.textMuted}
               returnKeyType="next"
-              style={[styles.input, focusedField === "email" ? styles.inputFocused : null]}
-              textContentType="emailAddress"
-              value={email}
+              style={[styles.input, focusedField === "credential" ? styles.inputFocused : null]}
+              textContentType="username"
+              value={loginCredential}
             />
           </View>
 

@@ -22,15 +22,37 @@ class AuthController extends Controller
     public function login(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'email' => ['required', 'email'],
+            'login' => ['nullable', 'string', 'max:255'],
+            'email' => ['nullable', 'string', 'max:255'],
             'password' => ['required', 'string'],
             'device_name' => ['nullable', 'string', 'max:100'],
         ]);
 
-        $user = User::query()
-            ->with(['tenant.currentPlan', 'roles:id,key,name', 'outlets:id,tenant_id,name,code,timezone'])
-            ->where('email', $validated['email'])
-            ->first();
+        $loginInput = trim((string) ($validated['login'] ?? $validated['email'] ?? ''));
+        if ($loginInput === '') {
+            throw ValidationException::withMessages([
+                'login' => ['The login field is required.'],
+            ]);
+        }
+
+        $normalizedEmail = $this->normalizeEmail($loginInput);
+        $phoneCandidates = $this->buildPhoneCandidates($loginInput);
+        $canResolveUser = $normalizedEmail !== null || $phoneCandidates !== [];
+
+        $user = $canResolveUser
+            ? User::query()
+                ->with(['tenant.currentPlan', 'roles:id,key,name', 'outlets:id,tenant_id,name,code,timezone'])
+                ->where(function ($query) use ($normalizedEmail, $phoneCandidates): void {
+                    if ($normalizedEmail !== null) {
+                        $query->orWhereRaw('LOWER(email) = ?', [$normalizedEmail]);
+                    }
+
+                    if ($phoneCandidates !== []) {
+                        $query->orWhereIn('phone', $phoneCandidates);
+                    }
+                })
+                ->first()
+            : null;
 
         if (! $user || ! Hash::check($validated['password'], $user->password)) {
             $this->auditTrail->record(
@@ -38,7 +60,8 @@ class AuthController extends Controller
                 actor: $user,
                 tenantId: $user?->tenant_id,
                 metadata: [
-                    'email' => strtolower($validated['email']),
+                    'login' => $loginInput,
+                    'email' => $normalizedEmail,
                     'reason' => 'invalid_credentials',
                 ],
                 channel: 'api',
@@ -46,6 +69,7 @@ class AuthController extends Controller
             );
 
             throw ValidationException::withMessages([
+                'login' => ['The provided credentials are incorrect.'],
                 'email' => ['The provided credentials are incorrect.'],
             ]);
         }
@@ -56,7 +80,8 @@ class AuthController extends Controller
                 actor: $user,
                 tenantId: $user->tenant_id,
                 metadata: [
-                    'email' => strtolower($validated['email']),
+                    'login' => $loginInput,
+                    'email' => strtolower((string) $user->email),
                     'reason' => 'inactive_account',
                 ],
                 channel: 'api',
@@ -76,6 +101,7 @@ class AuthController extends Controller
             actor: $user,
             tenantId: $user->tenant_id,
             metadata: [
+                'login' => $loginInput,
                 'email' => strtolower($user->email),
                 'device_name' => $validated['device_name'] ?? 'api-device',
             ],
@@ -88,6 +114,65 @@ class AuthController extends Controller
             'access_token' => $token,
             'data' => $this->buildUserContext($user),
         ]);
+    }
+
+    private function normalizeEmail(string $input): ?string
+    {
+        $normalized = strtolower(trim($input));
+
+        if ($normalized === '' || filter_var($normalized, FILTER_VALIDATE_EMAIL) === false) {
+            return null;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function buildPhoneCandidates(string $input): array
+    {
+        $trimmed = trim($input);
+        if ($trimmed === '' || str_contains($trimmed, '@')) {
+            return [];
+        }
+
+        if (preg_match('/^[0-9+\-\s().]+$/', $trimmed) !== 1) {
+            return [];
+        }
+
+        $digits = preg_replace('/\D+/', '', $trimmed) ?? '';
+        if ($digits === '') {
+            return [];
+        }
+
+        $candidates = [$trimmed, $digits];
+
+        if (str_starts_with($digits, '0')) {
+            $national = ltrim(substr($digits, 1), '0');
+            if ($national !== '') {
+                $candidates[] = '62'.$national;
+            }
+        } elseif (str_starts_with($digits, '8')) {
+            $candidates[] = '62'.$digits;
+        }
+
+        if (str_starts_with($digits, '62')) {
+            $national = ltrim(substr($digits, 2), '0');
+            if ($national !== '') {
+                $candidates[] = '0'.$national;
+                $candidates[] = '8'.$national;
+            }
+        }
+
+        if (str_starts_with($trimmed, '+')) {
+            $candidates[] = '+'.$digits;
+        }
+
+        return array_values(array_unique(array_filter(
+            $candidates,
+            static fn (string $value): bool => $value !== ''
+        )));
     }
 
     public function logout(Request $request): JsonResponse

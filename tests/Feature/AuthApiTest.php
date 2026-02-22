@@ -60,6 +60,7 @@ class AuthApiTest extends TestCase
             'tenant_id' => $this->tenant->id,
             'name' => 'Admin User',
             'email' => 'admin@example.com',
+            'phone' => '6281234567890',
             'status' => 'active',
             'password' => Hash::make('password'),
         ]);
@@ -95,6 +96,23 @@ class AuthApiTest extends TestCase
     public function test_me_requires_authentication(): void
     {
         $this->getJson('/api/me')->assertUnauthorized();
+    }
+
+    public function test_login_accepts_phone_number_identifier(): void
+    {
+        $response = $this->postJson('/api/auth/login', [
+            'login' => '081234567890',
+            'password' => 'password',
+            'device_name' => 'test-device',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertHeader('X-Request-Id')
+            ->assertJsonPath('data.user.email', 'admin@example.com')
+            ->assertJsonPath('data.user.phone', '6281234567890');
+
+        $this->assertNotEmpty($response->json('access_token'));
     }
 
     public function test_outlet_scope_rejects_unassigned_outlet(): void

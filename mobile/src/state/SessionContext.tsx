@@ -1,6 +1,6 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { MOBILE_DEVICE_NAME } from "../config/env";
-import { fetchMeContext, loginWithEmailPassword, logoutCurrentSession } from "../features/auth/authApi";
+import { fetchMeContext, loginWithCredential, logoutCurrentSession } from "../features/auth/authApi";
 import { authenticateWithBiometric, getBiometricAvailability } from "../lib/biometricAuth";
 import { setAuthBearerToken } from "../lib/httpClient";
 import {
@@ -16,7 +16,7 @@ import {
 import type { AllowedOutlet, UserContext } from "../types/auth";
 
 interface LoginInput {
-  email: string;
+  login: string;
   password: string;
 }
 
@@ -164,8 +164,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }
 
   async function login(input: LoginInput): Promise<void> {
-    const response = await loginWithEmailPassword({
-      email: input.email.trim(),
+    const response = await loginWithCredential({
+      login: input.login.trim(),
       password: input.password,
       deviceName: MOBILE_DEVICE_NAME,
     });
@@ -192,7 +192,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     const token = await getStoredAccessToken();
     if (!token) {
-      throw new Error("Sesi login tidak ditemukan. Silakan login email/password.");
+      throw new Error("Sesi login tidak ditemukan. Silakan login dengan email/nomor HP dan kata sandi.");
     }
 
     await authenticateWithBiometric(`Verifikasi ${biometricLabel} untuk masuk`);
