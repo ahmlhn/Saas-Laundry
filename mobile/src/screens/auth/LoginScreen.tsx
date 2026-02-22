@@ -1,5 +1,7 @@
 import axios from "axios";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import {
   ActivityIndicator,
   Animated,
@@ -17,12 +19,14 @@ import {
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { checkApiHealth } from "../../features/auth/authApi";
+import type { AuthStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
 
 type FocusedField = "credential" | "password" | null;
 type ApiStatus = "online" | "offline";
+type AuthNavigation = NativeStackNavigationProp<AuthStackParamList>;
 
 interface LoginLayoutMode {
   isLandscape: boolean;
@@ -57,6 +61,7 @@ function resolveLoginErrorMessage(error: unknown): string {
 
 export function LoginScreen() {
   const theme = useAppTheme();
+  const navigation = useNavigation<AuthNavigation>();
   const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
   const isLandscape = viewportWidth > viewportHeight;
   const isTablet = Math.min(viewportWidth, viewportHeight) >= 600;
@@ -352,6 +357,17 @@ export function LoginScreen() {
           </View>
 
           <Text style={styles.forgotHint}>Lupa password? Hubungi owner/admin tenant untuk reset akun.</Text>
+          <View style={styles.registerRow}>
+            <Text style={styles.registerLabel}>Belum punya akun?</Text>
+            <Pressable
+              accessibilityRole="button"
+              disabled={inputDisabled}
+              onPress={() => navigation.navigate("Register")}
+              style={({ pressed }) => [styles.registerLinkButton, pressed ? styles.registerLinkButtonPressed : null]}
+            >
+              <Text style={styles.registerLinkText}>Daftar sekarang</Text>
+            </Pressable>
+          </View>
 
           {errorSummary ? (
             <View style={styles.errorWrap}>
@@ -721,6 +737,32 @@ function createStyles(theme: AppTheme, layout: LoginLayoutMode) {
       fontSize: 13,
       marginTop: -2,
       marginLeft: 4,
+    },
+    registerRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      marginTop: -2,
+      marginBottom: 2,
+    },
+    registerLabel: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+    },
+    registerLinkButton: {
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 8,
+    },
+    registerLinkButtonPressed: {
+      opacity: 0.72,
+    },
+    registerLinkText: {
+      color: "#1aa8d3",
+      fontFamily: theme.fonts.bold,
+      fontSize: 12,
     },
     errorWrap: {
       borderWidth: 1,

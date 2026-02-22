@@ -37,6 +37,20 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
+        RateLimiter::for('auth-register', function (Request $request): Limit {
+            $email = strtolower(trim((string) $request->input('email', 'unknown')));
+            $ip = (string) $request->ip();
+
+            return Limit::perMinute(5)
+                ->by($email.'|'.$ip)
+                ->response(function (): \Illuminate\Http\JsonResponse {
+                    return response()->json([
+                        'reason_code' => 'TOO_MANY_REQUESTS',
+                        'message' => 'Too many registration attempts. Please try again later.',
+                    ], 429);
+                });
+        });
+
         RateLimiter::for('sync-push', function (Request $request): Limit {
             $userId = (string) ($request->user()?->id ?? 'guest');
             $deviceId = (string) $request->input('device_id', 'unknown');

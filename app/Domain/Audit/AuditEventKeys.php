@@ -12,6 +12,8 @@ class AuditEventKeys
 
     public const AUTH_LOGOUT = 'AUTH_LOGOUT';
 
+    public const AUTH_REGISTER_SUCCESS = 'AUTH_REGISTER_SUCCESS';
+
     public const ORDER_CREATED = 'ORDER_CREATED';
 
     public const PAYMENT_ADDED = 'PAYMENT_ADDED';

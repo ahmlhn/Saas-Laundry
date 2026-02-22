@@ -7,6 +7,7 @@ use App\Models\Outlet;
 use App\Models\Plan;
 use App\Models\Role;
 use App\Models\Tenant;
+use App\Models\TenantSubscription;
 use App\Models\User;
 use Database\Seeders\RolesAndPlansSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -113,6 +114,42 @@ class AuthApiTest extends TestCase
             ->assertJsonPath('data.user.phone', '6281234567890');
 
         $this->assertNotEmpty($response->json('access_token'));
+    }
+
+    public function test_register_creates_owner_tenant_and_returns_token(): void
+    {
+        $response = $this->postJson('/api/auth/register', [
+            'name' => 'Owner Baru',
+            'tenant_name' => 'Laundry Baru',
+            'outlet_name' => 'Outlet Pusat',
+            'email' => 'owner.baru@example.com',
+            'phone' => '081234567899',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+            'device_name' => 'register-device',
+        ]);
+
+        $response
+            ->assertCreated()
+            ->assertHeader('X-Request-Id')
+            ->assertJsonPath('data.user.email', 'owner.baru@example.com')
+            ->assertJsonPath('data.user.phone', '6281234567899')
+            ->assertJsonPath('data.roles.0', 'owner');
+
+        $this->assertNotEmpty($response->json('access_token'));
+
+        $registeredUser = User::query()->where('email', 'owner.baru@example.com')->first();
+        $this->assertNotNull($registeredUser);
+        $this->assertNotNull($registeredUser->tenant_id);
+        $this->assertSame('active', $registeredUser->status);
+        $this->assertTrue($registeredUser->roles()->where('key', 'owner')->exists());
+        $this->assertSame(1, $registeredUser->outlets()->count());
+
+        $subscription = TenantSubscription::query()
+            ->where('tenant_id', $registeredUser->tenant_id)
+            ->where('period', now()->format('Y-m'))
+            ->first();
+        $this->assertNotNull($subscription);
     }
 
     public function test_outlet_scope_rejects_unassigned_outlet(): void

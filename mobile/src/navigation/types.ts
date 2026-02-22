@@ -4,6 +4,7 @@ import type { Customer } from "../types/customer";
 
 export type AuthStackParamList = {
   Login: undefined;
+  Register: undefined;
 };
 
 export type OrdersStackParamList = {

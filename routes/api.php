@@ -22,6 +22,7 @@ Route::get('/health', static fn () => response()->json([
 ]));
 
 Route::prefix('auth')->group(function (): void {
+    Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:auth-register');
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:auth-login');
     Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
 });
