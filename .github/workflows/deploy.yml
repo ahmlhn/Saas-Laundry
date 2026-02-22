@@ -209,7 +209,9 @@ jobs:
               export NODE_ENV=development
               export npm_config_scripts_prepend_node_path=true
               if "$NPM_BIN" ci --no-audit --no-fund; then
-                "$NPM_BIN" run build
+                if ! "$NPM_BIN" run build; then
+                  echo "npm build gagal, lanjut deploy backend tanpa refresh aset frontend."
+                fi
               else
                 echo "npm ci gagal, skip npm build dan lanjut deploy backend."
               fi
