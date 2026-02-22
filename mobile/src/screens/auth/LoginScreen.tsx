@@ -119,6 +119,8 @@ export function LoginScreen() {
       }, 60);
     });
     const hideSub = Keyboard.addListener("keyboardDidHide", () => {
+      focusedFieldRef.current = null;
+      setFocusedField(null);
       setKeyboardVisible(false);
       keyboardHeightRef.current = 0;
       const restoreY = restoreScrollYRef.current;
@@ -225,7 +227,7 @@ export function LoginScreen() {
   return (
     <AppScreen
       contentContainerStyle={styles.scrollContainer}
-      keyboardShouldPersistTaps="always"
+      keyboardShouldPersistTaps="handled"
       onScroll={(event) => {
         currentScrollYRef.current = event.nativeEvent.contentOffset.y;
       }}
@@ -266,7 +268,7 @@ export function LoginScreen() {
           style={[styles.panelWrap, focusMode ? styles.panelWrapFocused : null, panelAnimatedStyle]}
         >
           <AppPanel style={styles.panel}>
-          <Text style={styles.autoRoleHint}>Role akun dideteksi otomatis saat tombol Masuk ditekan.</Text>
+          <Text style={styles.autoRoleHint}>Login sebagai pemilik atau pegawai</Text>
 
           <View style={styles.fieldGroup}>
             <TextInput
