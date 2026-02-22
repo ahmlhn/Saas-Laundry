@@ -57,6 +57,7 @@ jobs:
           COMPOSER_BIN: ${{ vars.DEPLOY_COMPOSER_BIN }}
           NODE_BIN: ${{ vars.DEPLOY_NODE_BIN }}
           NPM_BIN: ${{ vars.DEPLOY_NPM_BIN }}
+          BUILD_FRONTEND: ${{ vars.DEPLOY_BUILD_FRONTEND }}
           REPO_URL: ${{ vars.DEPLOY_REPO_URL }}
           DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref_name }}
           RUN_MIGRATIONS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_migrations || 'true' }}
@@ -70,7 +71,7 @@ jobs:
           passphrase: ${{ secrets.DEPLOY_SSH_PASSPHRASE }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
           timeout: 180s
-          envs: APP_PATH,PHP_BIN,COMPOSER_BIN,NODE_BIN,NPM_BIN,REPO_URL,DEPLOY_REF,RUN_MIGRATIONS,MAINTENANCE_MODE,GIT_REPOSITORY
+          envs: APP_PATH,PHP_BIN,COMPOSER_BIN,NODE_BIN,NPM_BIN,BUILD_FRONTEND,REPO_URL,DEPLOY_REF,RUN_MIGRATIONS,MAINTENANCE_MODE,GIT_REPOSITORY
           command_timeout: 45m
           script_stop: true
           script: |
@@ -81,6 +82,7 @@ jobs:
             COMPOSER_BIN="${COMPOSER_BIN:-composer}"
             NODE_BIN="${NODE_BIN:-node}"
             NPM_BIN="${NPM_BIN:-npm}"
+            BUILD_FRONTEND="$(echo "${BUILD_FRONTEND:-true}" | tr '[:upper:]' '[:lower:]')"
             REPO_URL="${REPO_URL:-https://github.com/${GIT_REPOSITORY}.git}"
             DEPLOY_REF="${DEPLOY_REF:-main}"
             RUN_MIGRATIONS="$(echo "${RUN_MIGRATIONS:-true}" | tr '[:upper:]' '[:lower:]')"
@@ -113,16 +115,72 @@ jobs:
               exit 1
             fi
 
-            if [ -f "$APP_PATH/package.json" ]; then
-              if ! command -v "$NODE_BIN" >/dev/null 2>&1; then
-                echo "Node.js tidak ditemukan. Set DEPLOY_NODE_BIN atau install Node.js di server."
+            if [ -f "$APP_PATH/package.json" ] && [ "$BUILD_FRONTEND" = "true" ]; then
+              NODE_FOUND=""
+              if command -v "$NODE_BIN" >/dev/null 2>&1; then
+                NODE_FOUND="$(command -v "$NODE_BIN")"
+              elif [ -x "$NODE_BIN" ]; then
+                NODE_FOUND="$NODE_BIN"
+              fi
+
+              if [ -z "$NODE_FOUND" ]; then
+                for CANDIDATE in \
+                  node \
+                  /usr/local/bin/node \
+                  /usr/bin/node \
+                  /opt/alt/alt-nodejs20/root/usr/bin/node \
+                  /opt/alt/alt-nodejs18/root/usr/bin/node \
+                  /opt/alt/alt-nodejs16/root/usr/bin/node \
+                  "$HOME/.local/bin/node"
+                do
+                  if [ -x "$CANDIDATE" ]; then
+                    NODE_FOUND="$CANDIDATE"
+                    break
+                  fi
+                done
+              fi
+
+              if [ -z "$NODE_FOUND" ]; then
+                echo "Node.js tidak ditemukan."
+                echo "Set DEPLOY_NODE_BIN/DEPLOY_NPM_BIN ke path binary server, atau set DEPLOY_BUILD_FRONTEND=false untuk skip build frontend sementara."
                 exit 1
               fi
 
-              if ! command -v "$NPM_BIN" >/dev/null 2>&1; then
-                echo "npm tidak ditemukan. Set DEPLOY_NPM_BIN atau install npm di server."
+              NODE_BIN="$NODE_FOUND"
+
+              NPM_FOUND=""
+              if command -v "$NPM_BIN" >/dev/null 2>&1; then
+                NPM_FOUND="$(command -v "$NPM_BIN")"
+              elif [ -x "$NPM_BIN" ]; then
+                NPM_FOUND="$NPM_BIN"
+              fi
+
+              if [ -z "$NPM_FOUND" ]; then
+                for CANDIDATE in \
+                  npm \
+                  /usr/local/bin/npm \
+                  /usr/bin/npm \
+                  /opt/alt/alt-nodejs20/root/usr/bin/npm \
+                  /opt/alt/alt-nodejs18/root/usr/bin/npm \
+                  /opt/alt/alt-nodejs16/root/usr/bin/npm \
+                  "$(dirname "$NODE_BIN")/npm"
+                do
+                  if [ -x "$CANDIDATE" ]; then
+                    NPM_FOUND="$CANDIDATE"
+                    break
+                  fi
+                done
+              fi
+
+              if [ -z "$NPM_FOUND" ]; then
+                echo "npm tidak ditemukan."
+                echo "Set DEPLOY_NPM_BIN ke path npm di server, atau set DEPLOY_BUILD_FRONTEND=false untuk skip build frontend sementara."
                 exit 1
               fi
+
+              NPM_BIN="$NPM_FOUND"
+              echo "Node binary: $NODE_BIN"
+              echo "Npm binary : $NPM_BIN"
             fi
 
             NEED_UP=0
@@ -140,10 +198,12 @@ jobs:
 
             "$COMPOSER_BIN" install --no-dev --optimize-autoloader --no-interaction --prefer-dist
 
-            if [ -f "$APP_PATH/package.json" ]; then
+            if [ -f "$APP_PATH/package.json" ] && [ "$BUILD_FRONTEND" = "true" ]; then
               export NODE_ENV=development
               "$NPM_BIN" ci --no-audit --no-fund
               "$NPM_BIN" run build
+            elif [ -f "$APP_PATH/package.json" ]; then
+              echo "DEPLOY_BUILD_FRONTEND=false -> skip npm build."
             fi
 
             if [ -f "$APP_PATH/.env" ]; then
