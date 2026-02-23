@@ -77,7 +77,7 @@ class ServiceCatalogController extends Controller
         $query = Service::query()
             ->where('tenant_id', $user->tenant_id)
             ->with([
-                'processTags' => function (Builder $tagQuery): void {
+                'processTags' => function ($tagQuery): void {
                     $tagQuery->orderBy('sort_order')->orderBy('name');
                 },
             ]);
@@ -135,7 +135,7 @@ class ServiceCatalogController extends Controller
 
                     $childQuery
                         ->with([
-                            'processTags' => function (Builder $tagQuery): void {
+                            'processTags' => function ($tagQuery): void {
                                 $tagQuery->orderBy('sort_order')->orderBy('name');
                             },
                         ])
