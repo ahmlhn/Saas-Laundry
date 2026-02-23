@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
+import type { NavigationProp } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useMemo, useState } from "react";
@@ -17,7 +18,7 @@ import {
 } from "../../features/customers/customerPhone";
 import { hasAnyRole } from "../../lib/accessControl";
 import { getApiErrorMessage } from "../../lib/httpClient";
-import type { AccountStackParamList } from "../../navigation/types";
+import type { AccountStackParamList, AppTabParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
@@ -102,12 +103,25 @@ export function CustomerFormScreen() {
           phone: normalizedPhone,
           notes: composedNotes || undefined,
         });
+
+        navigation.goBack();
+        return;
       } else {
-        await createCustomer({
+        const createdCustomer = await createCustomer({
           name: trimmedName,
           phone: normalizedPhone,
           notes: composedNotes || undefined,
         });
+
+        if (route.params.returnToQuickAction) {
+          const tabNavigation = navigation.getParent<NavigationProp<AppTabParamList>>();
+          navigation.popToTop();
+          tabNavigation?.navigate("QuickActionTab", {
+            openCreateStamp: Date.now(),
+            preselectCustomerId: createdCustomer.id,
+          });
+          return;
+        }
       }
 
       navigation.goBack();

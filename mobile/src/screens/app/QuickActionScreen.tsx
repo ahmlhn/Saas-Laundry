@@ -138,6 +138,7 @@ export function QuickActionScreen() {
   const [customerKeyword, setCustomerKeyword] = useState("");
   const [customerSortMode, setCustomerSortMode] = useState<CustomerSortMode>("az");
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  const [pendingAutoSelectCustomerId, setPendingAutoSelectCustomerId] = useState<string | null>(null);
   const [customerOrdersPreview, setCustomerOrdersPreview] = useState<OrderSummary[]>([]);
   const [loadingCustomerOrdersPreview, setLoadingCustomerOrdersPreview] = useState(false);
 
@@ -171,6 +172,17 @@ export function QuickActionScreen() {
 
     openCreateFlow();
   }, [route.params?.openCreateStamp, canCreateOrder]);
+
+  useEffect(() => {
+    const preselectCustomerId = route.params?.preselectCustomerId;
+    if (!preselectCustomerId || !canCreateOrder) {
+      return;
+    }
+
+    openCreateFlow();
+    setPendingAutoSelectCustomerId(preselectCustomerId);
+    void loadCustomers(true);
+  }, [route.params?.preselectCustomerId, canCreateOrder]);
 
   async function loadServices(forceRefresh = false): Promise<void> {
     if (!selectedOutlet) {
@@ -217,6 +229,7 @@ export function QuickActionScreen() {
     setMetrics({});
     setCustomerKeyword("");
     setSelectedCustomerId(null);
+    setPendingAutoSelectCustomerId(null);
     setCustomerName("");
     setCustomerPhone("");
     setCustomerNotes("");
@@ -253,6 +266,16 @@ export function QuickActionScreen() {
     openCreateFlow();
   }
 
+  function openCreateCustomerForm(): void {
+    navigation.navigate("AccountTab", {
+      screen: "CustomerForm",
+      params: {
+        mode: "create",
+        returnToQuickAction: true,
+      },
+    });
+  }
+
   function handleSelectCustomer(customer: Customer): void {
     const profile = parseCustomerProfileMeta(customer.notes);
     setSelectedCustomerId(customer.id);
@@ -273,6 +296,36 @@ export function QuickActionScreen() {
     setCustomerKeyword("");
     setErrorMessage(null);
   }
+
+  useEffect(() => {
+    if (!pendingAutoSelectCustomerId || loadingCustomers) {
+      return;
+    }
+
+    const matchedCustomer = customers.find((item) => item.id === pendingAutoSelectCustomerId) ?? null;
+    if (matchedCustomer) {
+      const profile = parseCustomerProfileMeta(matchedCustomer.notes);
+      setSelectedCustomerId(matchedCustomer.id);
+      setCustomerName(matchedCustomer.name);
+      setCustomerPhone(matchedCustomer.phone_normalized ?? "");
+      setCustomerNotes(profile.note);
+      setCustomerKeyword("");
+      setPendingAutoSelectCustomerId(null);
+      setErrorMessage(null);
+      navigation.setParams({
+        preselectCustomerId: undefined,
+      });
+      return;
+    }
+
+    if (customers.length > 0) {
+      setPendingAutoSelectCustomerId(null);
+      setErrorMessage("Pelanggan baru belum ditemukan. Coba muat ulang daftar.");
+      navigation.setParams({
+        preselectCustomerId: undefined,
+      });
+    }
+  }, [pendingAutoSelectCustomerId, loadingCustomers, customers, navigation]);
 
   function updateMetric(serviceId: string, value: string): void {
     setMetrics((previous) => {
@@ -644,7 +697,14 @@ export function QuickActionScreen() {
                         <Text style={styles.inlineActionText}>Ganti konsumen</Text>
                       </Pressable>
                     </View>
-                  ) : null}
+                  ) : (
+                    <View style={styles.inlineActions}>
+                      <Pressable onPress={openCreateCustomerForm} style={({ pressed }) => [styles.inlineAction, styles.inlineActionSingle, pressed ? styles.pressed : null]}>
+                        <Ionicons color={theme.colors.info} name="person-add-outline" size={15} />
+                        <Text style={styles.inlineActionText}>Tambah pelanggan baru</Text>
+                      </Pressable>
+                    </View>
+                  )}
 
                   {selectedCustomer ? (
                     <View style={styles.selectedCustomerCard}>

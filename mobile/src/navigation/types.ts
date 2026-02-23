@@ -30,6 +30,7 @@ export type AccountStackParamList = {
   CustomerForm: {
     mode: "create" | "edit";
     customer?: Customer;
+    returnToQuickAction?: boolean;
   };
   Services: undefined;
   ServiceCatalog:
@@ -96,6 +97,7 @@ export type AppTabParamList = {
   QuickActionTab:
     | {
         openCreateStamp?: number;
+        preselectCustomerId?: string;
       }
     | undefined;
   ReportsTab: undefined;
