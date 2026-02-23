@@ -25,6 +25,7 @@ import type { ServiceCatalogItem } from "../../types/service";
 
 type Step = "customer" | "services" | "review";
 type Direction = -1 | 1;
+type CustomerSortMode = "latest" | "frequent" | "az";
 
 const STEP_ORDER: Step[] = ["customer", "services", "review"];
 const CUSTOMER_LIMIT = 100;
@@ -135,6 +136,7 @@ export function QuickActionScreen() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [customerKeyword, setCustomerKeyword] = useState("");
+  const [customerSortMode, setCustomerSortMode] = useState<CustomerSortMode>("az");
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [customerOrdersPreview, setCustomerOrdersPreview] = useState<OrderSummary[]>([]);
   const [loadingCustomerOrdersPreview, setLoadingCustomerOrdersPreview] = useState(false);
@@ -293,20 +295,44 @@ export function QuickActionScreen() {
     const next = Math.max(normalizeMetricValue(safe + direction * metricStep(service.unit_type), service.unit_type), 0);
     updateMetric(service.id, next > 0 ? formatMetricValue(next, service.unit_type) : "");
   }
+
   const filteredCustomers = useMemo(() => {
-    const sorted = [...customers].sort((a, b) => a.name.localeCompare(b.name, "id-ID"));
     const keyword = customerKeyword.trim().toLowerCase();
 
-    if (!keyword) {
-      return sorted;
+    const filtered = customers.filter((item) => {
+      const profile = parseCustomerProfileMeta(item.notes);
+      const haystack = `${item.name} ${item.phone_normalized} ${profile.address} ${profile.email} ${profile.note}`.toLowerCase();
+      return keyword === "" || haystack.includes(keyword);
+    });
+
+    return filtered.sort((a, b) => {
+      if (customerSortMode === "az") {
+        return a.name.localeCompare(b.name, "id-ID");
+      }
+
+      if (customerSortMode === "frequent") {
+        const orderCountDiff = (b.orders_count ?? 0) - (a.orders_count ?? 0);
+        if (orderCountDiff !== 0) {
+          return orderCountDiff;
+        }
+      }
+
+      const updatedAtDiff = new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+      if (updatedAtDiff !== 0) {
+        return updatedAtDiff;
+      }
+
+      return a.name.localeCompare(b.name, "id-ID");
+    });
+  }, [customers, customerKeyword, customerSortMode]);
+
+  const customerCountInfo = useMemo(() => {
+    if (customerKeyword.trim()) {
+      return `Menampilkan ${filteredCustomers.length} dari ${customers.length} pelanggan`;
     }
 
-    return sorted.filter((item) => {
-      const profile = parseCustomerProfileMeta(item.notes);
-      const haystack = `${item.name} ${item.phone_normalized} ${profile.note} ${profile.address}`.toLowerCase();
-      return haystack.includes(keyword);
-    });
-  }, [customers, customerKeyword]);
+    return `${customers.length} pelanggan`;
+  }, [customerKeyword, filteredCustomers.length, customers.length]);
 
   const selectedCustomer = useMemo(() => {
     if (!selectedCustomerId) {
@@ -606,29 +632,19 @@ export function QuickActionScreen() {
 
               {step === "customer" ? (
                 <View style={styles.sectionWrap}>
-                  <View style={styles.stepHeader}>
-                    <View style={styles.stepHeaderIconWrap}>
-                      <Ionicons color={theme.colors.info} name="people-outline" size={16} />
-                    </View>
-                    <View style={styles.stepHeaderTextWrap}>
-                      <Text style={styles.stepHeaderTitle}>Data Konsumen</Text>
-                      <Text style={styles.stepHeaderSubtitle}>Pilih konsumen dari daftar pelanggan.</Text>
-                    </View>
+                  <View style={styles.customerStepLead}>
+                    <Text style={styles.customerStepLeadTitle}>Pilih Konsumen</Text>
+                    <Text style={styles.customerStepLeadSubtitle}>Cari dari daftar pelanggan untuk lanjut ke langkah layanan.</Text>
                   </View>
 
-                  <View style={styles.inlineActions}>
-                    {selectedCustomer ? (
+                  {selectedCustomer ? (
+                    <View style={styles.inlineActions}>
                       <Pressable onPress={handleReplaceSelectedCustomer} style={({ pressed }) => [styles.inlineAction, styles.inlineActionSingle, pressed ? styles.pressed : null]}>
                         <Ionicons color={theme.colors.info} name="swap-horizontal-outline" size={15} />
                         <Text style={styles.inlineActionText}>Ganti konsumen</Text>
                       </Pressable>
-                    ) : (
-                      <Pressable onPress={() => void loadCustomers(true)} style={({ pressed }) => [styles.inlineAction, pressed ? styles.pressed : null]}>
-                        <Ionicons color={theme.colors.textSecondary} name="refresh-outline" size={15} />
-                        <Text style={styles.inlineActionText}>Muat ulang</Text>
-                      </Pressable>
-                    )}
-                  </View>
+                    </View>
+                  ) : null}
 
                   {selectedCustomer ? (
                     <View style={styles.selectedCustomerCard}>
@@ -759,13 +775,53 @@ export function QuickActionScreen() {
 
                   {!selectedCustomer ? (
                     <View style={styles.customerPanel}>
-                      <TextInput
-                        onChangeText={setCustomerKeyword}
-                        placeholder="Cari nama atau nomor"
-                        placeholderTextColor={theme.colors.textMuted}
-                        style={styles.input}
-                        value={customerKeyword}
-                      />
+                      <View style={styles.customerSearchWrap}>
+                        <Ionicons color={theme.colors.textMuted} name="search-outline" size={16} />
+                        <TextInput
+                          onChangeText={setCustomerKeyword}
+                          placeholder="Cari nama, HP, atau alamat"
+                          placeholderTextColor={theme.colors.textMuted}
+                          style={styles.customerSearchInput}
+                          value={customerKeyword}
+                        />
+                        {customerKeyword.trim() ? (
+                          <Pressable hitSlop={6} onPress={() => setCustomerKeyword("")} style={({ pressed }) => [styles.customerSearchAction, pressed ? styles.pressed : null]}>
+                            <Ionicons color={theme.colors.textMuted} name="close-circle" size={18} />
+                          </Pressable>
+                        ) : null}
+                        <Pressable
+                          disabled={loadingCustomers}
+                          hitSlop={6}
+                          onPress={() => void loadCustomers(true)}
+                          style={({ pressed }) => [styles.customerSearchAction, pressed ? styles.pressed : null, loadingCustomers ? styles.customerSearchActionDisabled : null]}
+                        >
+                          {loadingCustomers ? <ActivityIndicator color={theme.colors.info} size="small" /> : <Ionicons color={theme.colors.textSecondary} name="refresh-outline" size={17} />}
+                        </Pressable>
+                      </View>
+
+                      <View style={styles.customerFilters}>
+                        <Pressable
+                          onPress={() => setCustomerSortMode("latest")}
+                          style={({ pressed }) => [styles.customerFilterChip, customerSortMode === "latest" ? styles.customerFilterChipActive : null, pressed ? styles.pressed : null]}
+                        >
+                          <Text style={[styles.customerFilterChipText, customerSortMode === "latest" ? styles.customerFilterChipTextActive : null]}>Terbaru</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => setCustomerSortMode("frequent")}
+                          style={({ pressed }) => [styles.customerFilterChip, customerSortMode === "frequent" ? styles.customerFilterChipActive : null, pressed ? styles.pressed : null]}
+                        >
+                          <Text style={[styles.customerFilterChipText, customerSortMode === "frequent" ? styles.customerFilterChipTextActive : null]}>Sering order</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => setCustomerSortMode("az")}
+                          style={({ pressed }) => [styles.customerFilterChip, customerSortMode === "az" ? styles.customerFilterChipActive : null, pressed ? styles.pressed : null]}
+                        >
+                          <Text style={[styles.customerFilterChipText, customerSortMode === "az" ? styles.customerFilterChipTextActive : null]}>A-Z</Text>
+                        </Pressable>
+                      </View>
+
+                      <Text style={styles.customerCountText}>{customerCountInfo}</Text>
+
                       {loadingCustomers ? (
                         <View style={styles.skeletonWrap}>
                           <AppSkeletonBlock height={11} width="52%" />
@@ -774,49 +830,26 @@ export function QuickActionScreen() {
                       ) : filteredCustomers.length > 0 ? (
                         <ScrollView contentContainerStyle={styles.customerListContent} keyboardShouldPersistTaps="handled" nestedScrollEnabled style={styles.customerList}>
                           {filteredCustomers.map((customer) => {
-                            const isSelected = customer.id === selectedCustomerId;
                             const profile = parseCustomerProfileMeta(customer.notes);
                             const address = profile.address.trim();
-                            const email = profile.email.trim();
-                            const note = profile.note.trim();
-                            const gender = mapGenderLabel(profile.gender);
                             return (
                               <Pressable
                                 key={customer.id}
                                 onPress={() => handleSelectCustomer(customer)}
-                                style={({ pressed }) => [styles.customerItem, isSelected ? styles.customerItemActive : null, pressed ? styles.pressed : null]}
+                                style={({ pressed }) => [styles.customerItem, pressed ? styles.pressed : null]}
                               >
                                 <View style={styles.customerItemMain}>
                                   <Text numberOfLines={1} style={styles.customerItemName}>
                                     {customer.name}
                                   </Text>
+                                  <Text numberOfLines={1} style={styles.customerItemMeta}>
+                                    {formatCustomerPhoneDisplay(customer.phone_normalized)}
+                                  </Text>
                                   <Text numberOfLines={1} style={[styles.customerItemAddress, !address ? styles.customerItemAddressMuted : null]}>
                                     {address || "Alamat belum diisi"}
                                   </Text>
-                                  {isSelected ? (
-                                    <>
-                                      <Text numberOfLines={1} style={styles.customerItemMeta}>
-                                        {formatCustomerPhoneDisplay(customer.phone_normalized)}
-                                      </Text>
-                                      {email ? (
-                                        <Text numberOfLines={1} style={styles.customerItemDetail}>
-                                          {email}
-                                        </Text>
-                                      ) : null}
-                                      {gender ? (
-                                        <Text numberOfLines={1} style={styles.customerItemDetail}>
-                                          {gender}
-                                        </Text>
-                                      ) : null}
-                                      {note ? (
-                                        <Text numberOfLines={1} style={styles.customerItemNote}>
-                                          {note}
-                                        </Text>
-                                      ) : null}
-                                    </>
-                                  ) : null}
                                 </View>
-                                <Ionicons color={isSelected ? theme.colors.info : theme.colors.textMuted} name={isSelected ? "checkmark-circle" : "chevron-forward"} size={16} />
+                                <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={16} />
                               </Pressable>
                             );
                           })}
@@ -1180,6 +1213,23 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     sectionWrap: {
       gap: theme.spacing.xs,
     },
+    customerStepLead: {
+      gap: 2,
+      paddingHorizontal: 2,
+      paddingVertical: 2,
+    },
+    customerStepLeadTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13.5,
+      lineHeight: 19,
+    },
+    customerStepLeadSubtitle: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+      lineHeight: 16,
+    },
     stepHeader: {
       flexDirection: "row",
       alignItems: "center",
@@ -1253,8 +1303,70 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       padding: 10,
       gap: theme.spacing.xs,
     },
+    customerSearchWrap: {
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.inputBg,
+      minHeight: isTablet ? 48 : 44,
+      paddingHorizontal: 12,
+      paddingVertical: isTablet ? 10 : 9,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    customerSearchInput: {
+      flex: 1,
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.medium,
+      fontSize: isTablet ? 14 : 13,
+      paddingVertical: 0,
+    },
+    customerSearchAction: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    customerSearchActionDisabled: {
+      opacity: 0.7,
+    },
+    customerFilters: {
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 6,
+    },
+    customerFilterChip: {
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+    },
+    customerFilterChipActive: {
+      borderColor: theme.colors.info,
+      backgroundColor: theme.colors.primarySoft,
+    },
+    customerFilterChipText: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
+      lineHeight: 15,
+    },
+    customerFilterChipTextActive: {
+      color: theme.colors.info,
+    },
+    customerCountText: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 15,
+    },
     customerList: {
-      maxHeight: isTablet ? 300 : 220,
+      maxHeight: isTablet ? 420 : 360,
     },
     customerListContent: {
       gap: 6,

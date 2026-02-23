@@ -41,6 +41,7 @@ class CustomerController extends Controller
 
         $query = Customer::query()
             ->where('tenant_id', $user->tenant_id)
+            ->withCount('orders')
             ->latest('updated_at');
 
         if ($includeDeleted) {

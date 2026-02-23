@@ -4,6 +4,7 @@ export interface Customer {
   name: string;
   phone_normalized: string;
   notes: string | null;
+  orders_count?: number;
   created_at: string;
   updated_at: string;
   deleted_at?: string | null;
