@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Models\OutletService;
 use App\Models\Service;
 use App\Models\ServiceProcessTag;
+use App\Models\ServiceProcessTagLink;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -720,12 +721,34 @@ class ServiceCatalogController extends Controller
             ], 422));
         }
 
-        $syncPayload = [];
+        /** @var \Illuminate\Support\Collection<string, ServiceProcessTagLink> $existingLinks */
+        $existingLinks = ServiceProcessTagLink::query()
+            ->where('service_id', $service->id)
+            ->get()
+            ->keyBy(fn (ServiceProcessTagLink $link): string => (string) $link->tag_id);
+
         foreach ($normalizedIds as $index => $tagId) {
-            $syncPayload[$tagId] = ['sort_order' => $index];
+            /** @var ServiceProcessTagLink|null $existingLink */
+            $existingLink = $existingLinks->get($tagId);
+            if ($existingLink) {
+                if ((int) $existingLink->sort_order !== $index) {
+                    $existingLink->sort_order = $index;
+                    $existingLink->save();
+                }
+                continue;
+            }
+
+            ServiceProcessTagLink::query()->create([
+                'service_id' => $service->id,
+                'tag_id' => $tagId,
+                'sort_order' => $index,
+            ]);
         }
 
-        $service->processTags()->sync($syncPayload);
+        ServiceProcessTagLink::query()
+            ->where('service_id', $service->id)
+            ->whereNotIn('tag_id', $normalizedIds)
+            ->delete();
     }
 
     /**
