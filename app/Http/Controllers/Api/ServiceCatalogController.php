@@ -116,7 +116,7 @@ class ServiceCatalogController extends Controller
 
         if ($withChildren) {
             $query->with([
-                'children' => function (Builder $childQuery) use ($includeDeleted, $serviceTypes, $validated, $search): void {
+                'children' => function ($childQuery) use ($includeDeleted, $serviceTypes, $validated, $search): void {
                     if ($includeDeleted) {
                         $childQuery->withTrashed();
                     }
