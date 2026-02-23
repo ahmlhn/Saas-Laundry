@@ -1,7 +1,9 @@
 import { createBottomTabNavigator, type BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
-import { Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { HomeDashboardScreen } from "../screens/app/HomeDashboardScreen";
 import { OrderDetailScreen } from "../screens/app/OrderDetailScreen";
 import { OrdersTodayScreen } from "../screens/app/OrdersTodayScreen";
@@ -84,28 +86,58 @@ function AccountTabNavigator() {
 
 function QuickActionTabButton(props: BottomTabBarButtonProps) {
   const theme = useAppTheme();
+  const navigation = useNavigation<BottomTabNavigationProp<AppTabParamList>>();
   const { width, height } = useWindowDimensions();
   const isLandscape = width > height;
   const minEdge = Math.min(width, height);
   const isTablet = minEdge >= 600;
-  const buttonSize = isTablet ? 62 : isLandscape ? 52 : 58;
+  const buttonSize = isTablet ? 64 : isLandscape ? 54 : 60;
   const wrapperTop = isLandscape ? -10 : -16;
+  const haloSize = buttonSize + (isTablet ? 16 : 14);
+  const isActive = Boolean(props.accessibilityState?.selected);
+
+  function handlePress(): void {
+    navigation.navigate("QuickActionTab", {
+      openCreateStamp: Date.now(),
+    });
+  }
 
   return (
     <Pressable
-      accessibilityLabel={props.accessibilityLabel}
-      onPress={props.onPress}
-      style={[styles.quickActionButtonWrap, { top: wrapperTop }]}
+      accessibilityHint="Buka halaman aksi cepat untuk membuat pesanan baru"
+      accessibilityLabel="Tambah Pesanan"
+      accessibilityRole="button"
+      onLongPress={props.onLongPress}
+      onPress={handlePress}
+      style={({ pressed }) => [
+        styles.quickActionButtonWrap,
+        {
+          top: wrapperTop,
+          transform: [{ scale: pressed ? 0.95 : 1 }],
+          opacity: pressed ? 0.92 : 1,
+        },
+      ]}
     >
+      <View
+        style={[
+          styles.quickActionHalo,
+          {
+            width: haloSize,
+            height: haloSize,
+            borderColor: theme.mode === "dark" ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.92)",
+            backgroundColor: theme.mode === "dark" ? "rgba(13,77,123,0.22)" : "rgba(31,163,232,0.14)",
+          },
+        ]}
+      />
       <View
         style={[
           styles.quickActionButton,
           {
             borderColor: theme.colors.surface,
-            backgroundColor: theme.colors.primaryStrong,
+            backgroundColor: isActive ? theme.colors.info : theme.colors.primaryStrong,
             width: buttonSize,
             height: buttonSize,
-            shadowColor: theme.colors.primaryStrong,
+            shadowColor: isActive ? theme.colors.info : theme.colors.primaryStrong,
             shadowOpacity: theme.mode === "dark" ? 0.35 : 0.22,
             shadowRadius: 8,
             shadowOffset: { width: 0, height: 4 },
@@ -113,7 +145,18 @@ function QuickActionTabButton(props: BottomTabBarButtonProps) {
           },
         ]}
       >
-        <Ionicons color={theme.colors.primaryContrast} name="add" size={isTablet ? 30 : 28} />
+        <Ionicons color={theme.colors.primaryContrast} name={isActive ? "add-circle" : "add"} size={isTablet ? 30 : 28} />
+      </View>
+      <View
+        style={[
+          styles.quickActionCaption,
+          {
+            backgroundColor: theme.mode === "dark" ? "#0f2f44" : "#eff8ff",
+            borderColor: theme.mode === "dark" ? "rgba(102,191,255,0.35)" : "rgba(31,163,232,0.3)",
+          },
+        ]}
+      >
+        <Text style={[styles.quickActionCaptionText, { color: theme.colors.info }]}>Tambah</Text>
       </View>
     </Pressable>
   );
@@ -181,6 +224,7 @@ function MainTabsNavigator() {
           component={QuickActionScreen}
           options={{
             tabBarLabel: "",
+            tabBarAccessibilityLabel: "Tambah Pesanan",
             tabBarIcon: () => null,
             tabBarButton: (props) => <QuickActionTabButton {...props} />,
           }}
@@ -232,11 +276,32 @@ const styles = StyleSheet.create({
   quickActionButtonWrap: {
     justifyContent: "center",
     alignItems: "center",
+    gap: 6,
+    position: "relative",
+  },
+  quickActionHalo: {
+    position: "absolute",
+    borderRadius: 999,
+    borderWidth: 1,
   },
   quickActionButton: {
     borderRadius: 999,
     borderWidth: 4,
     alignItems: "center",
     justifyContent: "center",
+  },
+  quickActionCaption: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    minWidth: 58,
+    alignItems: "center",
+  },
+  quickActionCaptionText: {
+    fontSize: 10.5,
+    letterSpacing: 0.2,
+    fontWeight: "700",
+    textTransform: "uppercase",
   },
 });

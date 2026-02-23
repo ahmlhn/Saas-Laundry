@@ -1,12 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
-import type { NavigationProp } from "@react-navigation/native";
-import { useNavigation } from "@react-navigation/native";
+import type { NavigationProp, RouteProp } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { AppSkeletonBlock } from "../../components/ui/AppSkeletonBlock";
+import { formatCustomerPhoneDisplay } from "../../features/customers/customerPhone";
+import { parseCustomerProfileMeta } from "../../features/customers/customerProfileNote";
+import { listCustomers } from "../../features/customers/customerApi";
 import { createOrder } from "../../features/orders/orderApi";
 import { listServices } from "../../features/services/serviceApi";
 import { hasAnyRole } from "../../lib/accessControl";
@@ -15,6 +18,7 @@ import type { AppTabParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
+import type { Customer } from "../../types/customer";
 import type { ServiceCatalogItem } from "../../types/service";
 
 interface DraftOrderItem {
@@ -24,6 +28,8 @@ interface DraftOrderItem {
 }
 
 type DraftMetricDirection = -1 | 1;
+
+const CUSTOMER_PICKER_LIMIT = 120;
 
 function generateDraftItemId(): string {
   return `item-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
@@ -84,6 +90,7 @@ export function QuickActionScreen() {
   const isCompactLandscape = isLandscape && !isTablet;
   const styles = useMemo(() => createStyles(theme, isTablet, isCompactLandscape), [theme, isTablet, isCompactLandscape]);
   const navigation = useNavigation<NavigationProp<AppTabParamList>>();
+  const route = useRoute<RouteProp<AppTabParamList, "QuickActionTab">>();
   const { session, selectedOutlet, refreshSession } = useSession();
   const roles = session?.roles ?? [];
   const canCreateOrder = hasAnyRole(roles, ["owner", "admin", "cashier"]);
@@ -91,6 +98,11 @@ export function QuickActionScreen() {
   const [loadingServices, setLoadingServices] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
+  const [customerOptions, setCustomerOptions] = useState<Customer[]>([]);
+  const [customerKeyword, setCustomerKeyword] = useState("");
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [draftItems, setDraftItems] = useState<DraftOrderItem[]>([createDraftItem(null)]);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -112,6 +124,16 @@ export function QuickActionScreen() {
 
     void loadServices(true);
   }, [selectedOutlet?.id, canCreateOrder]);
+
+  useEffect(() => {
+    if (!route.params?.openCreateStamp || !canCreateOrder) {
+      return;
+    }
+
+    openCreateForm();
+    setErrorMessage(null);
+    setActionMessage(null);
+  }, [route.params?.openCreateStamp, canCreateOrder]);
 
   async function loadServices(forceRefresh = false): Promise<void> {
     if (!selectedOutlet) {
@@ -156,7 +178,73 @@ export function QuickActionScreen() {
     }
   }
 
+  async function loadCustomerOptions(forceRefresh = false): Promise<void> {
+    setLoadingCustomers(true);
+    setErrorMessage(null);
+
+    try {
+      const data = await listCustomers({
+        limit: CUSTOMER_PICKER_LIMIT,
+        forceRefresh,
+      });
+      setCustomerOptions(data);
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error));
+    } finally {
+      setLoadingCustomers(false);
+    }
+  }
+
+  function openCreateForm(): void {
+    setShowCreateForm(true);
+    setCustomerPickerOpen(true);
+    setCustomerKeyword("");
+
+    if (customerOptions.length === 0 && !loadingCustomers) {
+      void loadCustomerOptions();
+    }
+  }
+
+  function handleToggleCreateForm(): void {
+    if (showCreateForm) {
+      setShowCreateForm(false);
+      setCustomerPickerOpen(false);
+      setCustomerKeyword("");
+      return;
+    }
+
+    openCreateForm();
+  }
+
+  function handleToggleCustomerPicker(): void {
+    const nextOpen = !customerPickerOpen;
+    setCustomerPickerOpen(nextOpen);
+    if (nextOpen && customerOptions.length === 0 && !loadingCustomers) {
+      void loadCustomerOptions();
+    }
+  }
+
+  function handleSelectCustomer(customer: Customer): void {
+    const profile = parseCustomerProfileMeta(customer.notes);
+    setSelectedCustomerId(customer.id);
+    setCustomerName(customer.name);
+    setCustomerPhone(customer.phone_normalized ?? "");
+    setCustomerNotes(profile.note);
+    setCustomerPickerOpen(false);
+    setCustomerKeyword("");
+    setErrorMessage(null);
+  }
+
+  function handleManualCustomerInput(): void {
+    setSelectedCustomerId(null);
+    setCustomerPickerOpen(false);
+    setCustomerKeyword("");
+  }
+
   function resetCreateForm(): void {
+    setSelectedCustomerId(null);
+    setCustomerPickerOpen(false);
+    setCustomerKeyword("");
     setCustomerName("");
     setCustomerPhone("");
     setCustomerNotes("");
@@ -254,6 +342,28 @@ export function QuickActionScreen() {
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
   }, [discountInput]);
   const estimatedTotal = useMemo(() => Math.max(estimatedSubtotal + parsedShippingFee - parsedDiscount, 0), [estimatedSubtotal, parsedShippingFee, parsedDiscount]);
+  const sortedCustomerOptions = useMemo(() => {
+    return [...customerOptions].sort((a, b) => a.name.localeCompare(b.name, "id-ID"));
+  }, [customerOptions]);
+  const filteredCustomerOptions = useMemo(() => {
+    const keyword = customerKeyword.trim().toLowerCase();
+    if (!keyword) {
+      return sortedCustomerOptions;
+    }
+
+    return sortedCustomerOptions.filter((item) => {
+      const profile = parseCustomerProfileMeta(item.notes);
+      const haystack = `${item.name} ${item.phone_normalized} ${profile.note}`.toLowerCase();
+      return haystack.includes(keyword);
+    });
+  }, [customerKeyword, sortedCustomerOptions]);
+  const selectedCustomer = useMemo(() => {
+    if (!selectedCustomerId) {
+      return null;
+    }
+
+    return customerOptions.find((item) => item.id === selectedCustomerId) ?? null;
+  }, [customerOptions, selectedCustomerId]);
   const outletLabel = selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "Outlet belum dipilih";
   const servicesStatusLabel = loadingServices
     ? "Memuat layanan aktif..."
@@ -261,6 +371,7 @@ export function QuickActionScreen() {
       ? `${services.length} layanan aktif siap dipakai`
       : "Belum ada layanan aktif";
   const createButtonDisabled = !canCreateOrder || loadingServices || services.length === 0;
+  const showStickyCreateFooter = showCreateForm && canCreateOrder;
 
   async function handleCreateOrder(): Promise<void> {
     if (!selectedOutlet || !canCreateOrder || submitting) {
@@ -344,6 +455,12 @@ export function QuickActionScreen() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function handleCancelCreate(): void {
+    resetCreateForm();
+    setShowCreateForm(false);
+    setErrorMessage(null);
   }
 
   function renderItemDraft(item: DraftOrderItem, index: number) {
@@ -459,8 +576,16 @@ export function QuickActionScreen() {
   }
 
   return (
-    <AppScreen contentContainerStyle={styles.content} scroll>
-      <AppPanel style={styles.heroPanel}>
+    <AppScreen scroll={false}>
+      <View style={styles.screenLayout}>
+        <ScrollView
+          contentContainerStyle={[styles.content, showStickyCreateFooter ? styles.contentWithStickyFooter : null]}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          style={styles.scrollView}
+        >
+          <AppPanel style={styles.heroPanel}>
         <View style={styles.heroTopRow}>
           <View style={styles.heroBadge}>
             <Ionicons color={theme.colors.info} name="flash-outline" size={16} />
@@ -494,9 +619,9 @@ export function QuickActionScreen() {
         <View style={styles.actionList}>
           <AppButton
             disabled={createButtonDisabled}
-            leftElement={<Ionicons color={theme.colors.primaryContrast} name={showCreateForm ? "close-outline" : "add-circle-outline"} size={18} />}
-            onPress={() => setShowCreateForm((value) => !value)}
-            title={showCreateForm ? "Tutup Form Order" : "Buat Order Baru"}
+            leftElement={<Ionicons color={theme.colors.primaryContrast} name={showCreateForm ? "close-outline" : "bag-add-outline"} size={18} />}
+            onPress={handleToggleCreateForm}
+            title={showCreateForm ? "Tutup Form Pesanan" : "Tambah Pesanan"}
           />
           <AppButton
             leftElement={<Ionicons color={theme.colors.info} name="person-add-outline" size={18} />}
@@ -537,8 +662,103 @@ export function QuickActionScreen() {
               <Text style={styles.formSubtitle}>Isi data utama untuk transaksi cepat dari kasir.</Text>
             </View>
           </View>
+          <View style={styles.customerPickerWrap}>
+            <View style={styles.customerPickerHeaderRow}>
+              <Text style={styles.inputLabel}>Pilih Konsumen</Text>
+              <Pressable onPress={handleToggleCustomerPicker} style={({ pressed }) => [styles.customerPickerToggleButton, pressed ? styles.customerPickerToggleButtonPressed : null]}>
+                <Ionicons color={theme.colors.info} name={customerPickerOpen ? "chevron-up-outline" : "chevron-down-outline"} size={14} />
+                <Text style={styles.customerPickerToggleButtonText}>{customerPickerOpen ? "Tutup Daftar" : "Pilih Nama"}</Text>
+              </Pressable>
+            </View>
+            {selectedCustomer ? (
+              <View style={styles.selectedCustomerCard}>
+                <Text numberOfLines={1} style={styles.selectedCustomerName}>
+                  {selectedCustomer.name}
+                </Text>
+                <Text numberOfLines={1} style={styles.selectedCustomerMeta}>
+                  {formatCustomerPhoneDisplay(selectedCustomer.phone_normalized)}
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.customerPickerHint}>Belum dipilih. Anda bisa isi manual atau pilih dari daftar.</Text>
+            )}
+            {customerPickerOpen ? (
+              <View style={styles.customerPickerBody}>
+                <TextInput
+                  onChangeText={setCustomerKeyword}
+                  placeholder="Cari nama atau nomor konsumen..."
+                  placeholderTextColor={theme.colors.textMuted}
+                  style={styles.input}
+                  value={customerKeyword}
+                />
+                {loadingCustomers ? (
+                  <View style={styles.skeletonWrap}>
+                    <AppSkeletonBlock height={11} width="46%" />
+                    <AppSkeletonBlock height={11} width="70%" />
+                    <AppSkeletonBlock height={11} width="58%" />
+                  </View>
+                ) : filteredCustomerOptions.length > 0 ? (
+                  <ScrollView contentContainerStyle={styles.customerOptionListContent} keyboardShouldPersistTaps="handled" nestedScrollEnabled style={styles.customerOptionList}>
+                    <Text style={styles.customerResultMeta}>{filteredCustomerOptions.length} konsumen ditampilkan</Text>
+                    {filteredCustomerOptions.map((customer) => {
+                      const profile = parseCustomerProfileMeta(customer.notes);
+                      const isSelected = customer.id === selectedCustomerId;
+
+                      return (
+                        <Pressable
+                          key={customer.id}
+                          onPress={() => handleSelectCustomer(customer)}
+                          style={({ pressed }) => [
+                            styles.customerOptionItem,
+                            isSelected ? styles.customerOptionItemSelected : null,
+                            pressed ? styles.customerOptionItemPressed : null,
+                          ]}
+                        >
+                          <View style={styles.customerOptionMain}>
+                            <Text numberOfLines={1} style={styles.customerOptionName}>
+                              {customer.name}
+                            </Text>
+                            <Text numberOfLines={1} style={styles.customerOptionPhone}>
+                              {formatCustomerPhoneDisplay(customer.phone_normalized)}
+                            </Text>
+                            {profile.note ? (
+                              <Text numberOfLines={1} style={styles.customerOptionNote}>
+                                {profile.note}
+                              </Text>
+                            ) : null}
+                          </View>
+                          <Ionicons color={isSelected ? theme.colors.info : theme.colors.textMuted} name={isSelected ? "checkmark-circle" : "chevron-forward"} size={16} />
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                ) : (
+                  <Text style={styles.customerPickerEmptyText}>Belum ada data konsumen yang cocok.</Text>
+                )}
+                <View style={styles.customerPickerActions}>
+                  <Pressable onPress={handleManualCustomerInput} style={({ pressed }) => [styles.customerPickerActionButton, pressed ? styles.customerPickerActionButtonPressed : null]}>
+                    <Ionicons color={theme.colors.textSecondary} name="create-outline" size={15} />
+                    <Text style={styles.customerPickerActionButtonText}>Input Manual</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => void loadCustomerOptions(true)}
+                    style={({ pressed }) => [styles.customerPickerActionButton, pressed ? styles.customerPickerActionButtonPressed : null]}
+                  >
+                    <Ionicons color={theme.colors.textSecondary} name="refresh-outline" size={15} />
+                    <Text style={styles.customerPickerActionButtonText}>Muat Ulang</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
+          </View>
           <TextInput
-            onChangeText={setCustomerName}
+            onChangeText={(value) => {
+              if (selectedCustomerId) {
+                setSelectedCustomerId(null);
+              }
+
+              setCustomerName(value);
+            }}
             placeholder="Nama pelanggan"
             placeholderTextColor={theme.colors.textMuted}
             style={styles.input}
@@ -546,7 +766,13 @@ export function QuickActionScreen() {
           />
           <TextInput
             keyboardType="phone-pad"
-            onChangeText={setCustomerPhone}
+            onChangeText={(value) => {
+              if (selectedCustomerId) {
+                setSelectedCustomerId(null);
+              }
+
+              setCustomerPhone(value);
+            }}
             placeholder="Nomor HP pelanggan"
             placeholderTextColor={theme.colors.textMuted}
             style={styles.input}
@@ -628,28 +854,6 @@ export function QuickActionScreen() {
             </View>
           </AppPanel>
 
-          <View style={[styles.formActions, isTablet || isCompactLandscape ? styles.formActionsWide : null]}>
-            <View style={styles.formActionItem}>
-              <AppButton
-                disabled={submitting || services.length === 0}
-                leftElement={<Ionicons color={theme.colors.primaryContrast} name="save-outline" size={18} />}
-                loading={submitting}
-                onPress={() => void handleCreateOrder()}
-                title="Simpan Order"
-              />
-            </View>
-            <View style={styles.formActionItem}>
-              <AppButton
-                leftElement={<Ionicons color={theme.colors.textPrimary} name="refresh-outline" size={18} />}
-                onPress={() => {
-                  resetCreateForm();
-                  setShowCreateForm(false);
-                }}
-                title="Batal"
-                variant="ghost"
-              />
-            </View>
-          </View>
         </AppPanel>
       ) : null}
 
@@ -697,6 +901,38 @@ export function QuickActionScreen() {
           <Text style={styles.errorText}>{errorMessage}</Text>
         </View>
       ) : null}
+        </ScrollView>
+
+        {showStickyCreateFooter ? (
+          <View style={styles.stickyFooterWrap}>
+            <View style={styles.stickyFooterHeader}>
+              <Text style={styles.stickyFooterTitle}>Simpan Pesanan</Text>
+              <Text style={styles.stickyFooterMeta}>
+                {draftItems.length} item • {formatMoney(estimatedTotal)}
+              </Text>
+            </View>
+            <View style={[styles.formActions, isTablet || isCompactLandscape ? styles.formActionsWide : null]}>
+              <View style={styles.formActionItem}>
+                <AppButton
+                  disabled={submitting || services.length === 0}
+                  leftElement={<Ionicons color={theme.colors.primaryContrast} name="save-outline" size={18} />}
+                  loading={submitting}
+                  onPress={() => void handleCreateOrder()}
+                  title="Simpan Pesanan"
+                />
+              </View>
+              <View style={styles.formActionItem}>
+                <AppButton
+                  leftElement={<Ionicons color={theme.colors.textPrimary} name="refresh-outline" size={18} />}
+                  onPress={handleCancelCreate}
+                  title="Batal"
+                  variant="ghost"
+                />
+              </View>
+            </View>
+          </View>
+        ) : null}
+      </View>
     </AppScreen>
   );
 }
@@ -707,12 +943,21 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
   const baseInputHeight = isTablet ? 48 : 44;
 
   return StyleSheet.create({
+    screenLayout: {
+      flex: 1,
+    },
+    scrollView: {
+      flex: 1,
+    },
     content: {
       flexGrow: 1,
       paddingHorizontal: contentHorizontal,
       paddingTop: contentTop,
       paddingBottom: theme.spacing.xxl,
       gap: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
+    },
+    contentWithStickyFooter: {
+      paddingBottom: theme.spacing.xl,
     },
     heroPanel: {
       gap: theme.spacing.sm,
@@ -831,6 +1076,158 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 18,
+    },
+    customerPickerWrap: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 11,
+      paddingVertical: 10,
+      gap: theme.spacing.xs,
+    },
+    customerPickerHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.xs,
+    },
+    customerPickerToggleButton: {
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surface,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+    },
+    customerPickerToggleButtonPressed: {
+      opacity: 0.78,
+    },
+    customerPickerToggleButtonText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+    },
+    customerPickerHint: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    selectedCustomerCard: {
+      borderWidth: 1,
+      borderColor: theme.colors.info,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      gap: 1,
+    },
+    selectedCustomerName: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12.5,
+      lineHeight: 18,
+    },
+    selectedCustomerMeta: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+      lineHeight: 16,
+    },
+    customerPickerBody: {
+      gap: theme.spacing.xs,
+    },
+    customerOptionList: {
+      maxHeight: isTablet ? 320 : 260,
+    },
+    customerOptionListContent: {
+      gap: 6,
+      paddingBottom: 2,
+    },
+    customerResultMeta: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+      lineHeight: 16,
+    },
+    customerOptionItem: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.xs,
+    },
+    customerOptionItemSelected: {
+      borderColor: theme.colors.info,
+      backgroundColor: theme.colors.primarySoft,
+    },
+    customerOptionItemPressed: {
+      opacity: 0.78,
+    },
+    customerOptionMain: {
+      flex: 1,
+      gap: 1,
+    },
+    customerOptionName: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12.5,
+      lineHeight: 18,
+    },
+    customerOptionPhone: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+      lineHeight: 16,
+    },
+    customerOptionNote: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 15,
+    },
+    customerPickerEmptyText: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 17,
+      textAlign: "center",
+      paddingVertical: 10,
+    },
+    customerPickerActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    customerPickerActionButton: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surface,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+      paddingVertical: 8,
+      paddingHorizontal: 10,
+    },
+    customerPickerActionButtonPressed: {
+      opacity: 0.78,
+    },
+    customerPickerActionButtonText: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
     },
     inputLabel: {
       color: theme.colors.textSecondary,
@@ -983,6 +1380,31 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
     formActionItem: {
       flex: 1,
+    },
+    stickyFooterWrap: {
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: contentHorizontal,
+      paddingTop: theme.spacing.xs,
+      paddingBottom: isCompactLandscape ? theme.spacing.xs : theme.spacing.sm,
+      gap: theme.spacing.xs,
+    },
+    stickyFooterHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
+    },
+    stickyFooterTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: isTablet ? 13.5 : 13,
+    },
+    stickyFooterMeta: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
     },
     summaryPanel: {
       gap: 6,

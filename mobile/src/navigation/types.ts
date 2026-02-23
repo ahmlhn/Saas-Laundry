@@ -93,7 +93,11 @@ export type AccountStackParamList = {
 export type AppTabParamList = {
   HomeTab: undefined;
   OrdersTab: NavigatorScreenParams<OrdersStackParamList> | undefined;
-  QuickActionTab: undefined;
+  QuickActionTab:
+    | {
+        openCreateStamp?: number;
+      }
+    | undefined;
   ReportsTab: undefined;
   AccountTab: NavigatorScreenParams<AccountStackParamList> | undefined;
 };
