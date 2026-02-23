@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Domain\Audit\AuditEventKeys;
 use App\Domain\Audit\AuditTrailService;
+use App\Domain\Onboarding\DefaultServiceCatalogSeeder;
 use App\Http\Controllers\Controller;
 use App\Models\Outlet;
 use App\Models\Plan;
@@ -27,6 +28,7 @@ class AuthController extends Controller
 {
     public function __construct(
         private readonly AuditTrailService $auditTrail,
+        private readonly DefaultServiceCatalogSeeder $defaultServiceCatalogSeeder,
     ) {
     }
 
@@ -419,6 +421,8 @@ class AuthController extends Controller
 
             $user->roles()->sync([$ownerRole->id]);
             $user->outlets()->sync([$outlet->id]);
+
+            $this->defaultServiceCatalogSeeder->seed($tenant, $outlet);
 
             $period = now()->format('Y-m');
             TenantSubscription::query()->firstOrCreate(

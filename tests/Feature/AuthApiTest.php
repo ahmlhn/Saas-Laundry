@@ -5,7 +5,10 @@ namespace Tests\Feature;
 use App\Models\AuditEvent;
 use App\Models\Outlet;
 use App\Models\Plan;
+use App\Models\Promotion;
 use App\Models\Role;
+use App\Models\Service;
+use App\Models\ServiceProcessTag;
 use App\Models\Tenant;
 use App\Models\TenantSubscription;
 use App\Models\User;
@@ -196,6 +199,20 @@ class AuthApiTest extends TestCase
             ->where('period', now()->format('Y-m'))
             ->first();
         $this->assertNotNull($subscription);
+
+        $this->assertGreaterThan(0, Service::query()->where('tenant_id', $registeredUser->tenant_id)->count());
+        $this->assertGreaterThan(0, Service::query()->where('tenant_id', $registeredUser->tenant_id)->where('service_type', 'regular')->count());
+        $this->assertGreaterThan(0, Service::query()->where('tenant_id', $registeredUser->tenant_id)->where('service_type', 'package')->count());
+        $this->assertGreaterThan(0, Service::query()->where('tenant_id', $registeredUser->tenant_id)->where('service_type', 'perfume')->count());
+        $this->assertGreaterThan(0, Service::query()->where('tenant_id', $registeredUser->tenant_id)->where('service_type', 'item')->count());
+
+        $this->assertDatabaseHas('service_process_tags', [
+            'tenant_id' => $registeredUser->tenant_id,
+            'name' => 'Cuci',
+        ]);
+
+        $this->assertGreaterThan(0, ServiceProcessTag::query()->where('tenant_id', $registeredUser->tenant_id)->count());
+        $this->assertGreaterThan(0, Promotion::query()->where('tenant_id', $registeredUser->tenant_id)->count());
     }
 
     public function test_forgot_password_creates_reset_token_with_generic_response(): void
