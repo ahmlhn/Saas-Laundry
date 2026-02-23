@@ -9,6 +9,7 @@ import {
   Easing,
   Keyboard,
   type KeyboardEvent,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -99,11 +100,19 @@ export function LoginScreen() {
   const keyboardHeightRef = useRef(0);
   const keyboardRaisedRef = useRef(false);
   const entranceProgress = useRef(new Animated.Value(0)).current;
+  const focusProgress = useRef(new Animated.Value(0)).current;
+  const heroBaseHeight = isLandscape ? (isTablet ? 200 : 176) : isTablet ? 318 : 278;
+  const heroFocusedHeight = isLandscape ? (isTablet ? 176 : 152) : isTablet ? 258 : 222;
+  const panelFocusLift = isLandscape ? 10 : 18;
+  const googleClientId = GOOGLE_WEB_CLIENT_ID || GOOGLE_EXPO_CLIENT_ID || GOOGLE_ANDROID_CLIENT_ID || GOOGLE_IOS_CLIENT_ID || "missing-google-client-id";
+  const googleAndroidClientId = GOOGLE_ANDROID_CLIENT_ID || GOOGLE_EXPO_CLIENT_ID || googleClientId;
+  const googleIosClientId = GOOGLE_IOS_CLIENT_ID || GOOGLE_EXPO_CLIENT_ID || googleClientId;
+  const googleWebClientId = GOOGLE_WEB_CLIENT_ID || googleClientId;
   const [googleAuthRequest, , promptGoogleAuth] = Google.useIdTokenAuthRequest({
-    clientId: GOOGLE_WEB_CLIENT_ID || GOOGLE_EXPO_CLIENT_ID || undefined,
-    androidClientId: GOOGLE_ANDROID_CLIENT_ID || undefined,
-    iosClientId: GOOGLE_IOS_CLIENT_ID || undefined,
-    webClientId: GOOGLE_WEB_CLIENT_ID || undefined,
+    clientId: googleClientId,
+    androidClientId: googleAndroidClientId,
+    iosClientId: googleIosClientId,
+    webClientId: googleWebClientId,
   });
 
   useEffect(() => {
@@ -111,7 +120,7 @@ export function LoginScreen() {
       toValue: 1,
       duration: 620,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
+      useNativeDriver: false,
     }).start();
   }, [entranceProgress]);
 
@@ -167,16 +176,26 @@ export function LoginScreen() {
   const heroAnimatedStyle = useMemo(
     () => ({
       opacity: entranceProgress,
+      height: focusProgress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [heroBaseHeight, heroFocusedHeight],
+      }),
       transform: [
         {
-          translateY: entranceProgress.interpolate({
-            inputRange: [0, 1],
-            outputRange: [-16, 0],
-          }),
+          translateY: Animated.add(
+            entranceProgress.interpolate({
+              inputRange: [0, 1],
+              outputRange: [-16, 0],
+            }),
+            focusProgress.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, -4],
+            })
+          ),
         },
       ],
     }),
-    [entranceProgress]
+    [entranceProgress, focusProgress, heroBaseHeight, heroFocusedHeight]
   );
 
   const panelAnimatedStyle = useMemo(
@@ -187,22 +206,52 @@ export function LoginScreen() {
       }),
       transform: [
         {
-          translateY: entranceProgress.interpolate({
-            inputRange: [0, 1],
-            outputRange: [24, 0],
-          }),
+          translateY: Animated.add(
+            entranceProgress.interpolate({
+              inputRange: [0, 1],
+              outputRange: [24, 0],
+            }),
+            focusProgress.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, -panelFocusLift],
+            })
+          ),
         },
       ],
     }),
-    [entranceProgress]
+    [entranceProgress, focusProgress, panelFocusLift]
   );
 
-  const canSubmit = !submitting && loginCredential.trim().length > 0 && password.length > 0;
+  const submitReady = loginCredential.trim().length > 0 && password.length > 0;
+  const canSubmit = !submitting && submitReady;
+  const submitButtonInactive = !submitReady;
   const canBiometricLogin = hasStoredSession && biometricAvailable && biometricEnabled && !biometricSubmitting && !submitting;
-  const googleFeatureReady = GOOGLE_LOGIN_ENABLED && !!googleAuthRequest;
-  const canGooglePress = !googleSubmitting && !submitting && !biometricSubmitting;
-  const inputDisabled = submitting || biometricSubmitting || googleSubmitting;
+  const googleFeatureEnabled = GOOGLE_LOGIN_ENABLED;
+  const googleConfiguredForPlatform =
+    Platform.OS === "android"
+      ? GOOGLE_ANDROID_CLIENT_ID !== "" || GOOGLE_EXPO_CLIENT_ID !== ""
+      : Platform.OS === "ios"
+        ? GOOGLE_IOS_CLIENT_ID !== "" || GOOGLE_EXPO_CLIENT_ID !== ""
+        : GOOGLE_WEB_CLIENT_ID !== "";
+  const googleFeatureReady = googleFeatureEnabled && googleConfiguredForPlatform && !!googleAuthRequest;
+  const canGooglePress = googleFeatureEnabled && !googleSubmitting && !submitting && !biometricSubmitting;
+  const inputDisabled = submitting || biometricSubmitting || (googleFeatureEnabled && googleSubmitting);
   const focusMode = keyboardVisible || focusedField !== null;
+  const missingGoogleConfigMessage =
+    Platform.OS === "android"
+      ? "Login Google belum dikonfigurasi. Isi EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID atau EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID di mobile/.env, lalu restart Expo."
+      : Platform.OS === "ios"
+        ? "Login Google belum dikonfigurasi. Isi EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID atau EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID di mobile/.env, lalu restart Expo."
+        : "Login Google belum dikonfigurasi. Isi EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID di mobile/.env, lalu restart Expo.";
+
+  useEffect(() => {
+    Animated.timing(focusProgress, {
+      toValue: focusMode ? 1 : 0,
+      duration: 180,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [focusMode, focusProgress]);
 
   function clearErrorState(): void {
     setErrorSummary(null);
@@ -252,13 +301,18 @@ export function LoginScreen() {
   }
 
   async function handleGoogleLogin(): Promise<void> {
+    if (!googleFeatureEnabled) {
+      setErrorSummary("Login Google sedang dinonaktifkan sementara.");
+      return;
+    }
+
     if (!canGooglePress) {
       return;
     }
 
     if (!googleFeatureReady) {
-      if (!GOOGLE_LOGIN_ENABLED) {
-        setErrorSummary("Login Google belum dikonfigurasi pada aplikasi mobile.");
+      if (!googleConfiguredForPlatform) {
+        setErrorSummary(missingGoogleConfigMessage);
       } else {
         setErrorSummary("Google login belum siap. Coba lagi beberapa detik.");
       }
@@ -300,7 +354,7 @@ export function LoginScreen() {
       scrollRef={screenScrollRef}
     >
       <View style={styles.responsiveWrap}>
-        <Animated.View style={[styles.heroShell, heroAnimatedStyle, focusMode ? styles.heroShellFocused : null]}>
+        <Animated.View style={[styles.heroShell, heroAnimatedStyle]}>
           <View pointerEvents="none" style={styles.heroBlueBase} />
           <View pointerEvents="none" style={styles.heroBlueLayer} />
           <View pointerEvents="none" style={styles.heroAccentRing} />
@@ -329,7 +383,7 @@ export function LoginScreen() {
           onLayout={(event) => {
             panelTopRef.current = event.nativeEvent.layout.y;
           }}
-          style={[styles.panelWrap, focusMode ? styles.panelWrapFocused : null, panelAnimatedStyle]}
+          style={[styles.panelWrap, panelAnimatedStyle]}
         >
           <AppPanel style={styles.panel}>
           <Text style={styles.autoRoleHint}>Login sebagai pemilik atau pegawai</Text>
@@ -423,17 +477,6 @@ export function LoginScreen() {
           >
             <Text style={styles.forgotHint}>Lupa password? Reset di sini.</Text>
           </Pressable>
-          <View style={styles.registerRow}>
-            <Text style={styles.registerLabel}>Belum punya akun?</Text>
-            <Pressable
-              accessibilityRole="button"
-              disabled={inputDisabled}
-              onPress={() => navigation.navigate("Register")}
-              style={({ pressed }) => [styles.registerLinkButton, pressed ? styles.registerLinkButtonPressed : null]}
-            >
-              <Text style={styles.registerLinkText}>Daftar sekarang</Text>
-            </Pressable>
-          </View>
 
           {errorSummary ? (
             <View style={styles.errorWrap}>
@@ -449,18 +492,14 @@ export function LoginScreen() {
               onPress={() => void handleSubmit()}
               style={({ pressed }) => [
                 styles.submitPrimaryButton,
-                !canSubmit ? styles.submitPrimaryButtonDisabled : null,
+                submitButtonInactive ? styles.submitPrimaryButtonDisabled : null,
                 pressed && canSubmit ? styles.submitPrimaryButtonPressed : null,
               ]}
             >
-              <View pointerEvents="none" style={styles.submitPrimaryBase} />
-              <View pointerEvents="none" style={styles.submitPrimaryAccent} />
-              <View pointerEvents="none" style={styles.submitPrimaryGlow} />
-              <View pointerEvents="none" style={styles.submitPrimarySheen} />
               {submitting ? (
                 <ActivityIndicator color="#ffffff" size="small" />
               ) : (
-                <Text style={styles.submitPrimaryText}>Masuk</Text>
+                <Text style={[styles.submitPrimaryText, submitButtonInactive ? styles.submitPrimaryTextDisabled : null]}>Masuk</Text>
               )}
             </Pressable>
 
@@ -499,34 +538,47 @@ export function LoginScreen() {
             ) : null}
           </View>
 
-          <Pressable
-            accessibilityRole="button"
-            disabled={!canGooglePress}
-            onPress={() => void handleGoogleLogin()}
-            style={({ pressed }) => [
-              styles.googleButton,
-              !googleFeatureReady ? styles.googleButtonNotReady : null,
-              !canGooglePress ? styles.googleButtonDisabled : null,
-              pressed && canGooglePress ? styles.googleButtonPressed : null,
-            ]}
-          >
-            {googleSubmitting ? (
-              <ActivityIndicator color={theme.colors.textPrimary} size="small" />
-            ) : (
-              <>
-                <View style={styles.googleBadge}>
-                  <Text style={styles.googleBadgeText}>G</Text>
-                </View>
-                <Text style={styles.googleButtonText}>Masuk dengan Google</Text>
-              </>
-            )}
-          </Pressable>
+          {googleFeatureEnabled ? (
+            <Pressable
+              accessibilityRole="button"
+              disabled={!canGooglePress}
+              onPress={() => void handleGoogleLogin()}
+              style={({ pressed }) => [
+                styles.googleButton,
+                !googleFeatureReady ? styles.googleButtonNotReady : null,
+                !canGooglePress ? styles.googleButtonDisabled : null,
+                pressed && canGooglePress ? styles.googleButtonPressed : null,
+              ]}
+            >
+              {googleSubmitting ? (
+                <ActivityIndicator color={theme.colors.textPrimary} size="small" />
+              ) : (
+                <>
+                  <View style={styles.googleBadge}>
+                    <Text style={styles.googleBadgeText}>G</Text>
+                  </View>
+                  <Text style={styles.googleButtonText}>Masuk dengan Google</Text>
+                </>
+              )}
+            </Pressable>
+          ) : null}
 
           {hasStoredSession && (!biometricAvailable || !biometricEnabled) ? (
             <View style={styles.biometricHintWrap}>
               <Text style={styles.biometricHint}>Sesi tersimpan terdeteksi. Aktifkan login biometrik dari menu Akun untuk akses instan.</Text>
             </View>
           ) : null}
+          <View style={styles.registerFooter}>
+            <Text style={styles.registerLabel}>Belum punya akun?</Text>
+            <Pressable
+              accessibilityRole="button"
+              disabled={inputDisabled}
+              onPress={() => navigation.navigate("Register")}
+              style={({ pressed }) => [styles.registerLinkButton, pressed ? styles.registerLinkButtonPressed : null]}
+            >
+              <Text style={styles.registerLinkText}>Daftar sekarang</Text>
+            </Pressable>
+          </View>
           </AppPanel>
         </Animated.View>
       </View>
@@ -537,10 +589,9 @@ export function LoginScreen() {
 function createStyles(theme: AppTheme, layout: LoginLayoutMode) {
   return StyleSheet.create({
     scrollContainer: {
-      flexGrow: 1,
       paddingHorizontal: theme.spacing.lg,
       paddingTop: layout.isLandscape ? theme.spacing.sm : theme.spacing.md,
-      paddingBottom: theme.spacing.xxl,
+      paddingBottom: theme.spacing.md,
       gap: theme.spacing.md,
       alignItems: "center",
     },
@@ -549,13 +600,9 @@ function createStyles(theme: AppTheme, layout: LoginLayoutMode) {
       maxWidth: layout.isTablet ? 760 : layout.isLandscape ? 640 : 520,
     },
     heroShell: {
-      height: layout.isLandscape ? (layout.isTablet ? 224 : 192) : layout.isTablet ? 356 : 306,
       borderRadius: 32,
       overflow: "hidden",
       position: "relative",
-    },
-    heroShellFocused: {
-      height: layout.isLandscape ? 176 : 220,
     },
     heroBlueBase: {
       ...StyleSheet.absoluteFillObject,
@@ -593,7 +640,7 @@ function createStyles(theme: AppTheme, layout: LoginLayoutMode) {
       position: "absolute",
       left: -58,
       right: -44,
-      bottom: -134,
+      bottom: -152,
       height: 244,
       borderRadius: 180,
       backgroundColor: "#ffffff",
@@ -601,7 +648,7 @@ function createStyles(theme: AppTheme, layout: LoginLayoutMode) {
     heroWaveSecondary: {
       position: "absolute",
       right: -56,
-      bottom: -100,
+      bottom: -116,
       width: 220,
       height: 130,
       borderRadius: 90,
@@ -626,8 +673,8 @@ function createStyles(theme: AppTheme, layout: LoginLayoutMode) {
     },
     heroContent: {
       paddingHorizontal: theme.spacing.lg,
-      paddingTop: layout.isLandscape ? theme.spacing.md : theme.spacing.xl,
-      gap: theme.spacing.sm,
+      paddingTop: layout.isLandscape ? theme.spacing.md : theme.spacing.lg,
+      gap: theme.spacing.xs,
     },
     brandRow: {
       flexDirection: "row",
@@ -693,11 +740,8 @@ function createStyles(theme: AppTheme, layout: LoginLayoutMode) {
       maxWidth: layout.isLandscape ? 520 : 340,
     },
     panelWrap: {
-      marginTop: layout.isLandscape ? -34 : -72,
+      marginTop: layout.isLandscape ? -28 : -58,
       paddingHorizontal: 2,
-    },
-    panelWrapFocused: {
-      marginTop: layout.isLandscape ? -16 : -92,
     },
     panel: {
       gap: theme.spacing.sm,
@@ -836,18 +880,17 @@ function createStyles(theme: AppTheme, layout: LoginLayoutMode) {
     forgotHintButtonPressed: {
       opacity: 0.74,
     },
-    registerRow: {
-      flexDirection: "row",
+    registerFooter: {
+      marginTop: 10,
       alignItems: "center",
       justifyContent: "center",
-      gap: 8,
-      marginTop: -2,
-      marginBottom: 2,
+      gap: 2,
     },
     registerLabel: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
+      textAlign: "center",
     },
     registerLinkButton: {
       paddingHorizontal: 6,
@@ -936,64 +979,36 @@ function createStyles(theme: AppTheme, layout: LoginLayoutMode) {
       flex: 1,
       minHeight: 54,
       borderRadius: theme.radii.pill,
-      overflow: "hidden",
       alignItems: "center",
       justifyContent: "center",
       borderWidth: 1,
-      borderColor: "#1b9ecf",
-      backgroundColor: "#24b7de",
-      position: "relative",
-      shadowColor: "#1b9ecf",
-      shadowOpacity: theme.mode === "dark" ? 0.4 : 0.26,
+      borderColor: theme.mode === "dark" ? "#26b8df" : "#1699cb",
+      backgroundColor: theme.mode === "dark" ? "#1698c3" : "#17a6d1",
+      shadowColor: theme.mode === "dark" ? "#1baad2" : "#128cbc",
+      shadowOpacity: theme.mode === "dark" ? 0.34 : 0.24,
       shadowRadius: 10,
       shadowOffset: { width: 0, height: 4 },
-      elevation: 5,
-    },
-    submitPrimaryBase: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: "#1fa0d6",
-    },
-    submitPrimaryAccent: {
-      position: "absolute",
-      left: -42,
-      top: -26,
-      width: 172,
-      height: 116,
-      borderRadius: 64,
-      backgroundColor: "#4bd5d5",
-      opacity: 0.96,
-    },
-    submitPrimaryGlow: {
-      position: "absolute",
-      right: -36,
-      top: -42,
-      width: 146,
-      height: 146,
-      borderRadius: 74,
-      backgroundColor: "rgba(107, 210, 255, 0.42)",
-    },
-    submitPrimarySheen: {
-      position: "absolute",
-      left: -28,
-      top: 8,
-      width: 112,
-      height: 16,
-      borderRadius: 12,
-      backgroundColor: "rgba(255,255,255,0.28)",
-      transform: [{ rotate: "-17deg" }],
+      elevation: 6,
     },
     submitPrimaryButtonDisabled: {
-      opacity: 0.52,
+      borderColor: theme.mode === "dark" ? "#456777" : "#8dafbc",
+      backgroundColor: theme.mode === "dark" ? "#3a5f6e" : "#9ac2ce",
+      shadowOpacity: 0.06,
+      elevation: 1,
     },
     submitPrimaryButtonPressed: {
-      opacity: 0.9,
+      opacity: 0.96,
+      transform: [{ translateY: 1 }, { scale: 0.994 }],
     },
     submitPrimaryText: {
       color: "#ffffff",
       fontFamily: theme.fonts.bold,
-      fontSize: 19,
-      letterSpacing: 0.9,
+      fontSize: 18,
+      letterSpacing: 0.8,
       textTransform: "uppercase",
+    },
+    submitPrimaryTextDisabled: {
+      color: "rgba(255,255,255,0.7)",
     },
     submitBiometricButton: {
       width: 88,

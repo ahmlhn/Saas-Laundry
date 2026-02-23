@@ -2,6 +2,7 @@
   "expo": {
     "name": "SaaS Laundry Mobile",
     "slug": "saas-laundry-mobile",
+    "scheme": "saaslaundry",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/icon.png",

@@ -94,7 +94,17 @@ Catatan orientasi:
 npm run typecheck
 ```
 
-## 6) Catatan UI/UX Responsif
+## 6) Catatan Pengembangan: Google Login (Sementara Off)
+
+- Status saat ini: login Google dimatikan via `EXPO_PUBLIC_GOOGLE_LOGIN_ENABLED=false`.
+- Dampak UI: tombol `Masuk dengan Google` tidak ditampilkan di halaman login.
+- Saat siap diaktifkan kembali:
+  - Ubah `mobile/.env` menjadi `EXPO_PUBLIC_GOOGLE_LOGIN_ENABLED=true`.
+  - Isi client ID Google sesuai platform (`EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`, `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`, `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` atau `EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID`).
+  - Pastikan backend mengisi `GOOGLE_CLIENT_IDS` (daftar client ID yang diizinkan).
+  - Restart Expo agar env baru terbaca.
+
+## 7) Catatan UI/UX Responsif
 
 - UI mobile wajib adaptif untuk layar kecil-besar (HP compact, HP large, foldable, tablet) tanpa memotong konten utama.
 - Prioritaskan layout berbasis `flex` + `%` + `maxWidth`, hindari ukuran fixed yang kaku untuk card/form/action penting.

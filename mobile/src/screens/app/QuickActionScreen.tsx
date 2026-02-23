@@ -126,6 +126,8 @@ export function QuickActionScreen() {
       const data = await listServices({
         outletId: selectedOutlet.id,
         active: true,
+        serviceType: ["regular", "package"],
+        isGroup: false,
         forceRefresh,
       });
       setServices(data);

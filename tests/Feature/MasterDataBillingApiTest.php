@@ -256,6 +256,273 @@ class MasterDataBillingApiTest extends TestCase
         ]);
     }
 
+    public function test_service_create_and_update_endpoints_require_owner_or_admin(): void
+    {
+        $this->apiAs($this->cashier)
+            ->postJson('/api/services', [
+                'name' => 'Express 24 Jam',
+                'unit_type' => 'kg',
+                'base_price_amount' => 12000,
+            ])
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'ROLE_ACCESS_DENIED');
+
+        $create = $this->apiAs($this->admin)
+            ->postJson('/api/services', [
+                'name' => 'Express 24 Jam',
+                'unit_type' => 'kg',
+                'base_price_amount' => 12000,
+                'active' => true,
+            ]);
+
+        $create->assertCreated()
+            ->assertJsonPath('data.name', 'Express 24 Jam')
+            ->assertJsonPath('data.unit_type', 'kg')
+            ->assertJsonPath('data.base_price_amount', 12000)
+            ->assertJsonPath('data.effective_price_amount', 12000);
+
+        $serviceId = (string) $create->json('data.id');
+
+        $this->assertDatabaseHas('services', [
+            'id' => $serviceId,
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Express 24 Jam',
+            'unit_type' => 'kg',
+            'base_price_amount' => 12000,
+            'active' => true,
+        ]);
+
+        $this->apiAs($this->cashier)
+            ->patchJson('/api/services/'.$serviceId, [
+                'base_price_amount' => 13000,
+            ])
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'ROLE_ACCESS_DENIED');
+
+        $this->apiAs($this->owner)
+            ->patchJson('/api/services/'.$serviceId, [
+                'name' => 'Express Super',
+                'unit_type' => 'pcs',
+                'base_price_amount' => 15000,
+                'active' => false,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.name', 'Express Super')
+            ->assertJsonPath('data.unit_type', 'pcs')
+            ->assertJsonPath('data.base_price_amount', 15000)
+            ->assertJsonPath('data.active', false);
+
+        $this->assertDatabaseHas('services', [
+            'id' => $serviceId,
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Express Super',
+            'unit_type' => 'pcs',
+            'base_price_amount' => 15000,
+            'active' => false,
+        ]);
+    }
+
+    public function test_services_support_type_filters_group_variant_and_process_tags(): void
+    {
+        $tagCreate = $this->apiAs($this->admin)
+            ->postJson('/api/service-process-tags', [
+                'name' => 'Cuci',
+                'color_hex' => '#2A7CE2',
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'Cuci');
+
+        $tagId = (string) $tagCreate->json('data.id');
+
+        $groupCreate = $this->apiAs($this->admin)
+            ->postJson('/api/services', [
+                'name' => 'Bed Cover',
+                'service_type' => 'regular',
+                'is_group' => true,
+                'unit_type' => 'pcs',
+                'display_unit' => 'satuan',
+                'base_price_amount' => 0,
+                'active' => true,
+                'process_tag_ids' => [$tagId],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.is_group', true)
+            ->assertJsonPath('data.service_type', 'regular');
+
+        $groupId = (string) $groupCreate->json('data.id');
+
+        $this->apiAs($this->admin)
+            ->postJson('/api/services', [
+                'name' => 'King',
+                'service_type' => 'regular',
+                'parent_service_id' => $groupId,
+                'is_group' => false,
+                'unit_type' => 'pcs',
+                'display_unit' => 'satuan',
+                'base_price_amount' => 25000,
+                'duration_days' => 3,
+                'active' => true,
+                'process_tag_ids' => [$tagId],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.parent_service_id', $groupId)
+            ->assertJsonPath('data.duration_days', 3);
+
+        $this->apiAs($this->admin)
+            ->postJson('/api/services', [
+                'name' => 'Parfum Mawar',
+                'service_type' => 'perfume',
+                'is_group' => false,
+                'unit_type' => 'pcs',
+                'display_unit' => 'satuan',
+                'base_price_amount' => 5000,
+                'active' => true,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.service_type', 'perfume');
+
+        $listResponse = $this->apiAs($this->cashier)
+            ->getJson('/api/services?service_type[]=regular&is_group=1&with_children=1')
+            ->assertOk();
+
+        $this->assertSame(1, count($listResponse->json('data')));
+        $this->assertSame('Bed Cover', $listResponse->json('data.0.name'));
+        $this->assertSame('Cuci', $listResponse->json('data.0.process_tags.0.name'));
+        $this->assertSame('King', $listResponse->json('data.0.children.0.name'));
+    }
+
+    public function test_service_process_tag_endpoints_enforce_roles_and_lifecycle(): void
+    {
+        $this->apiAs($this->cashier)
+            ->postJson('/api/service-process-tags', [
+                'name' => 'Setrika',
+            ])
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'ROLE_ACCESS_DENIED');
+
+        $create = $this->apiAs($this->owner)
+            ->postJson('/api/service-process-tags', [
+                'name' => 'Setrika',
+                'color_hex' => '#1AA2D9',
+                'active' => true,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'Setrika')
+            ->assertJsonPath('data.color_hex', '#1AA2D9');
+
+        $tagId = (string) $create->json('data.id');
+
+        $this->apiAs($this->cashier)
+            ->getJson('/api/service-process-tags')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $tagId);
+
+        $this->apiAs($this->admin)
+            ->patchJson('/api/service-process-tags/'.$tagId, [
+                'name' => 'Cuci Kering',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.name', 'Cuci Kering');
+
+        $this->apiAs($this->admin)
+            ->deleteJson('/api/service-process-tags/'.$tagId)
+            ->assertOk()
+            ->assertJsonPath('data.id', $tagId);
+
+        $this->assertSoftDeleted('service_process_tags', [
+            'id' => $tagId,
+            'tenant_id' => $this->tenant->id,
+        ]);
+    }
+
+    public function test_promotions_endpoints_support_crud_and_grouped_sections(): void
+    {
+        $this->apiAs($this->cashier)
+            ->postJson('/api/promotions', [
+                'promo_type' => 'selection',
+                'name' => 'Promo Cashier',
+            ])
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'ROLE_ACCESS_DENIED');
+
+        $selection = $this->apiAs($this->admin)
+            ->postJson('/api/promotions', [
+                'promo_type' => 'selection',
+                'name' => 'Promo Bed Cover',
+                'status' => 'active',
+                'priority' => 10,
+                'stack_mode' => 'exclusive',
+                'rule_json' => [
+                    'discount_type' => 'fixed',
+                    'discount_value' => 5000,
+                    'minimum_amount' => 30000,
+                ],
+                'targets' => [
+                    [
+                        'target_type' => 'service_type',
+                        'target_id' => 'regular',
+                    ],
+                ],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.promo_type', 'selection')
+            ->assertJsonPath('data.targets.0.target_type', 'service_type');
+
+        $selectionId = (string) $selection->json('data.id');
+
+        $voucher = $this->apiAs($this->owner)
+            ->postJson('/api/promotions', [
+                'promo_type' => 'voucher',
+                'name' => 'Voucher Welcome',
+                'status' => 'draft',
+                'rule_json' => [
+                    'discount_type' => 'percentage',
+                    'discount_value' => 10,
+                    'max_discount' => 15000,
+                ],
+                'vouchers' => [
+                    [
+                        'code' => 'WELCOME10',
+                        'quota_total' => 200,
+                        'per_customer_limit' => 1,
+                        'active' => true,
+                    ],
+                ],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.promo_type', 'voucher')
+            ->assertJsonPath('data.vouchers.0.code', 'WELCOME10');
+
+        $this->apiAs($this->cashier)
+            ->getJson('/api/promotions/sections?status=all')
+            ->assertOk()
+            ->assertJsonPath('data.selection.0.id', $selectionId)
+            ->assertJsonPath('data.voucher.0.id', (string) $voucher->json('data.id'));
+
+        $this->apiAs($this->admin)
+            ->patchJson('/api/promotions/'.$selectionId, [
+                'status' => 'inactive',
+                'rule_json' => [
+                    'discount_type' => 'fixed',
+                    'discount_value' => 3000,
+                ],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'inactive')
+            ->assertJsonPath('data.rule_json.discount_value', 3000);
+
+        $this->apiAs($this->owner)
+            ->deleteJson('/api/promotions/'.$selectionId)
+            ->assertOk()
+            ->assertJsonPath('data.id', $selectionId);
+
+        $this->assertSoftDeleted('promotions', [
+            'id' => $selectionId,
+            'tenant_id' => $this->tenant->id,
+        ]);
+    }
+
     public function test_outlet_lifecycle_owner_only_and_last_active_outlet_guard(): void
     {
         $this->apiAs($this->admin)

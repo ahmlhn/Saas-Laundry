@@ -1,43 +1,22 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useEffect, useMemo, useState } from "react";
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { useMemo } from "react";
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
-import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
-import { AppSkeletonBlock } from "../../components/ui/AppSkeletonBlock";
-import { StatusPill } from "../../components/ui/StatusPill";
-import { archiveService, listServices, restoreService } from "../../features/services/serviceApi";
 import { hasAnyRole } from "../../lib/accessControl";
-import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AccountStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
-import type { ServiceCatalogItem } from "../../types/service";
 
-const currencyFormatter = new Intl.NumberFormat("id-ID");
-
-function formatMoney(value: number): string {
-  return `Rp ${currencyFormatter.format(value)}`;
-}
-
-function formatUnitType(value: string): string {
-  const unit = value.trim().toLowerCase();
-  if (!unit) {
-    return "-";
-  }
-
-  if (unit === "kg") {
-    return "Kg";
-  }
-
-  if (unit === "pcs") {
-    return "Pcs";
-  }
-
-  return value;
+interface MenuItem {
+  id: string;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  locked?: boolean;
+  onPress: () => void;
 }
 
 export function ServicesScreen() {
@@ -52,164 +31,142 @@ export function ServicesScreen() {
   const { session, selectedOutlet } = useSession();
   const roles = session?.roles ?? [];
   const canView = hasAnyRole(roles, ["owner", "admin", "cashier"]);
-  const canArchive = hasAnyRole(roles, ["owner", "admin"]);
-
-  const [services, setServices] = useState<ServiceCatalogItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [search, setSearch] = useState("");
-  const [includeDeleted, setIncludeDeleted] = useState(false);
-  const [onlyActive, setOnlyActive] = useState(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const canManage = hasAnyRole(roles, ["owner", "admin"]);
   const outletLabel = selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "Semua outlet";
 
-  useEffect(() => {
-    if (!canView) {
-      setLoading(false);
-      return;
-    }
+  const serviceItems: MenuItem[] = [
+    {
+      id: "regular",
+      label: "Layanan Reguler",
+      icon: "shirt-outline",
+      onPress: () =>
+        navigation.navigate("ServiceTypeList", {
+          serviceType: "regular",
+          title: "Layanan Reguler",
+        }),
+    },
+    {
+      id: "package",
+      label: "Layanan Paket",
+      icon: "layers-outline",
+      onPress: () =>
+        navigation.navigate("ServiceTypeList", {
+          serviceType: "package",
+          title: "Layanan Paket",
+        }),
+    },
+    {
+      id: "parfum",
+      label: "Parfum dan Item",
+      icon: "flask-outline",
+      onPress: () => navigation.navigate("ParfumItem"),
+    },
+    {
+      id: "promo",
+      label: "Promo",
+      icon: "pricetags-outline",
+      onPress: () => navigation.navigate("Promo"),
+    },
+    {
+      id: "copy",
+      label: "Salin Layanan",
+      icon: "copy-outline",
+      locked: true,
+      onPress: () => undefined,
+    },
+  ];
 
-    void loadServices(false, true);
-  }, [selectedOutlet?.id, includeDeleted, onlyActive, canView]);
+  const inventoryItems: MenuItem[] = [
+    {
+      id: "category",
+      label: "Kategori & Satuan",
+      icon: "apps-outline",
+      onPress: () =>
+        navigation.navigate("FeaturePlaceholder", {
+          title: "Kategori & Satuan",
+          description: "Struktur kategori produk dan satuan stok akan hadir di rilis berikutnya.",
+        }),
+    },
+    {
+      id: "product",
+      label: "Daftar Produk",
+      icon: "clipboard-outline",
+      onPress: () =>
+        navigation.navigate("FeaturePlaceholder", {
+          title: "Daftar Produk",
+          description: "Master data produk bahan baku sedang disiapkan.",
+        }),
+    },
+    {
+      id: "purchase",
+      label: "Pembelian Produk",
+      icon: "cart-outline",
+      onPress: () =>
+        navigation.navigate("FeaturePlaceholder", {
+          title: "Pembelian Produk",
+          description: "Fitur pembelian produk akan tersedia setelah modul inventory inti siap.",
+        }),
+    },
+    {
+      id: "stock",
+      label: "Stok Opname",
+      icon: "cube-outline",
+      onPress: () =>
+        navigation.navigate("FeaturePlaceholder", {
+          title: "Stok Opname",
+          description: "Fitur stok opname akan tersedia di fase berikutnya.",
+        }),
+    },
+  ];
 
-  async function loadServices(isRefresh: boolean, forceRefresh = false): Promise<void> {
-    if (isRefresh) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-
-    setErrorMessage(null);
-
-    try {
-      const data = await listServices({
-        outletId: selectedOutlet?.id,
-        includeDeleted: includeDeleted && canArchive ? true : undefined,
-        active: onlyActive ? true : undefined,
-        forceRefresh: isRefresh || forceRefresh,
-      });
-      setServices(data);
-    } catch (error) {
-      setErrorMessage(getApiErrorMessage(error));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }
-
-  async function handleToggleArchive(item: ServiceCatalogItem): Promise<void> {
-    if (!canArchive) {
-      return;
-    }
-
-    setErrorMessage(null);
-    setActionMessage(null);
-
-    try {
-      if (item.deleted_at) {
-        await restoreService(item.id);
-        setActionMessage("Layanan berhasil dipulihkan.");
-      } else {
-        await archiveService(item.id);
-        setActionMessage("Layanan berhasil diarsipkan.");
-      }
-
-      await loadServices(false, true);
-    } catch (error) {
-      setErrorMessage(getApiErrorMessage(error));
-    }
-  }
-
-  const visibleServices = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
-    if (!keyword) {
-      return services;
-    }
-
-    return services.filter((item) => {
-      const name = item.name.toLowerCase();
-      const unit = item.unit_type.toLowerCase();
-      return name.includes(keyword) || unit.includes(keyword);
-    });
-  }, [services, search]);
-
-  function renderSkeletonList() {
+  function renderMenuGroup(title: string, items: MenuItem[]) {
     return (
-      <View style={styles.skeletonWrap}>
-        {Array.from({ length: 4 }).map((_, index) => (
-          <View key={`service-skeleton-${index}`} style={styles.skeletonCard}>
-            <AppSkeletonBlock height={14} width="52%" />
-            <AppSkeletonBlock height={11} width="76%" />
-            <AppSkeletonBlock height={10} width="42%" />
-          </View>
-        ))}
-      </View>
-    );
-  }
+      <AppPanel style={styles.groupPanel}>
+        <Text style={styles.groupTitle}>{title}</Text>
+        <View style={styles.itemList}>
+          {items.map((item) => {
+            const disabled = item.locked || (!canManage && title === "Layanan" && item.id === "copy");
+            const iconColor = disabled ? theme.colors.textMuted : theme.colors.info;
 
-  function renderStatus(item: ServiceCatalogItem): { label: string; tone: "warning" | "success" | "neutral" } {
-    if (item.deleted_at) {
-      return { label: "Arsip", tone: "warning" };
-    }
-
-    if (item.active) {
-      return { label: "Aktif", tone: "success" };
-    }
-
-    return { label: "Nonaktif", tone: "neutral" };
-  }
-
-  function renderItem({ item }: { item: ServiceCatalogItem }) {
-    const status = renderStatus(item);
-    const hasOverride = item.outlet_override?.price_override_amount !== null && item.outlet_override?.price_override_amount !== undefined;
-
-    return (
-      <View style={styles.serviceCard}>
-        <View style={styles.serviceTop}>
-          <View style={styles.serviceTitleWrap}>
-            <Text style={styles.serviceName}>{item.name}</Text>
-            <Text style={styles.serviceMeta}>
-              Unit {formatUnitType(item.unit_type)} - Harga Dasar {formatMoney(item.base_price_amount)}
-            </Text>
-          </View>
-          <StatusPill label={status.label} tone={status.tone} />
+            return (
+              <Pressable
+                disabled={disabled}
+                key={item.id}
+                onPress={item.onPress}
+                style={({ pressed }) => [styles.menuItem, disabled ? styles.menuItemDisabled : null, !disabled && pressed ? styles.menuItemPressed : null]}
+              >
+                <View style={styles.menuItemLeft}>
+                  <Ionicons color={iconColor} name={item.icon} size={24} />
+                  <Text style={[styles.menuLabel, disabled ? styles.menuLabelDisabled : null]}>{item.label}</Text>
+                </View>
+                {item.locked ? (
+                  <View style={styles.lockWrap}>
+                    <Ionicons color={theme.colors.danger} name="lock-closed" size={14} />
+                  </View>
+                ) : (
+                  <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={16} />
+                )}
+              </Pressable>
+            );
+          })}
         </View>
-
-        <Text style={styles.servicePrice}>Harga Berlaku: {formatMoney(item.effective_price_amount)}</Text>
-
-        {hasOverride ? <StatusPill label="Override Outlet Aktif" tone="info" /> : null}
-
-        {canArchive ? (
-          <View style={styles.actionRow}>
-            <AppButton
-              leftElement={<Ionicons color={theme.colors.textPrimary} name={item.deleted_at ? "refresh-outline" : "archive-outline"} size={17} />}
-              onPress={() => void handleToggleArchive(item)}
-              title={item.deleted_at ? "Restore" : "Arsipkan"}
-              variant="ghost"
-            />
-          </View>
-        ) : null}
-      </View>
+      </AppPanel>
     );
   }
 
   if (!canView) {
     return (
       <AppScreen contentContainerStyle={styles.content} scroll>
-        <AppPanel style={styles.heroPanel}>
-          <View style={styles.heroTopRow}>
-            <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}>
+        <AppPanel style={styles.headerPanel}>
+          <View style={styles.headerTopRow}>
+            <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.backButton, pressed ? styles.backButtonPressed : null]}>
               <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={18} />
             </Pressable>
-            <View style={styles.heroBadge}>
-              <Ionicons color={theme.colors.info} name="cube-outline" size={15} />
-              <Text style={styles.heroBadgeText}>Layanan/Produk</Text>
-            </View>
-            <View style={styles.heroSpacer} />
+            <Text style={styles.headerTitle}>Kelola Layanan/Produk</Text>
+            <View style={styles.headerSpacer} />
           </View>
-          <Text style={styles.title}>Layanan/Produk</Text>
-          <Text style={styles.subtitle}>Akun Anda tidak memiliki akses untuk membuka modul ini.</Text>
+          <Text style={styles.outletText}>{outletLabel}</Text>
+          <Text style={styles.blockedText}>Akun Anda tidak memiliki akses ke menu ini.</Text>
         </AppPanel>
       </AppScreen>
     );
@@ -217,82 +174,20 @@ export function ServicesScreen() {
 
   return (
     <AppScreen contentContainerStyle={styles.content} scroll>
-      <AppPanel style={styles.heroPanel}>
-        <View style={styles.heroTopRow}>
-          <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}>
+      <AppPanel style={styles.headerPanel}>
+        <View style={styles.headerTopRow}>
+          <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.backButton, pressed ? styles.backButtonPressed : null]}>
             <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={18} />
           </Pressable>
-          <View style={styles.heroBadge}>
-            <Ionicons color={theme.colors.info} name="cube-outline" size={15} />
-            <Text style={styles.heroBadgeText}>Layanan/Produk</Text>
-          </View>
-          <Pressable onPress={() => void loadServices(true, true)} style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}>
-            <Ionicons color={theme.colors.textSecondary} name="refresh-outline" size={18} />
-          </Pressable>
+          <Text style={styles.headerTitle}>Kelola Layanan/Produk</Text>
+          <View style={styles.headerSpacer} />
         </View>
-        <Text style={styles.title}>Layanan/Produk</Text>
-        <Text style={styles.subtitle}>{outletLabel} - Kelola katalog layanan tenant.</Text>
+        <Text style={styles.outletText}>{outletLabel}</Text>
+        <Text style={styles.headerSub}>Pilih modul untuk mengelola layanan dan promo.</Text>
       </AppPanel>
 
-      <View style={styles.searchRow}>
-        <TextInput
-          onChangeText={setSearch}
-          placeholder="Cari nama layanan / unit..."
-          placeholderTextColor={theme.colors.textMuted}
-          style={styles.searchInput}
-          value={search}
-        />
-        <AppButton
-          leftElement={<Ionicons color={theme.colors.info} name="refresh-outline" size={17} />}
-          onPress={() => void loadServices(true, true)}
-          title="Refresh"
-          variant="secondary"
-        />
-      </View>
-
-      <View style={styles.filterRow}>
-        <Pressable onPress={() => setOnlyActive((value) => !value)} style={[styles.toggleChip, onlyActive ? styles.toggleChipActive : null]}>
-          <Text style={[styles.toggleChipText, onlyActive ? styles.toggleChipTextActive : null]}>{onlyActive ? "Hanya Aktif" : "Semua Status"}</Text>
-        </Pressable>
-        {canArchive ? (
-          <Pressable
-            onPress={() => setIncludeDeleted((value) => !value)}
-            style={[styles.toggleChip, includeDeleted ? styles.toggleChipActive : null]}
-          >
-            <Text style={[styles.toggleChipText, includeDeleted ? styles.toggleChipTextActive : null]}>
-              {includeDeleted ? "Menampilkan Arsip" : "Sembunyikan Arsip"}
-            </Text>
-          </Pressable>
-        ) : null}
-      </View>
-
-      {loading ? (
-        renderSkeletonList()
-      ) : (
-        <FlatList
-          contentContainerStyle={styles.listContent}
-          data={visibleServices}
-          keyExtractor={(item) => item.id}
-          onRefresh={() => void loadServices(true, true)}
-          refreshing={refreshing}
-          renderItem={renderItem}
-          ListEmptyComponent={<Text style={styles.emptyText}>Belum ada layanan untuk filter saat ini.</Text>}
-          scrollEnabled={false}
-        />
-      )}
-
-      {actionMessage ? (
-        <View style={styles.successWrap}>
-          <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={16} />
-          <Text style={styles.successText}>{actionMessage}</Text>
-        </View>
-      ) : null}
-      {errorMessage ? (
-        <View style={styles.errorWrap}>
-          <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
-          <Text style={styles.errorText}>{errorMessage}</Text>
-        </View>
-      ) : null}
+      {renderMenuGroup("Layanan", serviceItems)}
+      {renderMenuGroup("Produk & Bahan Baku", inventoryItems)}
     </AppScreen>
   );
 }
@@ -304,207 +199,112 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       paddingHorizontal: isTablet ? theme.spacing.xl : theme.spacing.lg,
       paddingTop: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
       paddingBottom: theme.spacing.xxl,
-      gap: isCompactLandscape ? theme.spacing.xs : theme.spacing.sm,
-    },
-    heroPanel: {
-      gap: theme.spacing.xs,
-      backgroundColor: theme.mode === "dark" ? "#122d46" : "#f2faff",
-      borderColor: theme.colors.borderStrong,
-    },
-    heroTopRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
       gap: theme.spacing.sm,
     },
-    heroIconButton: {
+    headerPanel: {
+      gap: theme.spacing.xs,
+      backgroundColor: theme.mode === "dark" ? "#122d46" : "#f7f9fb",
+      borderColor: theme.colors.borderStrong,
+    },
+    headerTopRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
+    },
+    backButton: {
+      width: 34,
+      height: 34,
+      borderRadius: theme.radii.pill,
       borderWidth: 1,
       borderColor: theme.colors.border,
-      borderRadius: theme.radii.pill,
       backgroundColor: theme.colors.surface,
-      width: 36,
-      height: 36,
       alignItems: "center",
       justifyContent: "center",
     },
-    heroIconButtonPressed: {
+    backButtonPressed: {
       opacity: 0.82,
     },
-    heroBadge: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-      borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.pill,
-      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.92)",
-      paddingHorizontal: 10,
-      paddingVertical: 5,
+    headerSpacer: {
+      width: 34,
+      height: 34,
     },
-    heroBadgeText: {
-      color: theme.colors.info,
-      fontFamily: theme.fonts.bold,
-      fontSize: 11,
-      letterSpacing: 0.2,
-      textTransform: "uppercase",
-    },
-    heroSpacer: {
-      width: 36,
-      height: 36,
-    },
-    title: {
+    headerTitle: {
+      flex: 1,
+      textAlign: "center",
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.heavy,
-      fontSize: isTablet ? 27 : 24,
-      lineHeight: isTablet ? 33 : 30,
+      fontSize: isTablet ? 24 : 22,
+      lineHeight: isTablet ? 30 : 27,
     },
-    subtitle: {
+    outletText: {
       color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.medium,
+      fontFamily: theme.fonts.semibold,
       fontSize: 12.5,
-      lineHeight: 18,
-    },
-    searchRow: {
-      flexDirection: isTablet || isCompactLandscape ? "row" : "column",
-      gap: theme.spacing.xs,
-      alignItems: isTablet || isCompactLandscape ? "center" : "stretch",
-    },
-    searchInput: {
-      flex: isTablet || isCompactLandscape ? 1 : undefined,
-      borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.md,
-      backgroundColor: theme.colors.inputBg,
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.medium,
-      fontSize: isTablet ? 14 : 13,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-    },
-    filterRow: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: theme.spacing.xs,
-    },
-    toggleChip: {
-      alignSelf: "flex-start",
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: theme.radii.pill,
-      paddingHorizontal: 12,
-      paddingVertical: 7,
-      backgroundColor: theme.colors.surface,
-    },
-    toggleChipActive: {
-      borderColor: theme.colors.info,
-      backgroundColor: theme.colors.primarySoft,
-    },
-    toggleChipText: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 11.5,
-    },
-    toggleChipTextActive: {
-      color: theme.colors.info,
-    },
-    skeletonWrap: {
-      gap: theme.spacing.xs,
-      paddingVertical: 2,
-    },
-    skeletonCard: {
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: theme.radii.lg,
-      backgroundColor: theme.colors.surface,
-      paddingHorizontal: 12,
-      paddingVertical: 11,
-      gap: 7,
-    },
-    listContent: {
-      gap: theme.spacing.xs,
-    },
-    serviceCard: {
-      borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.lg,
-      backgroundColor: theme.colors.surface,
-      paddingHorizontal: 12,
-      paddingVertical: 12,
-      gap: 8,
-    },
-    serviceTop: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      gap: theme.spacing.sm,
-    },
-    serviceTitleWrap: {
-      flex: 1,
-      gap: 2,
-    },
-    serviceName: {
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: isTablet ? 15 : 14,
-    },
-    serviceMeta: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.medium,
-      fontSize: 12,
-      lineHeight: 17,
-    },
-    servicePrice: {
-      color: theme.colors.textMuted,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 12,
-    },
-    actionRow: {
-      marginTop: 2,
-    },
-    emptyText: {
       textAlign: "center",
+    },
+    headerSub: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
-      lineHeight: 18,
-      marginTop: 8,
-      marginBottom: 4,
+      textAlign: "center",
     },
-    successWrap: {
-      borderWidth: 1,
-      borderColor: theme.mode === "dark" ? "#1d5b3f" : "#bde7cd",
-      borderRadius: theme.radii.md,
-      backgroundColor: theme.mode === "dark" ? "#173f2d" : "#edf9f1",
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8,
-    },
-    successText: {
-      flex: 1,
-      color: theme.colors.success,
-      fontFamily: theme.fonts.medium,
-      fontSize: 12,
-      lineHeight: 18,
-    },
-    errorWrap: {
-      borderWidth: 1,
-      borderColor: theme.mode === "dark" ? "#6c3242" : "#f0bbc5",
-      borderRadius: theme.radii.md,
-      backgroundColor: theme.mode === "dark" ? "#482633" : "#fff1f4",
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8,
-    },
-    errorText: {
-      flex: 1,
+    blockedText: {
       color: theme.colors.danger,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
-      lineHeight: 18,
+      textAlign: "center",
+    },
+    groupPanel: {
+      gap: theme.spacing.xs,
+      paddingVertical: 14,
+    },
+    groupTitle: {
+      color: theme.mode === "dark" ? "#f5c067" : "#de8f14",
+      fontFamily: theme.fonts.bold,
+      fontSize: 16,
+      lineHeight: 22,
+      paddingHorizontal: 2,
+    },
+    itemList: {
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+      paddingTop: 4,
+    },
+    menuItem: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      minHeight: 54,
+      paddingHorizontal: 2,
+      borderRadius: theme.radii.md,
+      gap: theme.spacing.sm,
+    },
+    menuItemPressed: {
+      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.04)" : "rgba(42,124,226,0.06)",
+    },
+    menuItemDisabled: {
+      opacity: 0.68,
+    },
+    menuItemLeft: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 14,
+    },
+    menuLabel: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: isTablet ? 22 : 17,
+      lineHeight: isTablet ? 30 : 24,
+    },
+    menuLabelDisabled: {
+      color: theme.colors.textMuted,
+    },
+    lockWrap: {
+      width: 24,
+      alignItems: "center",
+      justifyContent: "center",
     },
   });
 }

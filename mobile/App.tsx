@@ -8,31 +8,89 @@ import {
 } from "@expo-google-fonts/manrope";
 import { NavigationContainer } from "@react-navigation/native";
 import { StatusBar } from "expo-status-bar";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { useEffect, useRef, useState } from "react";
+import { Animated, Easing, StyleSheet, View } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { AppLaunchLoader } from "./src/components/system/AppLaunchLoader";
 import { AppNavigator } from "./src/navigation/AppNavigator";
 import { AuthNavigator } from "./src/navigation/AuthNavigator";
 import { SessionProvider, useSession } from "./src/state/SessionContext";
 import { useAppTheme } from "./src/theme/useAppTheme";
 
-function RootRouter() {
+const APP_VERSION: string = (require("./app.json")?.expo?.version as string | undefined) ?? "1.0.0";
+
+function RootRouter({ fontsLoaded }: { fontsLoaded: boolean }) {
   const { booting, session } = useSession();
-  const theme = useAppTheme();
+  const startupReady = fontsLoaded && !booting;
+  const [showLoader, setShowLoader] = useState(true);
+  const loaderOpacity = useRef(new Animated.Value(1)).current;
+  const contentOpacity = useRef(new Animated.Value(0)).current;
+  const contentTranslateY = useRef(new Animated.Value(10)).current;
 
-  if (booting) {
-    return (
-      <SafeAreaView style={[styles.loadingSafeArea, { backgroundColor: theme.colors.background }]}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.colors.primaryStrong} />
-          <Text style={[styles.loadingText, { color: theme.colors.textSecondary, fontFamily: theme.fonts.semibold }]}>
-            Menyiapkan sesi aplikasi...
-          </Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  useEffect(() => {
+    if (!startupReady) {
+      setShowLoader(true);
+      loaderOpacity.setValue(1);
+      contentOpacity.setValue(0);
+      contentTranslateY.setValue(10);
+      return;
+    }
 
-  return session ? <AppNavigator /> : <AuthNavigator />;
+    const transition = Animated.parallel([
+      Animated.timing(loaderOpacity, {
+        toValue: 0,
+        duration: 280,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(contentOpacity, {
+        toValue: 1,
+        duration: 300,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(contentTranslateY, {
+        toValue: 0,
+        duration: 300,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]);
+
+    transition.start(({ finished }) => {
+      if (finished) {
+        setShowLoader(false);
+      }
+    });
+
+    return () => {
+      transition.stop();
+    };
+  }, [startupReady, contentOpacity, contentTranslateY, loaderOpacity]);
+
+  const loadingMessage = fontsLoaded ? "Menyiapkan sesi aplikasi..." : "";
+
+  return (
+    <View style={styles.root}>
+      <Animated.View
+        style={[
+          styles.contentLayer,
+          {
+            opacity: contentOpacity,
+            transform: [{ translateY: contentTranslateY }],
+          },
+        ]}
+      >
+        {startupReady ? (session ? <AppNavigator /> : <AuthNavigator />) : null}
+      </Animated.View>
+
+      {showLoader ? (
+        <Animated.View style={[styles.loaderLayer, { opacity: loaderOpacity }]}>
+          <AppLaunchLoader message={loadingMessage} version={APP_VERSION} />
+        </Animated.View>
+      ) : null}
+    </View>
+  );
 }
 
 export default function App() {
@@ -49,16 +107,7 @@ export default function App() {
     <SafeAreaProvider>
       <SessionProvider>
         <NavigationContainer>
-          {fontsLoaded ? (
-            <RootRouter />
-          ) : (
-            <SafeAreaView style={[styles.loadingSafeArea, { backgroundColor: theme.colors.background }]}>
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={theme.colors.primaryStrong} />
-                <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Menyiapkan tampilan aplikasi...</Text>
-              </View>
-            </SafeAreaView>
-          )}
+          <RootRouter fontsLoaded={fontsLoaded} />
           <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
         </NavigationContainer>
       </SessionProvider>
@@ -67,17 +116,13 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  loadingSafeArea: {
+  root: {
     flex: 1,
-    backgroundColor: "#f4f7f8",
   },
-  loadingContainer: {
+  contentLayer: {
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
   },
-  loadingText: {
-    fontSize: 14,
+  loaderLayer: {
+    ...StyleSheet.absoluteFillObject,
   },
 });

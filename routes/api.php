@@ -9,7 +9,9 @@ use App\Http\Controllers\Api\OutletContextController;
 use App\Http\Controllers\Api\OutletServiceController;
 use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\PrinterNoteController;
+use App\Http\Controllers\Api\PromotionController;
 use App\Http\Controllers\Api\ServiceCatalogController;
+use App\Http\Controllers\Api\ServiceProcessTagController;
 use App\Http\Controllers\Api\ShippingZoneController;
 use App\Http\Controllers\Api\SyncController;
 use App\Http\Controllers\Api\UserManagementController;
@@ -50,8 +52,21 @@ Route::middleware(['auth:sanctum', 'outlet.access'])->group(function (): void {
     Route::post('/customers/{customer}/restore', [CustomerController::class, 'restore']);
 
     Route::get('/services', [ServiceCatalogController::class, 'services']);
+    Route::post('/services', [ServiceCatalogController::class, 'store']);
+    Route::patch('/services/{service}', [ServiceCatalogController::class, 'update']);
     Route::delete('/services/{service}', [ServiceCatalogController::class, 'destroy']);
     Route::post('/services/{service}/restore', [ServiceCatalogController::class, 'restore']);
+
+    Route::get('/service-process-tags', [ServiceProcessTagController::class, 'index']);
+    Route::post('/service-process-tags', [ServiceProcessTagController::class, 'store']);
+    Route::patch('/service-process-tags/{serviceProcessTag}', [ServiceProcessTagController::class, 'update']);
+    Route::delete('/service-process-tags/{serviceProcessTag}', [ServiceProcessTagController::class, 'destroy']);
+
+    Route::get('/promotions/sections', [PromotionController::class, 'sections']);
+    Route::get('/promotions', [PromotionController::class, 'index']);
+    Route::post('/promotions', [PromotionController::class, 'store']);
+    Route::patch('/promotions/{promotion}', [PromotionController::class, 'update']);
+    Route::delete('/promotions/{promotion}', [PromotionController::class, 'destroy']);
 
     Route::get('/outlets', [OutletManagementController::class, 'index']);
     Route::delete('/outlets/{outlet}', [OutletManagementController::class, 'destroy']);

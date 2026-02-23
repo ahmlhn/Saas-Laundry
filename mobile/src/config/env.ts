@@ -24,6 +24,23 @@ function readPublicEnv(name: string): string {
   return value.trim();
 }
 
+function readBooleanPublicEnv(name: string, defaultValue: boolean): boolean {
+  const normalized = readPublicEnv(name).toLowerCase();
+  if (normalized === "") {
+    return defaultValue;
+  }
+
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
+    return true;
+  }
+
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") {
+    return false;
+  }
+
+  return defaultValue;
+}
+
 const configuredApiUrl = normalizeApiBaseUrl(process.env.EXPO_PUBLIC_API_URL?.trim() || FALLBACK_API_URL);
 const configuredFallbacks = process.env.EXPO_PUBLIC_API_URL_FALLBACKS?.split(",")
   .map((item: string) => normalizeApiBaseUrl(item))
@@ -53,8 +70,4 @@ export const GOOGLE_EXPO_CLIENT_ID = readPublicEnv("EXPO_PUBLIC_GOOGLE_EXPO_CLIE
 export const GOOGLE_ANDROID_CLIENT_ID = readPublicEnv("EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID");
 export const GOOGLE_IOS_CLIENT_ID = readPublicEnv("EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID");
 export const GOOGLE_WEB_CLIENT_ID = readPublicEnv("EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID");
-export const GOOGLE_LOGIN_ENABLED =
-  GOOGLE_EXPO_CLIENT_ID !== "" ||
-  GOOGLE_ANDROID_CLIENT_ID !== "" ||
-  GOOGLE_IOS_CLIENT_ID !== "" ||
-  GOOGLE_WEB_CLIENT_ID !== "";
+export const GOOGLE_LOGIN_ENABLED = readBooleanPublicEnv("EXPO_PUBLIC_GOOGLE_LOGIN_ENABLED", false);

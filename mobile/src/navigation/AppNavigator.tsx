@@ -20,6 +20,17 @@ import { PrinterNoteScreen } from "../screens/app/PrinterNoteScreen";
 import { HelpInfoScreen } from "../screens/app/HelpInfoScreen";
 import { WhatsAppToolsScreen } from "../screens/app/WhatsAppToolsScreen";
 import { ServicesScreen } from "../screens/app/ServicesScreen";
+import { ServiceCatalogScreen } from "../screens/app/ServiceCatalogScreen";
+import { ServiceFormScreen } from "../screens/app/ServiceFormScreen";
+import { ServiceTypeListScreen } from "../screens/app/ServiceTypeListScreen";
+import { ServiceGroupFormScreen } from "../screens/app/ServiceGroupFormScreen";
+import { ServiceVariantFormScreen } from "../screens/app/ServiceVariantFormScreen";
+import { ProcessTagManagerScreen } from "../screens/app/ProcessTagManagerScreen";
+import { ParfumItemScreen } from "../screens/app/ParfumItemScreen";
+import { ParfumItemFormScreen } from "../screens/app/ParfumItemFormScreen";
+import { PromoScreen } from "../screens/app/PromoScreen";
+import { PromoFormScreen } from "../screens/app/PromoFormScreen";
+import { FeaturePlaceholderScreen } from "../screens/app/FeaturePlaceholderScreen";
 import { StaffScreen } from "../screens/app/StaffScreen";
 import { OutletsScreen } from "../screens/app/OutletsScreen";
 import { ShippingZonesScreen } from "../screens/app/ShippingZonesScreen";
@@ -47,6 +58,17 @@ function AccountTabNavigator() {
       <AccountStack.Screen name="CustomerDetail" component={CustomerDetailScreen} />
       <AccountStack.Screen name="CustomerForm" component={CustomerFormScreen} />
       <AccountStack.Screen name="Services" component={ServicesScreen} />
+      <AccountStack.Screen name="ServiceCatalog" component={ServiceCatalogScreen} />
+      <AccountStack.Screen name="ServiceForm" component={ServiceFormScreen} />
+      <AccountStack.Screen name="ServiceTypeList" component={ServiceTypeListScreen} />
+      <AccountStack.Screen name="ServiceGroupForm" component={ServiceGroupFormScreen} />
+      <AccountStack.Screen name="ServiceVariantForm" component={ServiceVariantFormScreen} />
+      <AccountStack.Screen name="ProcessTagManager" component={ProcessTagManagerScreen} />
+      <AccountStack.Screen name="ParfumItem" component={ParfumItemScreen} />
+      <AccountStack.Screen name="ParfumItemForm" component={ParfumItemFormScreen} />
+      <AccountStack.Screen name="Promo" component={PromoScreen} />
+      <AccountStack.Screen name="PromoForm" component={PromoFormScreen} />
+      <AccountStack.Screen name="FeaturePlaceholder" component={FeaturePlaceholderScreen} />
       <AccountStack.Screen name="Staff" component={StaffScreen} />
       <AccountStack.Screen name="Outlets" component={OutletsScreen} />
       <AccountStack.Screen name="ShippingZones" component={ShippingZonesScreen} />

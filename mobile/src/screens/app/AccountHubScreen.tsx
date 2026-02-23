@@ -25,7 +25,10 @@ interface AccountMenuItem {
   subtitle: string;
   icon: keyof typeof Ionicons.glyphMap;
   badge?: "Hot" | "Soon";
-  route?: Exclude<keyof AccountStackParamList, "CustomerForm" | "CustomerDetail">;
+  route?: Exclude<
+    keyof AccountStackParamList,
+    "CustomerForm" | "CustomerDetail" | "ServiceForm" | "ServiceTypeList" | "ServiceGroupForm" | "ServiceVariantForm" | "ParfumItemForm" | "PromoForm" | "FeaturePlaceholder"
+  >;
   allowedRoles?: UserRole[];
   locked?: boolean;
 }
@@ -99,7 +102,7 @@ export function AccountHubScreen() {
       subtitle: "Lihat layanan, harga dasar, dan arsip",
       icon: "cube-outline",
       route: "Services",
-      allowedRoles: ["owner", "admin"],
+      allowedRoles: ["owner", "admin", "cashier"],
     },
     {
       title: "Kelola Pegawai",
