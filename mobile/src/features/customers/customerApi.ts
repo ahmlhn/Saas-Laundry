@@ -5,6 +5,13 @@ import type { Customer } from "../../types/customer";
 
 interface CustomersResponse {
   data: Customer[];
+  meta?: {
+    page: number;
+    per_page: number;
+    last_page: number;
+    total: number;
+    has_more: boolean;
+  };
 }
 
 interface CustomerResponse {
@@ -21,6 +28,8 @@ interface CustomerArchiveResponse {
 interface ListCustomersParams {
   query?: string;
   limit?: number;
+  page?: number;
+  fetchAll?: boolean;
   includeDeleted?: boolean;
   forceRefresh?: boolean;
 }
@@ -33,9 +42,11 @@ interface UpsertCustomerPayload {
 
 export async function listCustomers(params: ListCustomersParams = {}): Promise<Customer[]> {
   const query = params.query?.trim() || "";
-  const limit = params.limit ?? 40;
+  const limit = Math.min(params.limit ?? 40, 100);
+  const page = Math.max(params.page ?? 1, 1);
+  const fetchAll = params.fetchAll === true;
   const includeDeleted = params.includeDeleted ? "1" : "0";
-  const cacheKey = `customers:list:${query}:${limit}:${includeDeleted}`;
+  const cacheKey = `customers:list:${query}:${limit}:${includeDeleted}:${fetchAll ? "all" : `page-${page}`}`;
 
   if (!params.forceRefresh) {
     const cached = getCachedValue<Customer[]>(cacheKey);
@@ -44,16 +55,56 @@ export async function listCustomers(params: ListCustomersParams = {}): Promise<C
     }
   }
 
-  const response = await httpClient.get<CustomersResponse>("/customers", {
-    params: {
-      q: query || undefined,
-      limit,
-      include_deleted: toQueryBoolean(params.includeDeleted),
-    },
-  });
+  if (!fetchAll) {
+    const response = await httpClient.get<CustomersResponse>("/customers", {
+      params: {
+        q: query || undefined,
+        limit,
+        page,
+        include_deleted: toQueryBoolean(params.includeDeleted),
+      },
+    });
 
-  setCachedValue(cacheKey, response.data.data, 20_000);
-  return response.data.data;
+    setCachedValue(cacheKey, response.data.data, 20_000);
+    return response.data.data;
+  }
+
+  const merged: Customer[] = [];
+  const seen = new Set<string>();
+  let nextPage = 1;
+  let hasMore = true;
+  let guard = 0;
+
+  while (hasMore && guard < 50) {
+    guard += 1;
+    let addedInPage = 0;
+
+    const response = await httpClient.get<CustomersResponse>("/customers", {
+      params: {
+        q: query || undefined,
+        limit,
+        page: nextPage,
+        include_deleted: toQueryBoolean(params.includeDeleted),
+      },
+    });
+
+    for (const customer of response.data.data) {
+      if (seen.has(customer.id)) {
+        continue;
+      }
+
+      seen.add(customer.id);
+      merged.push(customer);
+      addedInPage += 1;
+    }
+
+    const responseHasMore = response.data.meta?.has_more;
+    hasMore = typeof responseHasMore === "boolean" ? responseHasMore : response.data.data.length >= limit && addedInPage > 0;
+    nextPage += 1;
+  }
+
+  setCachedValue(cacheKey, merged, 20_000);
+  return merged;
 }
 
 export async function createCustomer(payload: UpsertCustomerPayload): Promise<Customer> {

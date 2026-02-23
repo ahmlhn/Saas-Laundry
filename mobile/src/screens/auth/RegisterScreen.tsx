@@ -14,6 +14,7 @@ type AuthNavigation = NativeStackNavigationProp<AuthStackParamList>;
 
 interface ValidationErrorData {
   message?: string;
+  reason_code?: string;
   errors?: Record<string, string[] | string>;
 }
 
@@ -21,6 +22,12 @@ function resolveRegisterErrorMessage(error: unknown): string {
   if (axios.isAxiosError<ValidationErrorData>(error)) {
     if (!error.response) {
       return "Tidak bisa terhubung ke server. Cek internet atau status API.";
+    }
+
+    const reasonCode = error.response.data?.reason_code?.trim().toUpperCase();
+    if (reasonCode === "APP_CONFIG_INVALID") {
+      const serverMessage = error.response.data?.message?.trim();
+      return serverMessage || "Konfigurasi server belum siap. Hubungi admin.";
     }
 
     const validationErrors = error.response.data?.errors ?? {};
@@ -45,13 +52,13 @@ function resolveRegisterErrorMessage(error: unknown): string {
       return "Nama pemilik wajib diisi.";
     }
 
-    if (error.response.status >= 500) {
-      return "Server sedang bermasalah. Coba lagi beberapa saat.";
-    }
-
     const fallbackMessage = error.response.data?.message?.trim();
     if (fallbackMessage) {
       return fallbackMessage;
+    }
+
+    if (error.response.status >= 500) {
+      return "Server sedang bermasalah. Coba lagi beberapa saat.";
     }
   }
 

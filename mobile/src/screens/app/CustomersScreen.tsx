@@ -18,7 +18,7 @@ import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
 import type { Customer } from "../../types/customer";
 
-const INITIAL_LIMIT = 80;
+const PAGE_LIMIT = 100;
 const SEARCH_DEBOUNCE_MS = 300;
 
 type SortMode = "az" | "latest";
@@ -98,7 +98,8 @@ export function CustomersScreen() {
 
     try {
       const data = await listCustomers({
-        limit: INITIAL_LIMIT,
+        limit: PAGE_LIMIT,
+        fetchAll: true,
         query: query || undefined,
         forceRefresh: mode === "refresh",
       });

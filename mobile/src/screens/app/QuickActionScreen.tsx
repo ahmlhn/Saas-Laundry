@@ -2,15 +2,16 @@ import { Ionicons } from "@expo/vector-icons";
 import type { NavigationProp, RouteProp } from "@react-navigation/native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { AppSkeletonBlock } from "../../components/ui/AppSkeletonBlock";
+import { listCustomers } from "../../features/customers/customerApi";
 import { formatCustomerPhoneDisplay } from "../../features/customers/customerPhone";
 import { parseCustomerProfileMeta } from "../../features/customers/customerProfileNote";
-import { listCustomers } from "../../features/customers/customerApi";
-import { createOrder } from "../../features/orders/orderApi";
+import { createOrder, listOrders } from "../../features/orders/orderApi";
 import { listServices } from "../../features/services/serviceApi";
 import { hasAnyRole } from "../../lib/accessControl";
 import { getApiErrorMessage } from "../../lib/httpClient";
@@ -19,28 +20,18 @@ import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
 import type { Customer } from "../../types/customer";
+import type { OrderSummary } from "../../types/order";
 import type { ServiceCatalogItem } from "../../types/service";
 
-interface DraftOrderItem {
-  id: string;
-  serviceId: string | null;
-  metricInput: string;
-}
+type Step = "customer" | "services" | "review";
+type Direction = -1 | 1;
 
-type DraftMetricDirection = -1 | 1;
+const STEP_ORDER: Step[] = ["customer", "services", "review"];
+const CUSTOMER_LIMIT = 100;
+const currencyFormatter = new Intl.NumberFormat("id-ID");
 
-const CUSTOMER_PICKER_LIMIT = 120;
-
-function generateDraftItemId(): string {
-  return `item-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-}
-
-function createDraftItem(serviceId: string | null): DraftOrderItem {
-  return {
-    id: generateDraftItemId(),
-    serviceId,
-    metricInput: "",
-  };
+function formatMoney(value: number): string {
+  return `Rp ${currencyFormatter.format(value)}`;
 }
 
 function isKgUnit(unitType: string | undefined): boolean {
@@ -52,10 +43,6 @@ function parseMetricInput(raw: string): number {
   return Number.parseFloat(normalized);
 }
 
-function getMetricStep(unitType: string | undefined): number {
-  return isKgUnit(unitType) ? 0.1 : 1;
-}
-
 function normalizeMetricValue(value: number, unitType: string | undefined): number {
   if (isKgUnit(unitType)) {
     return Math.round(value * 10) / 10;
@@ -64,60 +51,110 @@ function normalizeMetricValue(value: number, unitType: string | undefined): numb
   return Math.round(value);
 }
 
-function formatMetricInputValue(value: number, unitType: string | undefined): string {
-  const normalizedValue = normalizeMetricValue(value, unitType);
-
+function formatMetricValue(value: number, unitType: string | undefined): string {
+  const normalized = normalizeMetricValue(value, unitType);
   if (isKgUnit(unitType)) {
-    const fixed = normalizedValue.toFixed(1);
+    const fixed = normalized.toFixed(1);
     return fixed.endsWith(".0") ? fixed.slice(0, -2) : fixed;
   }
 
-  return `${normalizedValue}`;
+  return `${normalized}`;
 }
 
-const currencyFormatter = new Intl.NumberFormat("id-ID");
+function metricStep(unitType: string | undefined): number {
+  return isKgUnit(unitType) ? 0.1 : 1;
+}
 
-function formatMoney(value: number): string {
-  return `Rp ${currencyFormatter.format(value)}`;
+function stepLabel(step: Step): string {
+  if (step === "customer") {
+    return "Konsumen";
+  }
+
+  if (step === "services") {
+    return "Layanan";
+  }
+
+  return "Ringkasan";
+}
+
+function mapGenderLabel(value: string): string {
+  if (value === "male") {
+    return "Laki-laki";
+  }
+
+  if (value === "female") {
+    return "Perempuan";
+  }
+
+  return "";
+}
+
+function formatDateShort(value: string | null): string {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) {
+    return "-";
+  }
+
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
 }
 
 export function QuickActionScreen() {
   const theme = useAppTheme();
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const minEdge = Math.min(width, height);
   const isLandscape = width > height;
   const isTablet = minEdge >= 600;
   const isCompactLandscape = isLandscape && !isTablet;
   const styles = useMemo(() => createStyles(theme, isTablet, isCompactLandscape), [theme, isTablet, isCompactLandscape]);
+  const footerBottomPadding = Math.max(insets.bottom, isCompactLandscape ? theme.spacing.xs : theme.spacing.sm);
+
   const navigation = useNavigation<NavigationProp<AppTabParamList>>();
   const route = useRoute<RouteProp<AppTabParamList, "QuickActionTab">>();
   const { session, selectedOutlet, refreshSession } = useSession();
+
   const roles = session?.roles ?? [];
   const canCreateOrder = hasAnyRole(roles, ["owner", "admin", "cashier"]);
+
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [step, setStep] = useState<Step>("customer");
+
   const [services, setServices] = useState<ServiceCatalogItem[]>([]);
   const [loadingServices, setLoadingServices] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [serviceKeyword, setServiceKeyword] = useState("");
+  const [metrics, setMetrics] = useState<Record<string, string>>({});
+
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
-  const [customerOptions, setCustomerOptions] = useState<Customer[]>([]);
   const [customerKeyword, setCustomerKeyword] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
-  const [draftItems, setDraftItems] = useState<DraftOrderItem[]>([createDraftItem(null)]);
+  const [customerOrdersPreview, setCustomerOrdersPreview] = useState<OrderSummary[]>([]);
+  const [loadingCustomerOrdersPreview, setLoadingCustomerOrdersPreview] = useState(false);
+
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerNotes, setCustomerNotes] = useState("");
+
   const [shippingFeeInput, setShippingFeeInput] = useState("");
   const [discountInput, setDiscountInput] = useState("");
   const [orderNotes, setOrderNotes] = useState("");
-  const [lastCreatedOrderId, setLastCreatedOrderId] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
+
+  const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [lastCreatedOrderId, setLastCreatedOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!selectedOutlet || !canCreateOrder) {
       setServices([]);
-      setDraftItems([createDraftItem(null)]);
       setLoadingServices(false);
       return;
     }
@@ -130,9 +167,7 @@ export function QuickActionScreen() {
       return;
     }
 
-    openCreateForm();
-    setErrorMessage(null);
-    setActionMessage(null);
+    openCreateFlow();
   }, [route.params?.openCreateStamp, canCreateOrder]);
 
   async function loadServices(forceRefresh = false): Promise<void> {
@@ -142,8 +177,6 @@ export function QuickActionScreen() {
     }
 
     setLoadingServices(true);
-    setErrorMessage(null);
-
     try {
       const data = await listServices({
         outletId: selectedOutlet.id,
@@ -153,24 +186,6 @@ export function QuickActionScreen() {
         forceRefresh,
       });
       setServices(data);
-      setDraftItems((previous) => {
-        const fallbackServiceId = data[0]?.id ?? null;
-
-        if (previous.length === 0) {
-          return [createDraftItem(fallbackServiceId)];
-        }
-
-        return previous.map((item) => {
-          if (item.serviceId && data.some((service) => service.id === item.serviceId)) {
-            return item;
-          }
-
-          return {
-            ...item,
-            serviceId: fallbackServiceId,
-          };
-        });
-      });
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error));
     } finally {
@@ -178,16 +193,15 @@ export function QuickActionScreen() {
     }
   }
 
-  async function loadCustomerOptions(forceRefresh = false): Promise<void> {
+  async function loadCustomers(forceRefresh = false): Promise<void> {
     setLoadingCustomers(true);
-    setErrorMessage(null);
-
     try {
       const data = await listCustomers({
-        limit: CUSTOMER_PICKER_LIMIT,
+        limit: CUSTOMER_LIMIT,
+        fetchAll: true,
         forceRefresh,
       });
-      setCustomerOptions(data);
+      setCustomers(data);
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error));
     } finally {
@@ -195,33 +209,46 @@ export function QuickActionScreen() {
     }
   }
 
-  function openCreateForm(): void {
-    setShowCreateForm(true);
-    setCustomerPickerOpen(true);
+  function resetDraft(): void {
+    setStep("customer");
+    setServiceKeyword("");
+    setMetrics({});
     setCustomerKeyword("");
+    setSelectedCustomerId(null);
+    setCustomerName("");
+    setCustomerPhone("");
+    setCustomerNotes("");
+    setCustomerOrdersPreview([]);
+    setLoadingCustomerOrdersPreview(false);
+    setShippingFeeInput("");
+    setDiscountInput("");
+    setOrderNotes("");
+  }
 
-    if (customerOptions.length === 0 && !loadingCustomers) {
-      void loadCustomerOptions();
+  function openCreateFlow(): void {
+    resetDraft();
+    setShowCreateForm(true);
+    setErrorMessage(null);
+    setActionMessage(null);
+
+    if (customers.length === 0 && !loadingCustomers) {
+      void loadCustomers();
     }
   }
 
-  function handleToggleCreateForm(): void {
+  function closeCreateFlow(): void {
+    setShowCreateForm(false);
+    resetDraft();
+    setErrorMessage(null);
+  }
+
+  function toggleCreateFlow(): void {
     if (showCreateForm) {
-      setShowCreateForm(false);
-      setCustomerPickerOpen(false);
-      setCustomerKeyword("");
+      closeCreateFlow();
       return;
     }
 
-    openCreateForm();
-  }
-
-  function handleToggleCustomerPicker(): void {
-    const nextOpen = !customerPickerOpen;
-    setCustomerPickerOpen(nextOpen);
-    if (nextOpen && customerOptions.length === 0 && !loadingCustomers) {
-      void loadCustomerOptions();
-    }
+    openCreateFlow();
   }
 
   function handleSelectCustomer(customer: Customer): void {
@@ -230,201 +257,253 @@ export function QuickActionScreen() {
     setCustomerName(customer.name);
     setCustomerPhone(customer.phone_normalized ?? "");
     setCustomerNotes(profile.note);
-    setCustomerPickerOpen(false);
     setCustomerKeyword("");
     setErrorMessage(null);
   }
 
-  function handleManualCustomerInput(): void {
+  function handleReplaceSelectedCustomer(): void {
     setSelectedCustomerId(null);
-    setCustomerPickerOpen(false);
-    setCustomerKeyword("");
-  }
-
-  function resetCreateForm(): void {
-    setSelectedCustomerId(null);
-    setCustomerPickerOpen(false);
-    setCustomerKeyword("");
     setCustomerName("");
     setCustomerPhone("");
     setCustomerNotes("");
-    setShippingFeeInput("");
-    setDiscountInput("");
-    setOrderNotes("");
-    setDraftItems([createDraftItem(services[0]?.id ?? null)]);
+    setCustomerOrdersPreview([]);
+    setLoadingCustomerOrdersPreview(false);
+    setCustomerKeyword("");
+    setErrorMessage(null);
   }
 
-  function updateDraftItem(itemId: string, patch: Partial<DraftOrderItem>): void {
-    setDraftItems((previous) => previous.map((item) => (item.id === itemId ? { ...item, ...patch } : item)));
-  }
-
-  function handleAddItem(): void {
-    setDraftItems((previous) => [...previous, createDraftItem(services[0]?.id ?? null)]);
-  }
-
-  function handleRemoveItem(itemId: string): void {
-    setDraftItems((previous) => {
-      if (previous.length <= 1) {
-        return previous;
+  function updateMetric(serviceId: string, value: string): void {
+    setMetrics((previous) => {
+      if (!value.trim()) {
+        const next = { ...previous };
+        delete next[serviceId];
+        return next;
       }
-
-      return previous.filter((item) => item.id !== itemId);
-    });
-  }
-
-  function handleMoveItem(itemId: string, direction: "up" | "down"): void {
-    setDraftItems((previous) => {
-      const currentIndex = previous.findIndex((item) => item.id === itemId);
-      if (currentIndex < 0) {
-        return previous;
-      }
-
-      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
-      if (targetIndex < 0 || targetIndex >= previous.length) {
-        return previous;
-      }
-
-      const nextItems = [...previous];
-      const [movedItem] = nextItems.splice(currentIndex, 1);
-      nextItems.splice(targetIndex, 0, movedItem);
-      return nextItems;
-    });
-  }
-
-  function handleStepMetric(itemId: string, direction: DraftMetricDirection): void {
-    const item = draftItems.find((draft) => draft.id === itemId);
-    if (!item) {
-      return;
-    }
-
-    const selectedService = services.find((service) => service.id === item.serviceId);
-    if (!selectedService) {
-      return;
-    }
-
-    const currentValue = parseMetricInput(item.metricInput);
-    const safeValue = Number.isFinite(currentValue) ? currentValue : 0;
-    const step = getMetricStep(selectedService.unit_type);
-    const nextValue = Math.max(normalizeMetricValue(safeValue + direction * step, selectedService.unit_type), 0);
-
-    updateDraftItem(item.id, {
-      metricInput: nextValue > 0 ? formatMetricInputValue(nextValue, selectedService.unit_type) : "",
-    });
-  }
-
-  const itemPricingPreview = useMemo(() => {
-    return draftItems.map((item, index) => {
-      const selectedService = services.find((service) => service.id === item.serviceId) ?? null;
-      const metricValue = parseMetricInput(item.metricInput);
-      const hasValidMetric = Number.isFinite(metricValue) && metricValue > 0;
-      const unitPrice = selectedService?.effective_price_amount ?? 0;
-      const lineSubtotal = selectedService && hasValidMetric ? Math.round(metricValue * unitPrice) : 0;
 
       return {
-        id: item.id,
-        label: `Item ${index + 1}`,
-        service: selectedService,
-        metricValue,
-        hasValidMetric,
-        unitPrice,
-        lineSubtotal,
+        ...previous,
+        [serviceId]: value,
       };
     });
-  }, [draftItems, services]);
+  }
 
-  const estimatedSubtotal = useMemo(() => itemPricingPreview.reduce((total, item) => total + item.lineSubtotal, 0), [itemPricingPreview]);
-  const parsedShippingFee = useMemo(() => {
-    const parsed = Number.parseInt(shippingFeeInput.trim(), 10);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-  }, [shippingFeeInput]);
-  const parsedDiscount = useMemo(() => {
-    const parsed = Number.parseInt(discountInput.trim(), 10);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-  }, [discountInput]);
-  const estimatedTotal = useMemo(() => Math.max(estimatedSubtotal + parsedShippingFee - parsedDiscount, 0), [estimatedSubtotal, parsedShippingFee, parsedDiscount]);
-  const sortedCustomerOptions = useMemo(() => {
-    return [...customerOptions].sort((a, b) => a.name.localeCompare(b.name, "id-ID"));
-  }, [customerOptions]);
-  const filteredCustomerOptions = useMemo(() => {
+  function stepMetric(service: ServiceCatalogItem, direction: Direction): void {
+    const current = parseMetricInput(metrics[service.id] ?? "");
+    const safe = Number.isFinite(current) ? current : 0;
+    const next = Math.max(normalizeMetricValue(safe + direction * metricStep(service.unit_type), service.unit_type), 0);
+    updateMetric(service.id, next > 0 ? formatMetricValue(next, service.unit_type) : "");
+  }
+  const filteredCustomers = useMemo(() => {
+    const sorted = [...customers].sort((a, b) => a.name.localeCompare(b.name, "id-ID"));
     const keyword = customerKeyword.trim().toLowerCase();
+
     if (!keyword) {
-      return sortedCustomerOptions;
+      return sorted;
     }
 
-    return sortedCustomerOptions.filter((item) => {
+    return sorted.filter((item) => {
       const profile = parseCustomerProfileMeta(item.notes);
-      const haystack = `${item.name} ${item.phone_normalized} ${profile.note}`.toLowerCase();
+      const haystack = `${item.name} ${item.phone_normalized} ${profile.note} ${profile.address}`.toLowerCase();
       return haystack.includes(keyword);
     });
-  }, [customerKeyword, sortedCustomerOptions]);
+  }, [customers, customerKeyword]);
+
   const selectedCustomer = useMemo(() => {
     if (!selectedCustomerId) {
       return null;
     }
 
-    return customerOptions.find((item) => item.id === selectedCustomerId) ?? null;
-  }, [customerOptions, selectedCustomerId]);
-  const outletLabel = selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "Outlet belum dipilih";
-  const servicesStatusLabel = loadingServices
-    ? "Memuat layanan aktif..."
-    : services.length > 0
-      ? `${services.length} layanan aktif siap dipakai`
-      : "Belum ada layanan aktif";
-  const createButtonDisabled = !canCreateOrder || loadingServices || services.length === 0;
-  const showStickyCreateFooter = showCreateForm && canCreateOrder;
+    return customers.find((item) => item.id === selectedCustomerId) ?? null;
+  }, [customers, selectedCustomerId]);
 
-  async function handleCreateOrder(): Promise<void> {
+  const selectedCustomerProfile = useMemo(() => {
+    if (!selectedCustomer) {
+      return null;
+    }
+
+    return parseCustomerProfileMeta(selectedCustomer.notes);
+  }, [selectedCustomer]);
+
+  useEffect(() => {
+    if (!selectedOutlet || !showCreateForm || step !== "customer" || !selectedCustomer) {
+      setCustomerOrdersPreview([]);
+      setLoadingCustomerOrdersPreview(false);
+      return;
+    }
+
+    const outlet = selectedOutlet;
+    const customer = selectedCustomer;
+    let active = true;
+
+    async function loadSelectedCustomerOrdersPreview(): Promise<void> {
+      const phoneQuery = customer.phone_normalized?.trim() ?? "";
+      const nameQuery = customer.name?.trim() ?? "";
+      const query = phoneQuery || nameQuery;
+
+      if (!query) {
+        setCustomerOrdersPreview([]);
+        return;
+      }
+
+      setLoadingCustomerOrdersPreview(true);
+      try {
+        const data = await listOrders({
+          outletId: outlet.id,
+          query,
+          limit: 100,
+          timezone: outlet.timezone,
+          forceRefresh: true,
+        });
+
+        if (!active) {
+          return;
+        }
+
+        const filtered = data.filter((order) => {
+          if (order.customer_id === customer.id) {
+            return true;
+          }
+
+          const orderPhone = order.customer?.phone_normalized?.trim() ?? "";
+          if (phoneQuery && orderPhone === phoneQuery) {
+            return true;
+          }
+
+          const orderName = order.customer?.name?.trim().toLowerCase() ?? "";
+          return nameQuery !== "" && orderName === nameQuery.toLowerCase();
+        });
+
+        setCustomerOrdersPreview(filtered);
+      } catch (error) {
+        if (active) {
+          setErrorMessage(getApiErrorMessage(error));
+        }
+      } finally {
+        if (active) {
+          setLoadingCustomerOrdersPreview(false);
+        }
+      }
+    }
+
+    void loadSelectedCustomerOrdersPreview();
+
+    return () => {
+      active = false;
+    };
+  }, [selectedCustomer, selectedOutlet, showCreateForm, step]);
+
+  const customerTransactionSummary = useMemo(() => {
+    const totalTransactions = customerOrdersPreview.length;
+    const totalAmount = customerOrdersPreview.reduce((sum, order) => sum + Math.max(order.total_amount ?? 0, 0), 0);
+    const outstandingAmount = customerOrdersPreview.reduce((sum, order) => sum + Math.max(order.due_amount ?? 0, 0), 0);
+    const unpaidCount = customerOrdersPreview.filter((order) => (order.due_amount ?? 0) > 0).length;
+    const lastOrderAt = customerOrdersPreview.length > 0 ? customerOrdersPreview[0].created_at : null;
+
+    return {
+      totalTransactions,
+      totalAmount,
+      outstandingAmount,
+      unpaidCount,
+      lastOrderAt,
+    };
+  }, [customerOrdersPreview]);
+
+  const filteredServices = useMemo(() => {
+    const keyword = serviceKeyword.trim().toLowerCase();
+    if (!keyword) {
+      return services;
+    }
+
+    return services.filter((service) => service.name.toLowerCase().includes(keyword));
+  }, [services, serviceKeyword]);
+
+  const selectedLines = useMemo(() => {
+    return services
+      .map((service) => {
+        const metricValue = parseMetricInput(metrics[service.id] ?? "");
+        const hasValidMetric = Number.isFinite(metricValue) && metricValue > 0;
+        return {
+          service,
+          metricValue,
+          hasValidMetric,
+          subtotal: hasValidMetric ? Math.round(metricValue * (service.effective_price_amount ?? 0)) : 0,
+        };
+      })
+      .filter((line) => line.hasValidMetric);
+  }, [metrics, services]);
+
+  const subtotal = useMemo(() => selectedLines.reduce((sum, line) => sum + line.subtotal, 0), [selectedLines]);
+
+  const shippingFee = useMemo(() => {
+    const parsed = Number.parseInt(shippingFeeInput.trim(), 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  }, [shippingFeeInput]);
+
+  const discountAmount = useMemo(() => {
+    const parsed = Number.parseInt(discountInput.trim(), 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  }, [discountInput]);
+
+  const total = useMemo(() => Math.max(subtotal + shippingFee - discountAmount, 0), [subtotal, shippingFee, discountAmount]);
+
+  const canCustomerNext = selectedCustomerId !== null;
+  const canServicesNext = selectedLines.length > 0;
+
+  function nextStep(): void {
+    if (step === "customer") {
+      if (!canCustomerNext) {
+        setErrorMessage("Pilih konsumen dari daftar terlebih dulu.");
+        return;
+      }
+      setStep("services");
+      setErrorMessage(null);
+      return;
+    }
+
+    if (step === "services") {
+      if (!canServicesNext) {
+        setErrorMessage("Pilih minimal satu layanan dengan qty/berat > 0.");
+        return;
+      }
+      setStep("review");
+      setErrorMessage(null);
+    }
+  }
+
+  function previousStep(): void {
+    if (step === "customer") {
+      closeCreateFlow();
+      navigation.navigate("OrdersTab", {
+        screen: "OrdersToday",
+      });
+      return;
+    }
+
+    if (step === "services") {
+      setStep("customer");
+      setErrorMessage(null);
+      return;
+    }
+
+    setStep("services");
+    setErrorMessage(null);
+  }
+
+  async function submitOrder(): Promise<void> {
     if (!selectedOutlet || !canCreateOrder || submitting) {
       return;
     }
 
-    const name = customerName.trim();
-    const phone = customerPhone.trim();
-    const parsedShipping = shippingFeeInput.trim() ? Number.parseInt(shippingFeeInput.trim(), 10) : 0;
-    const parsedDiscountAmount = discountInput.trim() ? Number.parseInt(discountInput.trim(), 10) : 0;
-
-    if (!name || !phone) {
-      setErrorMessage("Nama pelanggan dan nomor HP wajib diisi.");
+    if (!canCustomerNext) {
+      setErrorMessage("Pilih konsumen dari daftar terlebih dulu.");
+      setStep("customer");
       return;
     }
 
-    if (draftItems.length === 0) {
-      setErrorMessage("Minimal satu item layanan wajib diisi.");
+    if (!canServicesNext) {
+      setErrorMessage("Pilih minimal satu layanan dengan qty/berat > 0.");
+      setStep("services");
       return;
-    }
-
-    if (!Number.isFinite(parsedShipping) || parsedShipping < 0) {
-      setErrorMessage("Ongkir harus berupa angka >= 0.");
-      return;
-    }
-
-    if (!Number.isFinite(parsedDiscountAmount) || parsedDiscountAmount < 0) {
-      setErrorMessage("Diskon harus berupa angka >= 0.");
-      return;
-    }
-
-    const normalizedItems: Array<{ serviceId: string; qty?: number; weightKg?: number }> = [];
-
-    for (let index = 0; index < draftItems.length; index += 1) {
-      const item = draftItems[index];
-      const selectedService = services.find((service) => service.id === item.serviceId);
-
-      if (!selectedService) {
-        setErrorMessage(`Item ${index + 1}: layanan wajib dipilih.`);
-        return;
-      }
-
-      const metricValue = parseMetricInput(item.metricInput);
-      if (!Number.isFinite(metricValue) || metricValue <= 0) {
-        setErrorMessage(isKgUnit(selectedService.unit_type) ? `Item ${index + 1}: berat (kg) harus lebih dari 0.` : `Item ${index + 1}: qty harus lebih dari 0.`);
-        return;
-      }
-
-      normalizedItems.push({
-        serviceId: selectedService.id,
-        qty: isKgUnit(selectedService.unit_type) ? undefined : metricValue,
-        weightKg: isKgUnit(selectedService.unit_type) ? metricValue : undefined,
-      });
     }
 
     setSubmitting(true);
@@ -435,21 +514,25 @@ export function QuickActionScreen() {
       const created = await createOrder({
         outletId: selectedOutlet.id,
         customer: {
-          name,
-          phone,
+          name: customerName.trim(),
+          phone: customerPhone.trim(),
           notes: customerNotes,
         },
-        items: normalizedItems,
-        shippingFeeAmount: parsedShipping,
-        discountAmount: parsedDiscountAmount,
+        items: selectedLines.map((line) => ({
+          serviceId: line.service.id,
+          qty: isKgUnit(line.service.unit_type) ? undefined : line.metricValue,
+          weightKg: isKgUnit(line.service.unit_type) ? line.metricValue : undefined,
+        })),
+        shippingFeeAmount: shippingFee,
+        discountAmount,
         notes: orderNotes,
       });
 
       await refreshSession();
       setLastCreatedOrderId(created.id);
       setActionMessage(`Order ${created.order_code} berhasil dibuat.`);
-      resetCreateForm();
       setShowCreateForm(false);
+      resetDraft();
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error));
     } finally {
@@ -457,476 +540,478 @@ export function QuickActionScreen() {
     }
   }
 
-  function handleCancelCreate(): void {
-    resetCreateForm();
-    setShowCreateForm(false);
-    setErrorMessage(null);
-  }
+  const primaryDisabled =
+    step === "customer" ? !canCustomerNext : step === "services" ? !canServicesNext : submitting || selectedLines.length === 0;
 
-  function renderItemDraft(item: DraftOrderItem, index: number) {
-    const selectedService = services.find((service) => service.id === item.serviceId) ?? null;
-    const metricValue = parseMetricInput(item.metricInput);
-    const hasValidMetric = Number.isFinite(metricValue) && metricValue > 0;
-    const unitPrice = selectedService?.effective_price_amount ?? 0;
-    const lineSubtotal = selectedService && hasValidMetric ? Math.round(metricValue * unitPrice) : 0;
-    const canMoveUp = index > 0;
-    const canMoveDown = index < draftItems.length - 1;
-    const metricLabel = isKgUnit(selectedService?.unit_type) ? "Berat (kg)" : "Qty";
-    const stepInfo = isKgUnit(selectedService?.unit_type) ? "Step 0.1" : "Step 1";
-
-    return (
-      <View key={item.id} style={styles.itemPanel}>
-        <View style={styles.itemHeader}>
-          <Text style={styles.inputLabel}>Item {index + 1}</Text>
-          <View style={styles.itemHeaderActions}>
-            <Pressable
-              accessibilityLabel="Pindahkan item ke atas"
-              disabled={!canMoveUp}
-              onPress={() => handleMoveItem(item.id, "up")}
-              style={({ pressed }) => [
-                styles.headerActionIconButton,
-                !canMoveUp ? styles.headerActionIconButtonDisabled : null,
-                canMoveUp && pressed ? styles.headerActionIconButtonPressed : null,
-              ]}
-            >
-              <Ionicons color={canMoveUp ? theme.colors.textSecondary : theme.colors.textMuted} name="arrow-up" size={14} />
-            </Pressable>
-            <Pressable
-              accessibilityLabel="Pindahkan item ke bawah"
-              disabled={!canMoveDown}
-              onPress={() => handleMoveItem(item.id, "down")}
-              style={({ pressed }) => [
-                styles.headerActionIconButton,
-                !canMoveDown ? styles.headerActionIconButtonDisabled : null,
-                canMoveDown && pressed ? styles.headerActionIconButtonPressed : null,
-              ]}
-            >
-              <Ionicons color={canMoveDown ? theme.colors.textSecondary : theme.colors.textMuted} name="arrow-down" size={14} />
-            </Pressable>
-            {draftItems.length > 1 ? (
-              <Pressable
-                accessibilityLabel="Hapus item layanan"
-                onPress={() => handleRemoveItem(item.id)}
-                style={({ pressed }) => [styles.headerActionIconButton, pressed ? styles.headerActionIconButtonPressed : null]}
-              >
-                <Ionicons color={theme.colors.danger} name="trash-outline" size={14} />
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
-        <View style={styles.serviceList}>
-          {services.map((service) => {
-            const selected = service.id === item.serviceId;
-
-            return (
-              <Pressable
-                key={`${item.id}-${service.id}`}
-                onPress={() => updateDraftItem(item.id, { serviceId: service.id, metricInput: "" })}
-                style={[styles.serviceChip, selected ? styles.serviceChipActive : null]}
-              >
-                <Text style={[styles.serviceChipText, selected ? styles.serviceChipTextActive : null]}>
-                  {service.name} ({service.unit_type.toUpperCase()})
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        {selectedService ? (
-          <View style={styles.metricStepperWrap}>
-            <Text style={styles.inputLabel}>
-              Stepper {metricLabel} ({stepInfo})
-            </Text>
-            <View style={styles.metricStepperRow}>
-              <Pressable
-                onPress={() => handleStepMetric(item.id, -1)}
-                style={({ pressed }) => [styles.metricStepperButton, pressed ? styles.metricStepperButtonPressed : null]}
-              >
-                <Text style={styles.metricStepperButtonText}>-</Text>
-              </Pressable>
-              <Text style={styles.metricStepperValue}>{item.metricInput.trim() || "0"}</Text>
-              <Pressable
-                onPress={() => handleStepMetric(item.id, 1)}
-                style={({ pressed }) => [styles.metricStepperButton, pressed ? styles.metricStepperButtonPressed : null]}
-              >
-                <Text style={styles.metricStepperButtonText}>+</Text>
-              </Pressable>
-            </View>
-          </View>
-        ) : null}
-        <TextInput
-          keyboardType="numeric"
-          onChangeText={(value) => updateDraftItem(item.id, { metricInput: value })}
-          placeholder={isKgUnit(selectedService?.unit_type) ? "Berat (kg), contoh 2.5" : "Qty, contoh 3"}
-          placeholderTextColor={theme.colors.textMuted}
-          style={styles.input}
-          value={item.metricInput}
-        />
-        {selectedService ? (
-          <View style={styles.itemPriceInfo}>
-            <Text style={styles.itemPriceText}>
-              Harga satuan: {formatMoney(unitPrice)} / {selectedService.unit_type.toUpperCase()}
-            </Text>
-            <Text style={styles.itemPriceText}>
-              Subtotal item: {formatMoney(lineSubtotal)}
-            </Text>
-          </View>
-        ) : null}
-      </View>
-    );
-  }
+  const currentStepIndex = STEP_ORDER.indexOf(step);
+  const stepProgressPercent = ((currentStepIndex + 1) / STEP_ORDER.length) * 100;
 
   return (
     <AppScreen scroll={false}>
-      <View style={styles.screenLayout}>
-        <ScrollView
-          contentContainerStyle={[styles.content, showStickyCreateFooter ? styles.contentWithStickyFooter : null]}
-          keyboardDismissMode="on-drag"
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          style={styles.scrollView}
-        >
-          <AppPanel style={styles.heroPanel}>
-        <View style={styles.heroTopRow}>
-          <View style={styles.heroBadge}>
-            <Ionicons color={theme.colors.info} name="flash-outline" size={16} />
-            <Text style={styles.heroBadgeText}>Quick Action</Text>
+      <View style={styles.root}>
+        <ScrollView contentContainerStyle={[styles.content, showCreateForm ? styles.contentWithFooter : null]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.scroll}>
+          <View style={styles.pageHeader}>
+            <Text style={styles.pageTitle}>Tambah Pesanan</Text>
           </View>
-          <Text style={styles.heroOutletMeta}>{outletLabel}</Text>
-        </View>
-        <Text style={styles.title}>Aksi Cepat Operasional</Text>
-        <Text style={styles.subtitle}>Buat order baru, kelola item layanan, dan lanjutkan ke detail order dari satu layar.</Text>
-        <View style={styles.heroMetaWrap}>
-          <View style={styles.heroMetaChip}>
-            <Ionicons color={theme.colors.textMuted} name="pricetag-outline" size={14} />
-            <Text numberOfLines={1} style={styles.heroMetaText}>
-              {servicesStatusLabel}
-            </Text>
-          </View>
-          <View style={styles.heroMetaChip}>
-            <Ionicons color={theme.colors.textMuted} name={canCreateOrder ? "shield-checkmark-outline" : "shield-outline"} size={14} />
-            <Text numberOfLines={1} style={styles.heroMetaText}>
-              {canCreateOrder ? "Akses pembuatan order aktif" : "Akses pembuatan order terbatas"}
-            </Text>
-          </View>
-        </View>
-      </AppPanel>
 
-      <AppPanel style={styles.panel}>
-        <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Aksi Inti</Text>
-          <Text style={styles.sectionMeta}>{showCreateForm ? "Form aktif" : "Siap dipakai"}</Text>
-        </View>
-        <View style={styles.actionList}>
-          <AppButton
-            disabled={createButtonDisabled}
-            leftElement={<Ionicons color={theme.colors.primaryContrast} name={showCreateForm ? "close-outline" : "bag-add-outline"} size={18} />}
-            onPress={handleToggleCreateForm}
-            title={showCreateForm ? "Tutup Form Pesanan" : "Tambah Pesanan"}
-          />
-          <AppButton
-            leftElement={<Ionicons color={theme.colors.info} name="person-add-outline" size={18} />}
-            onPress={() =>
-              navigation.navigate("AccountTab", {
-                screen: "Customers",
-              })
-            }
-            title="Tambah Pelanggan"
-            variant="secondary"
-          />
-          <AppButton
-            disabled
-            leftElement={<Ionicons color={theme.colors.textMuted} name="scan-outline" size={18} />}
-            onPress={() => undefined}
-            title="Scan Nota / Barcode (Soon)"
-            variant="ghost"
-          />
-        </View>
-        {!canCreateOrder ? <Text style={styles.infoText}>Role Anda tidak memiliki akses membuat order.</Text> : null}
-        {loadingServices ? (
-          <View style={styles.skeletonWrap}>
-            <AppSkeletonBlock height={11} width="44%" />
-            <AppSkeletonBlock height={11} width="71%" />
-          </View>
-        ) : null}
-        {!loadingServices && canCreateOrder && services.length === 0 ? (
-          <Text style={styles.infoText}>Belum ada layanan aktif untuk outlet ini. Aktifkan layanan dulu di menu Akun.</Text>
-        ) : null}
-      </AppPanel>
-
-      {showCreateForm && canCreateOrder ? (
-        <AppPanel style={styles.formPanel}>
-          <View style={styles.formHeaderRow}>
-            <Ionicons color={theme.colors.info} name="receipt-outline" size={18} />
-            <View style={styles.formHeaderTextWrap}>
-              <Text style={styles.formTitle}>Form Order Minimal</Text>
-              <Text style={styles.formSubtitle}>Isi data utama untuk transaksi cepat dari kasir.</Text>
-            </View>
-          </View>
-          <View style={styles.customerPickerWrap}>
-            <View style={styles.customerPickerHeaderRow}>
-              <Text style={styles.inputLabel}>Pilih Konsumen</Text>
-              <Pressable onPress={handleToggleCustomerPicker} style={({ pressed }) => [styles.customerPickerToggleButton, pressed ? styles.customerPickerToggleButtonPressed : null]}>
-                <Ionicons color={theme.colors.info} name={customerPickerOpen ? "chevron-up-outline" : "chevron-down-outline"} size={14} />
-                <Text style={styles.customerPickerToggleButtonText}>{customerPickerOpen ? "Tutup Daftar" : "Pilih Nama"}</Text>
-              </Pressable>
-            </View>
-            {selectedCustomer ? (
-              <View style={styles.selectedCustomerCard}>
-                <Text numberOfLines={1} style={styles.selectedCustomerName}>
-                  {selectedCustomer.name}
-                </Text>
-                <Text numberOfLines={1} style={styles.selectedCustomerMeta}>
-                  {formatCustomerPhoneDisplay(selectedCustomer.phone_normalized)}
-                </Text>
-              </View>
-            ) : (
-              <Text style={styles.customerPickerHint}>Belum dipilih. Anda bisa isi manual atau pilih dari daftar.</Text>
-            )}
-            {customerPickerOpen ? (
-              <View style={styles.customerPickerBody}>
-                <TextInput
-                  onChangeText={setCustomerKeyword}
-                  placeholder="Cari nama atau nomor konsumen..."
-                  placeholderTextColor={theme.colors.textMuted}
-                  style={styles.input}
-                  value={customerKeyword}
+          {!showCreateForm ? (
+            <AppPanel style={styles.panel}>
+              <View style={styles.actionList}>
+                <AppButton
+                  disabled={!canCreateOrder || loadingServices || services.length === 0}
+                  leftElement={<Ionicons color={theme.colors.primaryContrast} name="bag-add-outline" size={18} />}
+                  onPress={toggleCreateFlow}
+                  title="Mulai Tambah Pesanan"
                 />
-                {loadingCustomers ? (
-                  <View style={styles.skeletonWrap}>
-                    <AppSkeletonBlock height={11} width="46%" />
-                    <AppSkeletonBlock height={11} width="70%" />
-                    <AppSkeletonBlock height={11} width="58%" />
-                  </View>
-                ) : filteredCustomerOptions.length > 0 ? (
-                  <ScrollView contentContainerStyle={styles.customerOptionListContent} keyboardShouldPersistTaps="handled" nestedScrollEnabled style={styles.customerOptionList}>
-                    <Text style={styles.customerResultMeta}>{filteredCustomerOptions.length} konsumen ditampilkan</Text>
-                    {filteredCustomerOptions.map((customer) => {
-                      const profile = parseCustomerProfileMeta(customer.notes);
-                      const isSelected = customer.id === selectedCustomerId;
-
-                      return (
-                        <Pressable
-                          key={customer.id}
-                          onPress={() => handleSelectCustomer(customer)}
-                          style={({ pressed }) => [
-                            styles.customerOptionItem,
-                            isSelected ? styles.customerOptionItemSelected : null,
-                            pressed ? styles.customerOptionItemPressed : null,
-                          ]}
-                        >
-                          <View style={styles.customerOptionMain}>
-                            <Text numberOfLines={1} style={styles.customerOptionName}>
-                              {customer.name}
-                            </Text>
-                            <Text numberOfLines={1} style={styles.customerOptionPhone}>
-                              {formatCustomerPhoneDisplay(customer.phone_normalized)}
-                            </Text>
-                            {profile.note ? (
-                              <Text numberOfLines={1} style={styles.customerOptionNote}>
-                                {profile.note}
-                              </Text>
-                            ) : null}
-                          </View>
-                          <Ionicons color={isSelected ? theme.colors.info : theme.colors.textMuted} name={isSelected ? "checkmark-circle" : "chevron-forward"} size={16} />
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
-                ) : (
-                  <Text style={styles.customerPickerEmptyText}>Belum ada data konsumen yang cocok.</Text>
-                )}
-                <View style={styles.customerPickerActions}>
-                  <Pressable onPress={handleManualCustomerInput} style={({ pressed }) => [styles.customerPickerActionButton, pressed ? styles.customerPickerActionButtonPressed : null]}>
-                    <Ionicons color={theme.colors.textSecondary} name="create-outline" size={15} />
-                    <Text style={styles.customerPickerActionButtonText}>Input Manual</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => void loadCustomerOptions(true)}
-                    style={({ pressed }) => [styles.customerPickerActionButton, pressed ? styles.customerPickerActionButtonPressed : null]}
-                  >
-                    <Ionicons color={theme.colors.textSecondary} name="refresh-outline" size={15} />
-                    <Text style={styles.customerPickerActionButtonText}>Muat Ulang</Text>
-                  </Pressable>
+                <AppButton
+                  leftElement={<Ionicons color={theme.colors.info} name="person-add-outline" size={18} />}
+                  onPress={() =>
+                    navigation.navigate("AccountTab", {
+                      screen: "Customers",
+                    })
+                  }
+                  title="Tambah Pelanggan"
+                  variant="secondary"
+                />
+              </View>
+              {!canCreateOrder ? <Text style={styles.infoText}>Role Anda tidak memiliki akses membuat order.</Text> : null}
+              {!loadingServices && canCreateOrder && services.length === 0 ? <Text style={styles.infoText}>Belum ada layanan aktif untuk outlet ini.</Text> : null}
+              {loadingServices ? (
+                <View style={styles.skeletonWrap}>
+                  <AppSkeletonBlock height={11} width="44%" />
+                  <AppSkeletonBlock height={11} width="71%" />
                 </View>
+              ) : null}
+            </AppPanel>
+          ) : (
+            <AppPanel style={styles.panel}>
+              <View style={styles.stepsRow}>
+                {STEP_ORDER.map((item, index) => {
+                  const isActive = item === step;
+                  const done = index < currentStepIndex;
+
+                  return (
+                    <View key={item} style={styles.stepItem}>
+                      <View style={[styles.stepDot, isActive ? styles.stepDotActive : null, done ? styles.stepDotDone : null]}>
+                        <Text style={[styles.stepDotText, isActive || done ? styles.stepDotTextActive : null]}>{index + 1}</Text>
+                      </View>
+                      <Text style={[styles.stepText, isActive ? styles.stepTextActive : null]}>{stepLabel(item)}</Text>
+                    </View>
+                  );
+                })}
               </View>
-            ) : null}
-          </View>
-          <TextInput
-            onChangeText={(value) => {
-              if (selectedCustomerId) {
-                setSelectedCustomerId(null);
-              }
-
-              setCustomerName(value);
-            }}
-            placeholder="Nama pelanggan"
-            placeholderTextColor={theme.colors.textMuted}
-            style={styles.input}
-            value={customerName}
-          />
-          <TextInput
-            keyboardType="phone-pad"
-            onChangeText={(value) => {
-              if (selectedCustomerId) {
-                setSelectedCustomerId(null);
-              }
-
-              setCustomerPhone(value);
-            }}
-            placeholder="Nomor HP pelanggan"
-            placeholderTextColor={theme.colors.textMuted}
-            style={styles.input}
-            value={customerPhone}
-          />
-          <TextInput
-            multiline
-            onChangeText={setCustomerNotes}
-            placeholder="Catatan pelanggan (opsional)"
-            placeholderTextColor={theme.colors.textMuted}
-            style={[styles.input, styles.notesInput]}
-            value={customerNotes}
-          />
-
-          <View style={styles.serviceWrap}>
-            <Text style={styles.inputLabel}>Item Layanan</Text>
-            <View style={styles.itemList}>{draftItems.map((item, index) => renderItemDraft(item, index))}</View>
-            <AppButton
-              disabled={services.length === 0}
-              leftElement={<Ionicons color={theme.colors.info} name="add-outline" size={18} />}
-              onPress={handleAddItem}
-              title="Tambah Item"
-              variant="secondary"
-            />
-          </View>
-          <View style={[styles.feeRow, isTablet || isCompactLandscape ? styles.feeRowWide : null]}>
-            <TextInput
-              keyboardType="numeric"
-              onChangeText={setShippingFeeInput}
-              placeholder="Ongkir (opsional, angka)"
-              placeholderTextColor={theme.colors.textMuted}
-              style={[styles.input, styles.feeInput]}
-              value={shippingFeeInput}
-            />
-            <TextInput
-              keyboardType="numeric"
-              onChangeText={setDiscountInput}
-              placeholder="Diskon (opsional, angka)"
-              placeholderTextColor={theme.colors.textMuted}
-              style={[styles.input, styles.feeInput]}
-              value={discountInput}
-            />
-          </View>
-          <TextInput
-            multiline
-            onChangeText={setOrderNotes}
-            placeholder="Catatan order (opsional)"
-            placeholderTextColor={theme.colors.textMuted}
-            style={[styles.input, styles.notesInput]}
-            value={orderNotes}
-          />
-
-          <AppPanel style={styles.summaryPanel}>
-            <Text style={styles.formTitle}>Ringkasan Estimasi</Text>
-            {itemPricingPreview.map((item) => (
-              <View key={`summary-${item.id}`} style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>
-                  {item.label} - {item.service ? item.service.name : "Pilih layanan"}
-                </Text>
-                <Text style={styles.summaryValue}>{formatMoney(item.lineSubtotal)}</Text>
+              <View style={styles.stepProgressTrack}>
+                <View style={[styles.stepProgressFill, { width: `${stepProgressPercent}%` }]} />
               </View>
-            ))}
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Subtotal</Text>
-              <Text style={styles.summaryValue}>{formatMoney(estimatedSubtotal)}</Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Ongkir</Text>
-              <Text style={styles.summaryValue}>{formatMoney(parsedShippingFee)}</Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Diskon</Text>
-              <Text style={styles.summaryValue}>- {formatMoney(parsedDiscount)}</Text>
-            </View>
-            <View style={styles.summaryDivider} />
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryTotalLabel}>Estimasi Total</Text>
-              <Text style={styles.summaryTotalValue}>{formatMoney(estimatedTotal)}</Text>
-            </View>
-          </AppPanel>
 
-        </AppPanel>
-      ) : null}
+              {step === "customer" ? (
+                <View style={styles.sectionWrap}>
+                  <View style={styles.stepHeader}>
+                    <View style={styles.stepHeaderIconWrap}>
+                      <Ionicons color={theme.colors.info} name="people-outline" size={16} />
+                    </View>
+                    <View style={styles.stepHeaderTextWrap}>
+                      <Text style={styles.stepHeaderTitle}>Data Konsumen</Text>
+                      <Text style={styles.stepHeaderSubtitle}>Pilih konsumen dari daftar pelanggan.</Text>
+                    </View>
+                  </View>
 
-      {lastCreatedOrderId ? (
-        <AppPanel style={styles.followupPanel}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Order Terakhir</Text>
-            <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={17} />
-          </View>
-          <View style={styles.actionList}>
-            <AppButton
-              leftElement={<Ionicons color={theme.colors.info} name="receipt-outline" size={18} />}
-              onPress={() =>
-                navigation.navigate("OrdersTab", {
-                  screen: "OrderDetail",
-                  params: { orderId: lastCreatedOrderId },
-                })
-              }
-              title="Lihat Detail Order"
-              variant="secondary"
-            />
-            <AppButton
-              leftElement={<Ionicons color={theme.colors.textPrimary} name="list-outline" size={18} />}
-              onPress={() =>
-                navigation.navigate("OrdersTab", {
-                  screen: "OrdersToday",
-                })
-              }
-              title="Buka Daftar Pesanan"
-              variant="ghost"
-            />
-          </View>
-        </AppPanel>
-      ) : null}
+                  <View style={styles.inlineActions}>
+                    {selectedCustomer ? (
+                      <Pressable onPress={handleReplaceSelectedCustomer} style={({ pressed }) => [styles.inlineAction, styles.inlineActionSingle, pressed ? styles.pressed : null]}>
+                        <Ionicons color={theme.colors.info} name="swap-horizontal-outline" size={15} />
+                        <Text style={styles.inlineActionText}>Ganti konsumen</Text>
+                      </Pressable>
+                    ) : (
+                      <Pressable onPress={() => void loadCustomers(true)} style={({ pressed }) => [styles.inlineAction, pressed ? styles.pressed : null]}>
+                        <Ionicons color={theme.colors.textSecondary} name="refresh-outline" size={15} />
+                        <Text style={styles.inlineActionText}>Muat ulang</Text>
+                      </Pressable>
+                    )}
+                  </View>
 
-      {actionMessage ? (
-        <View style={styles.successWrap}>
-          <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={16} />
-          <Text style={styles.successText}>{actionMessage}</Text>
-        </View>
-      ) : null}
-      {errorMessage ? (
-        <View style={styles.errorWrap}>
-          <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
-          <Text style={styles.errorText}>{errorMessage}</Text>
-        </View>
-      ) : null}
+                  {selectedCustomer ? (
+                    <View style={styles.selectedCustomerCard}>
+                      <View style={styles.selectedCustomerHeadRow}>
+                        <Text style={styles.selectedCustomerBadge}>Konsumen terpilih</Text>
+                        <Ionicons color={theme.colors.success} name="checkmark-circle" size={14} />
+                      </View>
+                      <Text numberOfLines={1} style={styles.selectedCustomerName}>
+                        {selectedCustomer.name}
+                      </Text>
+                      <Text numberOfLines={1} style={styles.selectedCustomerMeta}>
+                        {formatCustomerPhoneDisplay(selectedCustomer.phone_normalized)}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {selectedCustomer ? (
+                    <View style={styles.customerInsightStack}>
+                      <AppPanel style={styles.customerInsightPanel}>
+                        <Text style={styles.customerInsightTitle}>Profil & Kontak</Text>
+
+                        <View style={styles.customerInsightRow}>
+                          <View style={styles.customerInsightIconWrap}>
+                            <Ionicons color={theme.colors.textSecondary} name="call-outline" size={14} />
+                          </View>
+                          <View style={styles.customerInsightTextWrap}>
+                            <Text style={styles.customerInsightLabel}>Telepon</Text>
+                            <Text style={styles.customerInsightValue}>{formatCustomerPhoneDisplay(selectedCustomer.phone_normalized)}</Text>
+                          </View>
+                        </View>
+
+                        <View style={styles.customerInsightRow}>
+                          <View style={styles.customerInsightIconWrap}>
+                            <Ionicons color={theme.colors.textSecondary} name="location-outline" size={14} />
+                          </View>
+                          <View style={styles.customerInsightTextWrap}>
+                            <Text style={styles.customerInsightLabel}>Alamat</Text>
+                            <Text style={[styles.customerInsightValue, !selectedCustomerProfile?.address?.trim() ? styles.customerInsightValueMuted : null]}>
+                              {selectedCustomerProfile?.address?.trim() || "Belum diisi"}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View style={styles.customerInsightRow}>
+                          <View style={styles.customerInsightIconWrap}>
+                            <Ionicons color={theme.colors.textSecondary} name="mail-outline" size={14} />
+                          </View>
+                          <View style={styles.customerInsightTextWrap}>
+                            <Text style={styles.customerInsightLabel}>Email</Text>
+                            <Text style={[styles.customerInsightValue, !selectedCustomerProfile?.email?.trim() ? styles.customerInsightValueMuted : null]}>
+                              {selectedCustomerProfile?.email?.trim() || "Belum diisi"}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View style={styles.customerInsightRow}>
+                          <View style={styles.customerInsightIconWrap}>
+                            <Ionicons color={theme.colors.textSecondary} name="document-text-outline" size={14} />
+                          </View>
+                          <View style={styles.customerInsightTextWrap}>
+                            <Text style={styles.customerInsightLabel}>Catatan</Text>
+                            <Text style={[styles.customerInsightValue, !selectedCustomerProfile?.note?.trim() ? styles.customerInsightValueMuted : null]}>
+                              {selectedCustomerProfile?.note?.trim() || "Tidak ada catatan"}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {selectedCustomerProfile?.gender ? (
+                          <View style={styles.customerInsightRow}>
+                            <View style={styles.customerInsightIconWrap}>
+                              <Ionicons color={theme.colors.textSecondary} name="transgender-outline" size={14} />
+                            </View>
+                            <View style={styles.customerInsightTextWrap}>
+                              <Text style={styles.customerInsightLabel}>Gender</Text>
+                              <Text style={styles.customerInsightValue}>{mapGenderLabel(selectedCustomerProfile.gender)}</Text>
+                            </View>
+                          </View>
+                        ) : null}
+                      </AppPanel>
+
+                      <AppPanel style={styles.customerInsightPanel}>
+                        <View style={styles.customerInsightHeaderRow}>
+                          <Text style={styles.customerInsightTitle}>Data Transaksi</Text>
+                          {loadingCustomerOrdersPreview ? <ActivityIndicator color={theme.colors.info} size="small" /> : null}
+                        </View>
+
+                        <View style={styles.customerMetricGrid}>
+                          <View style={styles.customerMetricItem}>
+                            <Text style={styles.customerMetricValue}>{customerTransactionSummary.totalTransactions}</Text>
+                            <Text style={styles.customerMetricLabel}>Total transaksi</Text>
+                          </View>
+                          <View style={styles.customerMetricItem}>
+                            <Text style={styles.customerMetricValue}>{customerTransactionSummary.unpaidCount}</Text>
+                            <Text style={styles.customerMetricLabel}>Transaksi piutang</Text>
+                          </View>
+                        </View>
+
+                        <View style={styles.customerMetricGrid}>
+                          <View style={styles.customerMetricItem}>
+                            <Text style={styles.customerMetricValue}>{formatMoney(customerTransactionSummary.totalAmount)}</Text>
+                            <Text style={styles.customerMetricLabel}>Akumulasi belanja</Text>
+                          </View>
+                          <View style={styles.customerMetricItem}>
+                            <Text style={styles.customerMetricValue}>{formatMoney(customerTransactionSummary.outstandingAmount)}</Text>
+                            <Text style={styles.customerMetricLabel}>Piutang aktif</Text>
+                          </View>
+                        </View>
+
+                        <Text style={styles.customerInsightHint}>Transaksi terakhir: {formatDateShort(customerTransactionSummary.lastOrderAt)}</Text>
+                      </AppPanel>
+
+                      <AppPanel style={styles.customerInsightPanel}>
+                        <Text style={styles.customerInsightTitle}>Data Paket</Text>
+                        <View style={styles.customerMetricGrid}>
+                          <View style={styles.customerMetricItem}>
+                            <Text style={styles.customerMetricValue}>0</Text>
+                            <Text style={styles.customerMetricLabel}>Paket aktif</Text>
+                          </View>
+                          <View style={styles.customerMetricItem}>
+                            <Text style={styles.customerMetricValue}>-</Text>
+                            <Text style={styles.customerMetricLabel}>Sisa kuota</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.customerInsightHint}>Data paket pelanggan belum tersedia di API saat ini.</Text>
+                      </AppPanel>
+                    </View>
+                  ) : null}
+
+                  {!selectedCustomer ? (
+                    <View style={styles.customerPanel}>
+                      <TextInput
+                        onChangeText={setCustomerKeyword}
+                        placeholder="Cari nama atau nomor"
+                        placeholderTextColor={theme.colors.textMuted}
+                        style={styles.input}
+                        value={customerKeyword}
+                      />
+                      {loadingCustomers ? (
+                        <View style={styles.skeletonWrap}>
+                          <AppSkeletonBlock height={11} width="52%" />
+                          <AppSkeletonBlock height={11} width="70%" />
+                        </View>
+                      ) : filteredCustomers.length > 0 ? (
+                        <ScrollView contentContainerStyle={styles.customerListContent} keyboardShouldPersistTaps="handled" nestedScrollEnabled style={styles.customerList}>
+                          {filteredCustomers.map((customer) => {
+                            const isSelected = customer.id === selectedCustomerId;
+                            const profile = parseCustomerProfileMeta(customer.notes);
+                            const address = profile.address.trim();
+                            const email = profile.email.trim();
+                            const note = profile.note.trim();
+                            const gender = mapGenderLabel(profile.gender);
+                            return (
+                              <Pressable
+                                key={customer.id}
+                                onPress={() => handleSelectCustomer(customer)}
+                                style={({ pressed }) => [styles.customerItem, isSelected ? styles.customerItemActive : null, pressed ? styles.pressed : null]}
+                              >
+                                <View style={styles.customerItemMain}>
+                                  <Text numberOfLines={1} style={styles.customerItemName}>
+                                    {customer.name}
+                                  </Text>
+                                  <Text numberOfLines={1} style={[styles.customerItemAddress, !address ? styles.customerItemAddressMuted : null]}>
+                                    {address || "Alamat belum diisi"}
+                                  </Text>
+                                  {isSelected ? (
+                                    <>
+                                      <Text numberOfLines={1} style={styles.customerItemMeta}>
+                                        {formatCustomerPhoneDisplay(customer.phone_normalized)}
+                                      </Text>
+                                      {email ? (
+                                        <Text numberOfLines={1} style={styles.customerItemDetail}>
+                                          {email}
+                                        </Text>
+                                      ) : null}
+                                      {gender ? (
+                                        <Text numberOfLines={1} style={styles.customerItemDetail}>
+                                          {gender}
+                                        </Text>
+                                      ) : null}
+                                      {note ? (
+                                        <Text numberOfLines={1} style={styles.customerItemNote}>
+                                          {note}
+                                        </Text>
+                                      ) : null}
+                                    </>
+                                  ) : null}
+                                </View>
+                                <Ionicons color={isSelected ? theme.colors.info : theme.colors.textMuted} name={isSelected ? "checkmark-circle" : "chevron-forward"} size={16} />
+                              </Pressable>
+                            );
+                          })}
+                        </ScrollView>
+                      ) : (
+                        <Text style={styles.infoText}>Data konsumen tidak ditemukan.</Text>
+                      )}
+                    </View>
+                  ) : null}
+
+                </View>
+              ) : null}
+
+              {step === "services" ? (
+                <View style={styles.sectionWrap}>
+                  <View style={styles.stepHeader}>
+                    <View style={styles.stepHeaderIconWrap}>
+                      <Ionicons color={theme.colors.info} name="pricetag-outline" size={16} />
+                    </View>
+                    <View style={styles.stepHeaderTextWrap}>
+                      <Text style={styles.stepHeaderTitle}>Pilih Layanan</Text>
+                      <Text style={styles.stepHeaderSubtitle}>Isi qty/berat untuk layanan yang dipilih.</Text>
+                    </View>
+                  </View>
+
+                  <TextInput onChangeText={setServiceKeyword} placeholder="Cari layanan" placeholderTextColor={theme.colors.textMuted} style={styles.input} value={serviceKeyword} />
+                  {filteredServices.map((service) => {
+                    const metricRaw = metrics[service.id] ?? "";
+                    const metricValue = parseMetricInput(metricRaw);
+                    const active = Number.isFinite(metricValue) && metricValue > 0;
+
+                    return (
+                      <View key={service.id} style={[styles.serviceCard, active ? styles.serviceCardActive : null]}>
+                        <View style={styles.serviceHeader}>
+                          <View style={styles.serviceInfo}>
+                            <Text numberOfLines={1} style={styles.serviceName}>
+                              {service.name}
+                            </Text>
+                            <View style={styles.serviceMetaRow}>
+                              <Text style={styles.serviceMeta}>
+                                {formatMoney(service.effective_price_amount)} / {service.unit_type.toUpperCase()}
+                              </Text>
+                              {active ? (
+                                <View style={styles.serviceSelectedPill}>
+                                  <Text style={styles.serviceSelectedPillText}>Dipilih</Text>
+                                </View>
+                              ) : null}
+                            </View>
+                          </View>
+                          <View style={styles.stepperRow}>
+                            <Pressable onPress={() => stepMetric(service, -1)} style={({ pressed }) => [styles.stepperButton, pressed ? styles.pressed : null]}>
+                              <Text style={styles.stepperButtonText}>-</Text>
+                            </Pressable>
+                            <TextInput
+                              keyboardType="numeric"
+                              onChangeText={(value) => updateMetric(service.id, value)}
+                              placeholder={isKgUnit(service.unit_type) ? "KG" : "QTY"}
+                              placeholderTextColor={theme.colors.textMuted}
+                              style={styles.metricInput}
+                              value={metricRaw}
+                            />
+                            <Pressable onPress={() => stepMetric(service, 1)} style={({ pressed }) => [styles.stepperButton, pressed ? styles.pressed : null]}>
+                              <Text style={styles.stepperButtonText}>+</Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                        {active ? <Text style={styles.serviceSubtotal}>Subtotal: {formatMoney(Math.round(metricValue * service.effective_price_amount))}</Text> : null}
+                      </View>
+                    );
+                  })}
+                  <View style={styles.metaBar}>
+                    <View style={styles.metaLeft}>
+                      <Text style={styles.metaLabel}>Subtotal layanan</Text>
+                      <Text style={styles.metaHint}>{selectedLines.length} layanan dipilih</Text>
+                    </View>
+                    <Text style={styles.metaValue}>{formatMoney(subtotal)}</Text>
+                  </View>
+                </View>
+              ) : null}
+
+              {step === "review" ? (
+                <View style={styles.sectionWrap}>
+                  <View style={styles.stepHeader}>
+                    <View style={styles.stepHeaderIconWrap}>
+                      <Ionicons color={theme.colors.info} name="document-text-outline" size={16} />
+                    </View>
+                    <View style={styles.stepHeaderTextWrap}>
+                      <Text style={styles.stepHeaderTitle}>Review Pesanan</Text>
+                      <Text style={styles.stepHeaderSubtitle}>Cek total dan catatan sebelum simpan.</Text>
+                    </View>
+                  </View>
+
+                  <AppPanel style={styles.summaryPanel}>
+                    <Text style={styles.summaryTitle}>Konsumen</Text>
+                    <Text style={styles.summaryText}>{customerName || "-"}</Text>
+                    <Text style={styles.summaryTextMuted}>{customerPhone || "-"}</Text>
+                  </AppPanel>
+
+                  <AppPanel style={styles.summaryPanel}>
+                    <Text style={styles.summaryTitle}>Item Layanan</Text>
+                    {selectedLines.map((line) => (
+                      <View key={line.service.id} style={styles.summaryRow}>
+                        <Text style={styles.summaryText}>
+                          {line.service.name} ({line.metricValue} {line.service.unit_type})
+                        </Text>
+                        <Text style={styles.summaryValue}>{formatMoney(line.subtotal)}</Text>
+                      </View>
+                    ))}
+                  </AppPanel>
+
+                  <TextInput keyboardType="numeric" onChangeText={setShippingFeeInput} placeholder="Ongkir (opsional)" placeholderTextColor={theme.colors.textMuted} style={styles.input} value={shippingFeeInput} />
+                  <TextInput keyboardType="numeric" onChangeText={setDiscountInput} placeholder="Diskon (opsional)" placeholderTextColor={theme.colors.textMuted} style={styles.input} value={discountInput} />
+                  <TextInput multiline onChangeText={setOrderNotes} placeholder="Catatan order (opsional)" placeholderTextColor={theme.colors.textMuted} style={[styles.input, styles.notesInput]} value={orderNotes} />
+
+                  <AppPanel style={styles.summaryPanel}>
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryText}>Subtotal</Text>
+                      <Text style={styles.summaryValue}>{formatMoney(subtotal)}</Text>
+                    </View>
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryText}>Ongkir</Text>
+                      <Text style={styles.summaryValue}>{formatMoney(shippingFee)}</Text>
+                    </View>
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryText}>Diskon</Text>
+                      <Text style={styles.summaryValue}>- {formatMoney(discountAmount)}</Text>
+                    </View>
+                    <View style={styles.summaryDivider} />
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryTotal}>Total Estimasi</Text>
+                      <Text style={styles.summaryTotalValue}>{formatMoney(total)}</Text>
+                    </View>
+                  </AppPanel>
+                </View>
+              ) : null}
+            </AppPanel>
+          )}
+
+          {lastCreatedOrderId && !showCreateForm ? (
+            <AppPanel style={styles.panel}>
+              <AppButton
+                leftElement={<Ionicons color={theme.colors.info} name="receipt-outline" size={18} />}
+                onPress={() =>
+                  navigation.navigate("OrdersTab", {
+                    screen: "OrderDetail",
+                    params: { orderId: lastCreatedOrderId },
+                  })
+                }
+                title="Lihat Detail Order"
+                variant="secondary"
+              />
+            </AppPanel>
+          ) : null}
+
+          {actionMessage ? (
+            <View style={styles.successWrap}>
+              <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={16} />
+              <Text style={styles.successText}>{actionMessage}</Text>
+            </View>
+          ) : null}
+
+          {errorMessage ? (
+            <View style={styles.errorWrap}>
+              <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
+              <Text style={styles.errorText}>{errorMessage}</Text>
+            </View>
+          ) : null}
         </ScrollView>
 
-        {showStickyCreateFooter ? (
-          <View style={styles.stickyFooterWrap}>
-            <View style={styles.stickyFooterHeader}>
-              <Text style={styles.stickyFooterTitle}>Simpan Pesanan</Text>
-              <Text style={styles.stickyFooterMeta}>
-                {draftItems.length} item • {formatMoney(estimatedTotal)}
-              </Text>
-            </View>
-            <View style={[styles.formActions, isTablet || isCompactLandscape ? styles.formActionsWide : null]}>
-              <View style={styles.formActionItem}>
-                <AppButton
-                  disabled={submitting || services.length === 0}
-                  leftElement={<Ionicons color={theme.colors.primaryContrast} name="save-outline" size={18} />}
-                  loading={submitting}
-                  onPress={() => void handleCreateOrder()}
-                  title="Simpan Pesanan"
-                />
+        {showCreateForm ? (
+          <View style={[styles.footer, { paddingBottom: footerBottomPadding }]}>
+            <View style={styles.footerMetaRow}>
+              <View style={styles.footerMetaLeft}>
+                <Text style={styles.footerMetaText}>Langkah {currentStepIndex + 1} dari 3</Text>
+                <Text style={styles.footerMetaHint}>{selectedLines.length} layanan aktif</Text>
               </View>
-              <View style={styles.formActionItem}>
+              <Text style={styles.footerMetaValue}>{formatMoney(total)}</Text>
+            </View>
+            <View style={styles.footerActions}>
+              <View style={styles.footerActionItem}>
+                <AppButton leftElement={<Ionicons color={theme.colors.textPrimary} name="arrow-back-outline" size={18} />} onPress={previousStep} title={step === "customer" ? "Batal" : "Kembali"} variant="ghost" />
+              </View>
+              <View style={styles.footerActionItem}>
                 <AppButton
-                  leftElement={<Ionicons color={theme.colors.textPrimary} name="refresh-outline" size={18} />}
-                  onPress={handleCancelCreate}
-                  title="Batal"
-                  variant="ghost"
+                  disabled={primaryDisabled}
+                  leftElement={<Ionicons color={theme.colors.primaryContrast} name={step === "review" ? "save-outline" : "arrow-forward-outline"} size={18} />}
+                  loading={submitting && step === "review"}
+                  onPress={() => {
+                    if (step === "review") {
+                      void submitOrder();
+                      return;
+                    }
+                    nextStep();
+                  }}
+                  title={step === "review" ? "Simpan Pesanan" : "Lanjut"}
                 />
               </View>
             </View>
@@ -940,221 +1025,242 @@ export function QuickActionScreen() {
 function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: boolean) {
   const contentHorizontal = isTablet ? theme.spacing.xl : theme.spacing.lg;
   const contentTop = isCompactLandscape ? theme.spacing.md : theme.spacing.lg;
-  const baseInputHeight = isTablet ? 48 : 44;
 
   return StyleSheet.create({
-    screenLayout: {
+    root: {
       flex: 1,
     },
-    scrollView: {
+    scroll: {
       flex: 1,
+    },
+    pageHeader: {
+      paddingHorizontal: 2,
+    },
+    pageTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.heavy,
+      fontSize: isTablet ? 26 : 22,
+      lineHeight: isTablet ? 33 : 29,
     },
     content: {
       flexGrow: 1,
       paddingHorizontal: contentHorizontal,
       paddingTop: contentTop,
       paddingBottom: theme.spacing.xxl,
-      gap: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
+      gap: theme.spacing.md,
     },
-    contentWithStickyFooter: {
+    contentWithFooter: {
       paddingBottom: theme.spacing.xl,
     },
-    heroPanel: {
+    hero: {
       gap: theme.spacing.sm,
       borderColor: theme.colors.borderStrong,
       backgroundColor: theme.mode === "dark" ? "#122d46" : "#f2faff",
     },
-    heroTopRow: {
-      flexDirection: isCompactLandscape ? "row" : "column",
-      alignItems: isCompactLandscape ? "center" : "flex-start",
-      justifyContent: "space-between",
-      gap: theme.spacing.xs,
-    },
-    heroBadge: {
+    heroBadgeRow: {
       flexDirection: "row",
       alignItems: "center",
       gap: 6,
-      borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.pill,
-      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.9)",
-      paddingHorizontal: 10,
-      paddingVertical: 5,
     },
-    heroBadgeText: {
+    heroBadge: {
       color: theme.colors.info,
       fontFamily: theme.fonts.bold,
       fontSize: 11,
-      letterSpacing: 0.2,
       textTransform: "uppercase",
-    },
-    heroOutletMeta: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: isTablet ? 13 : 12,
-      lineHeight: 18,
+      letterSpacing: 0.2,
     },
     title: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.heavy,
-      fontSize: isTablet ? 28 : 24,
+      fontSize: isTablet ? 27 : 23,
       lineHeight: isTablet ? 34 : 30,
     },
     subtitle: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
-      fontSize: isTablet ? 14 : 13,
-      lineHeight: isTablet ? 20 : 18,
+      fontSize: 13,
+      lineHeight: 19,
     },
-    heroMetaWrap: {
-      flexDirection: isCompactLandscape || isTablet ? "row" : "column",
-      flexWrap: "wrap",
-      gap: theme.spacing.xs,
-    },
-    heroMetaChip: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: theme.radii.pill,
-      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.8)",
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-    },
-    heroMetaText: {
-      color: theme.colors.textMuted,
-      fontFamily: theme.fonts.medium,
-      fontSize: 12,
-      flexShrink: 1,
-    },
-    panel: {
-      gap: theme.spacing.md,
-    },
-    sectionHeaderRow: {
+    heroMetaRow: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
       gap: theme.spacing.sm,
     },
-    sectionTitle: {
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.bold,
-      fontSize: isTablet ? 17 : 16,
-    },
-    sectionMeta: {
+    outletText: {
+      flex: 1,
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.semibold,
       fontSize: 12,
+      lineHeight: 17,
+    },
+    heroStatusPill: {
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.86)",
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+    },
+    heroStatusText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11.5,
+    },
+    panel: {
+      gap: theme.spacing.md,
     },
     actionList: {
       gap: theme.spacing.sm,
     },
-    skeletonWrap: {
-      gap: 6,
-      marginTop: 2,
-    },
-    formPanel: {
-      gap: theme.spacing.md,
-    },
-    formHeaderRow: {
-      flexDirection: "row",
-      alignItems: "flex-start",
-      gap: theme.spacing.xs,
-    },
-    formHeaderTextWrap: {
-      flex: 1,
-      gap: 2,
-    },
-    formTitle: {
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.bold,
-      fontSize: isTablet ? 16 : 15,
-    },
-    formSubtitle: {
+    infoText: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 18,
     },
-    customerPickerWrap: {
+    stepsRow: {
+      flexDirection: "row",
+      gap: 8,
+      marginBottom: 2,
+    },
+    stepProgressTrack: {
+      height: 5,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.border,
+      overflow: "hidden",
+      marginTop: 2,
+      marginBottom: 4,
+    },
+    stepProgressFill: {
+      height: "100%",
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.info,
+    },
+    stepItem: {
+      flex: 1,
+      alignItems: "center",
+      gap: 4,
+    },
+    stepDot: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    stepDotActive: {
+      borderColor: theme.colors.info,
+      backgroundColor: theme.colors.primarySoft,
+    },
+    stepDotDone: {
+      borderColor: theme.colors.success,
+      backgroundColor: theme.mode === "dark" ? "#173f2d" : "#edf9f1",
+    },
+    stepDotText: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.bold,
+      fontSize: 12,
+    },
+    stepDotTextActive: {
+      color: theme.colors.info,
+    },
+    stepText: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+    },
+    stepTextActive: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+    },
+    sectionWrap: {
+      gap: theme.spacing.xs,
+    },
+    stepHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.md,
       backgroundColor: theme.colors.surfaceSoft,
       paddingHorizontal: 11,
       paddingVertical: 10,
-      gap: theme.spacing.xs,
     },
-    customerPickerHeaderRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: theme.spacing.xs,
-    },
-    customerPickerToggleButton: {
+    stepHeaderIconWrap: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.pill,
       backgroundColor: theme.colors.surface,
-      flexDirection: "row",
       alignItems: "center",
-      gap: 4,
-      paddingHorizontal: 10,
-      paddingVertical: 5,
+      justifyContent: "center",
     },
-    customerPickerToggleButtonPressed: {
-      opacity: 0.78,
+    stepHeaderTextWrap: {
+      flex: 1,
+      gap: 1,
     },
-    customerPickerToggleButtonText: {
-      color: theme.colors.info,
+    stepHeaderTitle: {
+      color: theme.colors.textPrimary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 12,
+      fontSize: 13,
+      lineHeight: 18,
     },
-    customerPickerHint: {
+    stepHeaderSubtitle: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
-      fontSize: 12,
-      lineHeight: 17,
+      fontSize: 11.5,
+      lineHeight: 16,
     },
-    selectedCustomerCard: {
+    inlineActions: {
+      flexDirection: "row",
+      gap: 8,
+    },
+    inlineAction: {
+      flex: 1,
       borderWidth: 1,
-      borderColor: theme.colors.info,
+      borderColor: theme.colors.border,
       borderRadius: theme.radii.md,
       backgroundColor: theme.colors.surface,
       paddingHorizontal: 10,
       paddingVertical: 8,
-      gap: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
     },
-    selectedCustomerName: {
-      color: theme.colors.textPrimary,
+    inlineActionSingle: {
+      flex: 0,
+      alignSelf: "flex-start",
+      minWidth: 170,
+    },
+    inlineActionText: {
+      color: theme.colors.textSecondary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 12.5,
-      lineHeight: 18,
-    },
-    selectedCustomerMeta: {
-      color: theme.colors.textMuted,
-      fontFamily: theme.fonts.medium,
       fontSize: 11.5,
-      lineHeight: 16,
+      textAlign: "center",
     },
-    customerPickerBody: {
+    customerPanel: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surfaceSoft,
+      padding: 10,
       gap: theme.spacing.xs,
     },
-    customerOptionList: {
-      maxHeight: isTablet ? 320 : 260,
+    customerList: {
+      maxHeight: isTablet ? 300 : 220,
     },
-    customerOptionListContent: {
+    customerListContent: {
       gap: 6,
       paddingBottom: 2,
     },
-    customerResultMeta: {
-      color: theme.colors.textMuted,
-      fontFamily: theme.fonts.medium,
-      fontSize: 11.5,
-      lineHeight: 16,
-    },
-    customerOptionItem: {
+    customerItem: {
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.md,
@@ -1166,72 +1272,299 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       justifyContent: "space-between",
       gap: theme.spacing.xs,
     },
-    customerOptionItemSelected: {
+    customerItemActive: {
       borderColor: theme.colors.info,
       backgroundColor: theme.colors.primarySoft,
     },
-    customerOptionItemPressed: {
-      opacity: 0.78,
-    },
-    customerOptionMain: {
+    customerItemMain: {
       flex: 1,
       gap: 1,
     },
-    customerOptionName: {
+    customerItemName: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.semibold,
       fontSize: 12.5,
       lineHeight: 18,
     },
-    customerOptionPhone: {
+    customerItemMeta: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
       fontSize: 11.5,
       lineHeight: 16,
     },
-    customerOptionNote: {
+    customerItemAddress: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 15,
+    },
+    customerItemAddressMuted: {
+      color: theme.colors.textMuted,
+    },
+    customerItemDetail: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 15,
+    },
+    customerItemNote: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
       fontSize: 11,
       lineHeight: 15,
     },
-    customerPickerEmptyText: {
+    selectedCustomerCard: {
+      borderWidth: 1,
+      borderColor: theme.colors.info,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 11,
+      paddingVertical: 9,
+      gap: 2,
+    },
+    selectedCustomerHeadRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.xs,
+    },
+    selectedCustomerBadge: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
+      textTransform: "uppercase",
+      letterSpacing: 0.2,
+    },
+    selectedCustomerName: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13,
+      lineHeight: 18,
+    },
+    selectedCustomerMeta: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+      lineHeight: 16,
+    },
+    selectedCustomerMetaMuted: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 15,
+    },
+    customerInsightStack: {
+      gap: 8,
+    },
+    customerInsightPanel: {
+      borderColor: theme.colors.borderStrong,
+      backgroundColor: theme.colors.surfaceSoft,
+      gap: 7,
+    },
+    customerInsightHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
+    },
+    customerInsightTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12.5,
+      lineHeight: 17,
+    },
+    customerInsightRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 8,
+    },
+    customerInsightIconWrap: {
+      width: 23,
+      height: 23,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: 12,
+      backgroundColor: theme.colors.surface,
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: 1,
+    },
+    customerInsightTextWrap: {
+      flex: 1,
+      gap: 1,
+    },
+    customerInsightLabel: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 10.5,
+      textTransform: "uppercase",
+      letterSpacing: 0.2,
+    },
+    customerInsightValue: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11.5,
+      lineHeight: 16,
+    },
+    customerInsightValueMuted: {
+      color: theme.colors.textMuted,
+    },
+    customerMetricGrid: {
+      flexDirection: "row",
+      gap: 8,
+    },
+    customerMetricItem: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 9,
+      paddingVertical: 8,
+      gap: 1,
+    },
+    customerMetricValue: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
       fontSize: 12,
       lineHeight: 17,
-      textAlign: "center",
-      paddingVertical: 10,
     },
-    customerPickerActions: {
+    customerMetricLabel: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 10.5,
+      lineHeight: 14,
+    },
+    customerInsightHint: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 15,
+    },
+    serviceCard: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+      gap: 6,
+    },
+    serviceCardActive: {
+      borderColor: theme.colors.info,
+      backgroundColor: theme.colors.primarySoft,
+    },
+    serviceHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.xs,
+    },
+    serviceInfo: {
+      flex: 1,
+      gap: 1,
+    },
+    serviceName: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13,
+      lineHeight: 18,
+    },
+    serviceMetaRow: {
       flexDirection: "row",
       alignItems: "center",
       gap: 8,
+      flexWrap: "wrap",
     },
-    customerPickerActionButton: {
-      flex: 1,
+    serviceMeta: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+    },
+    serviceSelectedPill: {
+      borderWidth: 1,
+      borderColor: theme.colors.info,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+    },
+    serviceSelectedPillText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 10.5,
+      textTransform: "uppercase",
+      letterSpacing: 0.2,
+    },
+    serviceSubtotal: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11.5,
+      lineHeight: 16,
+    },
+    stepperRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    stepperButton: {
+      width: 30,
+      height: 30,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.sm,
+      backgroundColor: theme.colors.surfaceSoft,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    stepperButtonText: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 15,
+    },
+    metricInput: {
+      minWidth: 64,
+      maxWidth: 78,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.sm,
+      backgroundColor: theme.colors.inputBg,
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13,
+      textAlign: "center",
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+    },
+    metaBar: {
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
       borderRadius: theme.radii.md,
-      backgroundColor: theme.colors.surface,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 6,
-      paddingVertical: 8,
+      backgroundColor: theme.colors.surfaceSoft,
       paddingHorizontal: 10,
+      paddingVertical: 8,
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
     },
-    customerPickerActionButtonPressed: {
-      opacity: 0.78,
+    metaLeft: {
+      flex: 1,
+      gap: 1,
     },
-    customerPickerActionButtonText: {
+    metaLabel: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.semibold,
       fontSize: 12,
     },
-    inputLabel: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
+    metaHint: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 15,
+    },
+    metaValue: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.bold,
       fontSize: 12.5,
     },
     input: {
@@ -1242,7 +1575,7 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.medium,
       fontSize: isTablet ? 14 : 13,
-      minHeight: baseInputHeight,
+      minHeight: isTablet ? 48 : 44,
       paddingHorizontal: 13,
       paddingVertical: isTablet ? 11 : 10,
     },
@@ -1250,138 +1583,61 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       minHeight: isTablet ? 84 : 72,
       textAlignVertical: "top",
     },
-    serviceWrap: {
-      gap: theme.spacing.xs,
+    skeletonWrap: {
+      gap: 6,
+      marginTop: 2,
     },
-    itemList: {
-      gap: theme.spacing.xs,
+    summaryPanel: {
+      gap: 6,
+      borderColor: theme.colors.borderStrong,
+      backgroundColor: theme.colors.surfaceSoft,
     },
-    itemPanel: {
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: theme.radii.md,
-      backgroundColor: theme.colors.surface,
-      paddingHorizontal: 11,
-      paddingVertical: 11,
-      gap: theme.spacing.xs,
+    summaryTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 13,
     },
-    itemHeader: {
+    summaryRow: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
-      gap: theme.spacing.xs,
+      gap: theme.spacing.sm,
     },
-    itemHeaderActions: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      justifyContent: "flex-end",
-      gap: 4,
-    },
-    headerActionIconButton: {
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surfaceSoft,
-      width: 30,
-      height: 30,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    headerActionIconButtonDisabled: {
-      opacity: 0.54,
-    },
-    headerActionIconButtonPressed: {
-      opacity: 0.78,
-    },
-    metricStepperWrap: {
-      gap: 5,
-    },
-    metricStepperRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: theme.spacing.xs,
-    },
-    metricStepperButton: {
-      width: isTablet ? 34 : 32,
-      height: isTablet ? 34 : 32,
-      borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.sm,
-      backgroundColor: theme.colors.surfaceSoft,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    metricStepperButtonPressed: {
-      opacity: 0.78,
-    },
-    metricStepperButtonText: {
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.bold,
-      fontSize: 16,
-      lineHeight: 19,
-    },
-    metricStepperValue: {
-      minWidth: isTablet ? 48 : 42,
-      textAlign: "center",
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: isTablet ? 14 : 13,
-    },
-    itemPriceInfo: {
-      gap: 2,
-    },
-    itemPriceText: {
-      color: theme.colors.textMuted,
+    summaryText: {
+      flex: 1,
+      color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 17,
     },
-    serviceList: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: theme.spacing.xs,
+    summaryTextMuted: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+      lineHeight: 16,
     },
-    serviceChip: {
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surface,
-      paddingHorizontal: 12,
-      paddingVertical: isTablet ? 8 : 7,
-    },
-    serviceChipActive: {
-      borderColor: theme.colors.info,
-      backgroundColor: theme.colors.primarySoft,
-    },
-    serviceChipText: {
-      color: theme.colors.textSecondary,
+    summaryValue: {
+      color: theme.colors.textPrimary,
       fontFamily: theme.fonts.semibold,
-      fontSize: isTablet ? 12.5 : 12,
+      fontSize: 12,
     },
-    serviceChipTextActive: {
+    summaryDivider: {
+      height: 1,
+      backgroundColor: theme.colors.border,
+      marginVertical: 2,
+    },
+    summaryTotal: {
+      flex: 1,
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 13,
+    },
+    summaryTotalValue: {
       color: theme.colors.info,
+      fontFamily: theme.fonts.heavy,
+      fontSize: 14,
     },
-    feeRow: {
-      gap: theme.spacing.xs,
-    },
-    feeRowWide: {
-      flexDirection: "row",
-      alignItems: "center",
-    },
-    feeInput: {
-      flex: 1,
-    },
-    formActions: {
-      gap: theme.spacing.xs,
-    },
-    formActionsWide: {
-      flexDirection: "row",
-      alignItems: "center",
-    },
-    formActionItem: {
-      flex: 1,
-    },
-    stickyFooterWrap: {
+    footer: {
       borderTopWidth: 1,
       borderTopColor: theme.colors.border,
       backgroundColor: theme.colors.surface,
@@ -1389,70 +1645,48 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       paddingTop: theme.spacing.xs,
       paddingBottom: isCompactLandscape ? theme.spacing.xs : theme.spacing.sm,
       gap: theme.spacing.xs,
+      shadowColor: "#000",
+      shadowOpacity: theme.mode === "dark" ? 0.35 : 0.08,
+      shadowOffset: { width: 0, height: -3 },
+      shadowRadius: 8,
+      elevation: 6,
     },
-    stickyFooterHeader: {
+    footerMetaRow: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
       gap: theme.spacing.sm,
     },
-    stickyFooterTitle: {
+    footerMetaLeft: {
+      flex: 1,
+      gap: 1,
+    },
+    footerMetaText: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
       fontSize: isTablet ? 13.5 : 13,
     },
-    stickyFooterMeta: {
-      color: theme.colors.info,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 12,
-    },
-    summaryPanel: {
-      gap: 6,
-      borderColor: theme.colors.borderStrong,
-      backgroundColor: theme.colors.surfaceSoft,
-    },
-    summaryRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      gap: theme.spacing.sm,
-    },
-    summaryLabel: {
-      flex: 1,
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.medium,
-      fontSize: isTablet ? 12.5 : 12,
-      lineHeight: 17,
-    },
-    summaryValue: {
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: isTablet ? 12.5 : 12,
-    },
-    summaryDivider: {
-      height: 1,
-      backgroundColor: theme.colors.border,
-      marginVertical: 2,
-    },
-    summaryTotalLabel: {
-      flex: 1,
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.bold,
-      fontSize: isTablet ? 14 : 13,
-    },
-    summaryTotalValue: {
-      color: theme.colors.info,
-      fontFamily: theme.fonts.heavy,
-      fontSize: isTablet ? 15 : 14,
-    },
-    followupPanel: {
-      gap: theme.spacing.sm,
-    },
-    infoText: {
+    footerMetaHint: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 15,
+    },
+    footerMetaValue: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.semibold,
       fontSize: 12,
-      lineHeight: 18,
+    },
+    footerActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.spacing.xs,
+    },
+    footerActionItem: {
+      flex: 1,
+    },
+    pressed: {
+      opacity: 0.78,
     },
     successWrap: {
       borderWidth: 1,

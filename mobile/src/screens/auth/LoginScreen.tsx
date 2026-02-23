@@ -42,15 +42,73 @@ interface LoginLayoutMode {
   isTablet: boolean;
 }
 
+function mapLoginErrorText(raw: string): string {
+  const message = raw.trim();
+  const lower = message.toLowerCase();
+
+  if (lower.includes("provided credentials are incorrect")) {
+    return "Email/nomor HP atau kata sandi tidak sesuai.";
+  }
+
+  if (lower.includes("login field is required")) {
+    return "Email atau nomor HP wajib diisi.";
+  }
+
+  if (lower.includes("password field is required")) {
+    return "Kata sandi wajib diisi.";
+  }
+
+  if (lower.includes("too many login attempts")) {
+    return "Terlalu banyak percobaan login. Coba lagi beberapa saat.";
+  }
+
+  if (lower.includes("your account is inactive")) {
+    return "Akun belum diizinkan login. Hubungi admin tenant.";
+  }
+
+  if (lower.includes("the given data was invalid")) {
+    return "Data login belum valid. Periksa lagi email/nomor HP dan kata sandi.";
+  }
+
+  return message;
+}
+
 function resolveLoginErrorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
     if (!error.response) {
       return "Tidak bisa terhubung ke server. Cek internet atau status API.";
     }
 
-    const responseData = error.response.data as { message?: unknown } | undefined;
+    const responseData = error.response.data as
+      | {
+          message?: unknown;
+          reason_code?: unknown;
+          errors?: Record<string, unknown>;
+        }
+      | undefined;
+
+    if (responseData?.reason_code === "USER_INACTIVE") {
+      return "Akun belum diizinkan login. Hubungi admin tenant.";
+    }
+
+    if (responseData?.errors && typeof responseData.errors === "object") {
+      for (const value of Object.values(responseData.errors)) {
+        if (Array.isArray(value)) {
+          const firstMessage = value.find((item) => typeof item === "string" && item.trim().length > 0);
+          if (typeof firstMessage === "string") {
+            return mapLoginErrorText(firstMessage);
+          }
+          continue;
+        }
+
+        if (typeof value === "string" && value.trim().length > 0) {
+          return mapLoginErrorText(value);
+        }
+      }
+    }
+
     if (responseData && typeof responseData.message === "string" && responseData.message.trim().length > 0) {
-      return responseData.message.trim();
+      return mapLoginErrorText(responseData.message);
     }
 
     if (error.response.status === 401) {
@@ -63,6 +121,10 @@ function resolveLoginErrorMessage(error: unknown): string {
 
     if (error.response.status === 422) {
       return "Data login belum valid. Periksa lagi email/nomor HP dan kata sandi.";
+    }
+
+    if (error.response.status === 429) {
+      return "Terlalu banyak percobaan login. Coba lagi beberapa saat.";
     }
 
     if (error.response.status >= 500) {

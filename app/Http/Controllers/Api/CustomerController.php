@@ -29,6 +29,7 @@ class CustomerController extends Controller
         $validated = $request->validate([
             'q' => ['nullable', 'string', 'max:100'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'page' => ['nullable', 'integer', 'min:1'],
             'include_deleted' => ['nullable', 'boolean'],
         ]);
 
@@ -55,9 +56,18 @@ class CustomerController extends Controller
         }
 
         $limit = (int) ($validated['limit'] ?? 30);
+        $page = (int) ($validated['page'] ?? 1);
+        $result = $query->paginate($limit, ['*'], 'page', $page);
 
         return response()->json([
-            'data' => $query->limit($limit)->get(),
+            'data' => $result->items(),
+            'meta' => [
+                'page' => $result->currentPage(),
+                'per_page' => $result->perPage(),
+                'last_page' => $result->lastPage(),
+                'total' => $result->total(),
+                'has_more' => $result->hasMorePages(),
+            ],
         ]);
     }
 

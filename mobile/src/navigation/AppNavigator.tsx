@@ -92,7 +92,8 @@ function QuickActionTabButton(props: BottomTabBarButtonProps) {
   const minEdge = Math.min(width, height);
   const isTablet = minEdge >= 600;
   const buttonSize = isTablet ? 64 : isLandscape ? 54 : 60;
-  const wrapperTop = isLandscape ? -10 : -16;
+  const wrapperTopIdle = isLandscape ? -10 : -16;
+  const wrapperTopActive = isLandscape ? -4 : -8;
   const haloSize = buttonSize + (isTablet ? 16 : 14);
   const isActive = Boolean(props.accessibilityState?.selected);
 
@@ -112,7 +113,8 @@ function QuickActionTabButton(props: BottomTabBarButtonProps) {
       style={({ pressed }) => [
         styles.quickActionButtonWrap,
         {
-          top: wrapperTop,
+          gap: isActive ? 0 : 6,
+          top: isActive ? wrapperTopActive : wrapperTopIdle,
           transform: [{ scale: pressed ? 0.95 : 1 }],
           opacity: pressed ? 0.92 : 1,
         },
@@ -147,17 +149,19 @@ function QuickActionTabButton(props: BottomTabBarButtonProps) {
       >
         <Ionicons color={theme.colors.primaryContrast} name={isActive ? "add-circle" : "add"} size={isTablet ? 30 : 28} />
       </View>
-      <View
-        style={[
-          styles.quickActionCaption,
-          {
-            backgroundColor: theme.mode === "dark" ? "#0f2f44" : "#eff8ff",
-            borderColor: theme.mode === "dark" ? "rgba(102,191,255,0.35)" : "rgba(31,163,232,0.3)",
-          },
-        ]}
-      >
-        <Text style={[styles.quickActionCaptionText, { color: theme.colors.info }]}>Tambah</Text>
-      </View>
+      {!isActive ? (
+        <View
+          style={[
+            styles.quickActionCaption,
+            {
+              backgroundColor: theme.mode === "dark" ? "#0f2f44" : "#eff8ff",
+              borderColor: theme.mode === "dark" ? "rgba(102,191,255,0.35)" : "rgba(31,163,232,0.3)",
+            },
+          ]}
+        >
+          <Text style={[styles.quickActionCaptionText, { color: theme.colors.info }]}>Tambah</Text>
+        </View>
+      ) : null}
     </Pressable>
   );
 }
