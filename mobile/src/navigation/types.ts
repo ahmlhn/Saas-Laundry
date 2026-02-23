@@ -83,6 +83,7 @@ export type AccountStackParamList = {
         outletLabel?: string;
       }
     | undefined;
+  TenantManagement: undefined;
   FinanceTools: undefined;
   PrinterNote: undefined;
   HelpInfo: undefined;

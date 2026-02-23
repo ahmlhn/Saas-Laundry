@@ -10,6 +10,7 @@ import { StatusPill } from "../../components/ui/StatusPill";
 import {
   canManageFinance,
   canManagePrinterNote,
+  canManageTenantProfile,
   canOpenWaModule,
   hasAnyRole,
   isWaPlanEligible,
@@ -66,6 +67,7 @@ export function AccountHubScreen() {
 
   const roles = session.roles ?? [];
   const planKey = session.plan.key ?? null;
+  const tenantAllowed = canManageTenantProfile(roles);
   const waAllowed = canOpenWaModule(roles);
   const waPlanAllowed = isWaPlanEligible(planKey);
   const outletLabel = selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "Outlet belum dipilih";
@@ -89,6 +91,14 @@ export function AccountHubScreen() {
       icon: "business-outline",
       route: "Outlets",
       allowedRoles: ["owner", "admin"],
+    },
+    {
+      title: "Kelola Tenant",
+      subtitle: "Profil tenant, status, dan ringkasan data",
+      icon: "layers-outline",
+      route: "TenantManagement",
+      allowedRoles: ["owner", "tenant_manager"],
+      locked: !tenantAllowed,
     },
     {
       title: "Zona Antar",

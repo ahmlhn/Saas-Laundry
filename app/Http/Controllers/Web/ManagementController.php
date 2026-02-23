@@ -1223,7 +1223,7 @@ class ManagementController extends Controller
     private function availableRoleOptions(User $actor): Collection
     {
         $orderedKeys = $this->isOwner($actor)
-            ? ['admin', 'cashier', 'worker', 'courier']
+            ? ['tenant_manager', 'admin', 'cashier', 'worker', 'courier']
             : ['cashier', 'worker', 'courier'];
 
         $rows = Role::query()

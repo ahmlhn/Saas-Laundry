@@ -1,4 +1,4 @@
-export type UserRole = "owner" | "admin" | "cashier" | "worker" | "courier";
+export type UserRole = "owner" | "tenant_manager" | "admin" | "cashier" | "worker" | "courier";
 
 const WA_ALLOWED_PLAN_KEYS = new Set(["premium", "pro"]);
 
@@ -28,6 +28,10 @@ export function canManagePrinterNote(roles: string[]): boolean {
 
 export function canOpenWaModule(roles: string[]): boolean {
   return hasAnyRole(roles, ["owner", "admin"]);
+}
+
+export function canManageTenantProfile(roles: string[]): boolean {
+  return hasAnyRole(roles, ["owner", "tenant_manager"]);
 }
 
 export function isWaPlanEligible(planKey: string | null | undefined): boolean {

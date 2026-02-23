@@ -34,6 +34,7 @@ import { FeaturePlaceholderScreen } from "../screens/app/FeaturePlaceholderScree
 import { StaffScreen } from "../screens/app/StaffScreen";
 import { OutletsScreen } from "../screens/app/OutletsScreen";
 import { ShippingZonesScreen } from "../screens/app/ShippingZonesScreen";
+import { TenantManagementScreen } from "../screens/app/TenantManagementScreen";
 import { canSeeQuickActionTab, canSeeReportsTab } from "../lib/accessControl";
 
 const RootStack = createNativeStackNavigator<AppRootStackParamList>();
@@ -72,6 +73,7 @@ function AccountTabNavigator() {
       <AccountStack.Screen name="Staff" component={StaffScreen} />
       <AccountStack.Screen name="Outlets" component={OutletsScreen} />
       <AccountStack.Screen name="ShippingZones" component={ShippingZonesScreen} />
+      <AccountStack.Screen name="TenantManagement" component={TenantManagementScreen} />
       <AccountStack.Screen name="FinanceTools" component={FinanceToolsScreen} />
       <AccountStack.Screen name="PrinterNote" component={PrinterNoteScreen} />
       <AccountStack.Screen name="HelpInfo" component={HelpInfoScreen} />

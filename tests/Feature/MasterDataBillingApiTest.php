@@ -36,6 +36,8 @@ class MasterDataBillingApiTest extends TestCase
 
     private User $admin;
 
+    private User $tenantManager;
+
     private User $cashier;
 
     private User $worker;
@@ -88,6 +90,7 @@ class MasterDataBillingApiTest extends TestCase
         $this->owner = $this->createUserWithRole('owner@master.local', 'owner', [$this->outletA->id, $this->outletB->id]);
         $this->ownerTwo = $this->createUserWithRole('owner2@master.local', 'owner', [$this->outletA->id, $this->outletB->id]);
         $this->admin = $this->createUserWithRole('admin@master.local', 'admin', [$this->outletA->id]);
+        $this->tenantManager = $this->createUserWithRole('tenant.manager@master.local', 'tenant_manager', [$this->outletA->id]);
         $this->cashier = $this->createUserWithRole('cashier@master.local', 'cashier', [$this->outletA->id]);
         $this->worker = $this->createUserWithRole('worker@master.local', 'worker', [$this->outletA->id]);
     }
@@ -822,6 +825,58 @@ class MasterDataBillingApiTest extends TestCase
             ])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['amount']);
+    }
+
+    public function test_tenant_management_endpoint_enforces_role_and_supports_update(): void
+    {
+        $this->apiAs($this->cashier)
+            ->getJson('/api/tenant-management')
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'ROLE_ACCESS_DENIED');
+
+        $this->apiAs($this->tenantManager)
+            ->getJson('/api/tenant-management')
+            ->assertOk()
+            ->assertJsonPath('data.id', $this->tenant->id)
+            ->assertJsonPath('data.name', 'Tenant Master Data');
+
+        $this->apiAs($this->tenantManager)
+            ->patchJson('/api/tenant-management', [
+                'name' => 'Tenant Data Baru',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.name', 'Tenant Data Baru');
+
+        $this->assertDatabaseHas('tenants', [
+            'id' => $this->tenant->id,
+            'name' => 'Tenant Data Baru',
+            'status' => 'active',
+        ]);
+
+        $this->apiAs($this->tenantManager)
+            ->patchJson('/api/tenant-management', [
+                'name' => 'Tenant Data Baru',
+                'status' => 'inactive',
+            ])
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'ROLE_ACCESS_DENIED');
+
+        $this->apiAs($this->owner)
+            ->patchJson('/api/tenant-management', [
+                'name' => 'Tenant Data Owner',
+                'status' => 'inactive',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.name', 'Tenant Data Owner')
+            ->assertJsonPath('data.status', 'inactive');
+
+        $this->assertDatabaseHas('audit_events', [
+            'tenant_id' => $this->tenant->id,
+            'event_key' => 'TENANT_PROFILE_UPDATED',
+            'channel' => 'api',
+            'entity_type' => 'tenant',
+            'entity_id' => $this->tenant->id,
+        ]);
     }
 
     public function test_printer_note_logo_upload_endpoint_supports_upload_and_access_guard(): void

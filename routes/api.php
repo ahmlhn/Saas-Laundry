@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\ServiceCatalogController;
 use App\Http\Controllers\Api\ServiceProcessTagController;
 use App\Http\Controllers\Api\ShippingZoneController;
 use App\Http\Controllers\Api\SyncController;
+use App\Http\Controllers\Api\TenantManagementController;
 use App\Http\Controllers\Api\UserManagementController;
 use App\Http\Controllers\Api\WaController;
 use Illuminate\Support\Facades\Route;
@@ -35,6 +36,8 @@ Route::prefix('auth')->group(function (): void {
 Route::middleware(['auth:sanctum', 'outlet.access'])->group(function (): void {
     Route::get('/me', [AuthController::class, 'me']);
     Route::get('/outlets/allowed', [OutletContextController::class, 'allowed']);
+    Route::get('/tenant-management', [TenantManagementController::class, 'show']);
+    Route::patch('/tenant-management', [TenantManagementController::class, 'update']);
 
     Route::get('/orders', [OrderController::class, 'index']);
     Route::post('/orders', [OrderController::class, 'store']);

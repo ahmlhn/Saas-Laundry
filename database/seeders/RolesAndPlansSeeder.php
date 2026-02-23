@@ -15,6 +15,7 @@ class RolesAndPlansSeeder extends Seeder
     {
         $roles = [
             ['key' => 'owner', 'name' => 'Owner'],
+            ['key' => 'tenant_manager', 'name' => 'Manajer Tenant'],
             ['key' => 'admin', 'name' => 'Admin'],
             ['key' => 'cashier', 'name' => 'Kasir'],
             ['key' => 'worker', 'name' => 'Pekerja'],
