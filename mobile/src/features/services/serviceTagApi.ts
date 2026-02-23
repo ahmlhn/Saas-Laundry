@@ -1,4 +1,5 @@
 import { httpClient } from "../../lib/httpClient";
+import { toQueryBoolean } from "../../lib/httpQuery";
 import { getCachedValue, invalidateCache, setCachedValue } from "../../lib/queryCache";
 import type { ServiceProcessTag } from "../../types/service";
 
@@ -36,7 +37,7 @@ export async function listServiceProcessTags(params: ListServiceProcessTagsParam
   const response = await httpClient.get<TagListResponse>("/service-process-tags", {
     params: {
       q: params.q?.trim() || undefined,
-      include_deleted: params.includeDeleted || undefined,
+      include_deleted: toQueryBoolean(params.includeDeleted),
     },
   });
 

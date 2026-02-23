@@ -1,4 +1,5 @@
 import { httpClient } from "../../lib/httpClient";
+import { toQueryBoolean } from "../../lib/httpQuery";
 import { getCachedValue, invalidateCache, setCachedValue } from "../../lib/queryCache";
 import type { ServiceCatalogItem, ServiceCreatePayload, ServiceType, ServiceUpdatePayload } from "../../types/service";
 
@@ -73,12 +74,12 @@ export async function listServices(params: ListServicesParams = {}): Promise<Ser
   const response = await httpClient.get<ServicesResponse>("/services", {
     params: {
       outlet_id: params.outletId || undefined,
-      include_deleted: params.includeDeleted || undefined,
-      active: typeof params.active === "boolean" ? params.active : undefined,
+      include_deleted: toQueryBoolean(params.includeDeleted),
+      active: toQueryBoolean(params.active),
       service_type: serviceTypes.length > 0 ? serviceTypes : undefined,
       parent_id: params.parentId === undefined ? undefined : params.parentId,
-      is_group: typeof params.isGroup === "boolean" ? params.isGroup : undefined,
-      with_children: params.withChildren || undefined,
+      is_group: toQueryBoolean(params.isGroup),
+      with_children: toQueryBoolean(params.withChildren),
       q: params.q?.trim() || undefined,
       sort: params.sort || undefined,
       limit: params.limit || undefined,

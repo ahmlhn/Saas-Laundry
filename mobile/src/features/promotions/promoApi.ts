@@ -1,4 +1,5 @@
 import { httpClient } from "../../lib/httpClient";
+import { toQueryBoolean } from "../../lib/httpQuery";
 import { getCachedValue, invalidateCache, setCachedValue } from "../../lib/queryCache";
 import type { Promotion, PromotionCreatePayload, PromotionSections, PromotionUpdatePayload } from "../../types/promotion";
 
@@ -63,7 +64,7 @@ export async function listPromotions(params: ListPromotionsParams = {}): Promise
       q: params.q?.trim() || undefined,
       status: params.status || undefined,
       promo_type: params.promoType || undefined,
-      include_deleted: params.includeDeleted || undefined,
+      include_deleted: toQueryBoolean(params.includeDeleted),
     },
   });
 

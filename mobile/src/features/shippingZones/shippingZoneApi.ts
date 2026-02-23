@@ -1,4 +1,5 @@
 import { httpClient } from "../../lib/httpClient";
+import { toQueryBoolean } from "../../lib/httpQuery";
 import { getCachedValue, invalidateCache, setCachedValue } from "../../lib/queryCache";
 import type { ShippingZone } from "../../types/shippingZone";
 
@@ -42,7 +43,7 @@ export async function listShippingZones(params: ListShippingZonesParams = {}): P
   const response = await httpClient.get<ShippingZonesResponse>("/shipping-zones", {
     params: {
       outlet_id: params.outletId || undefined,
-      active: typeof params.active === "boolean" ? params.active : undefined,
+      active: toQueryBoolean(params.active),
     },
   });
 

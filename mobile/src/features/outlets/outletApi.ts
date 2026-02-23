@@ -1,4 +1,5 @@
 import { httpClient } from "../../lib/httpClient";
+import { toQueryBoolean } from "../../lib/httpQuery";
 import { getCachedValue, invalidateCache, setCachedValue } from "../../lib/queryCache";
 import type { OutletItem } from "../../types/outlet";
 
@@ -41,7 +42,7 @@ export async function listOutlets(params: ListOutletsParams = {}): Promise<Outle
     params: {
       q: query || undefined,
       limit,
-      include_deleted: params.includeDeleted || undefined,
+      include_deleted: toQueryBoolean(params.includeDeleted),
     },
   });
 
