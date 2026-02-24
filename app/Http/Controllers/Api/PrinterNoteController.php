@@ -10,6 +10,7 @@ use App\Models\PrinterNoteSetting;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -30,14 +31,14 @@ class PrinterNoteController extends Controller
 
         $validated = $request->validate([
             'outlet_id' => ['required', 'uuid'],
-            'logo' => ['required', 'file', 'image', 'max:2048', 'mimes:jpg,jpeg,png,webp'],
+            'logo' => ['required', 'file', 'max:4096', 'mimetypes:image/jpeg,image/jpg,image/png,image/webp,image/heic,image/heif'],
         ]);
 
         $this->ensureOutletAccess($user, $validated['outlet_id']);
         $sourceChannel = $this->resolveSourceChannel($request, 'mobile');
 
         $logo = $validated['logo'];
-        $extension = $logo->getClientOriginalExtension() ?: 'jpg';
+        $extension = $this->resolveLogoExtension($logo);
         $directory = sprintf('printer-logos/%s/%s', $user->tenant_id, $validated['outlet_id']);
         $filename = (string) Str::uuid().'.'.strtolower($extension);
         $path = $logo->storeAs($directory, $filename, 'public');
@@ -225,6 +226,23 @@ class PrinterNoteController extends Controller
         $raw = strtolower((string) $request->header('X-Source-Channel', $fallback));
 
         return in_array($raw, ['mobile', 'web', 'system'], true) ? $raw : $fallback;
+    }
+
+    private function resolveLogoExtension(UploadedFile $file): string
+    {
+        $candidate = strtolower((string) $file->getClientOriginalExtension());
+        if ($candidate !== '') {
+            return $candidate === 'jpeg' ? 'jpg' : $candidate;
+        }
+
+        $mime = strtolower((string) $file->getClientMimeType());
+        return match ($mime) {
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+            'image/heif' => 'heif',
+            'image/heic' => 'heic',
+            default => 'jpg',
+        };
     }
 
     /**

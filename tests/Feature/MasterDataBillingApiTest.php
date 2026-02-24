@@ -996,6 +996,14 @@ class MasterDataBillingApiTest extends TestCase
             ->getJson('/api/printer-note/settings?outlet_id='.$this->outletB->id)
             ->assertStatus(403)
             ->assertJsonPath('reason_code', 'OUTLET_ACCESS_DENIED');
+
+        $this->apiAs($this->cashier)->post('/api/printer-note/logo', [
+            'outlet_id' => $this->outletA->id,
+            'logo' => UploadedFile::fake()->create('invalid.pdf', 100, 'application/pdf'),
+        ], [
+            'Accept' => 'application/json',
+        ])
+            ->assertStatus(422);
     }
 
     private function createUserWithRole(string $email, string $roleKey, array $outletIds): User

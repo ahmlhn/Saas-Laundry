@@ -85,9 +85,31 @@ export async function upsertPrinterNoteSettingsToServer(payload: UpsertPrinterNo
 
 export async function uploadPrinterLogo(payload: UploadPrinterLogoPayload): Promise<UploadedPrinterLogo> {
   const formData = new FormData();
-  const type = payload.mimeType || "image/jpeg";
-  const extension = type.includes("/") ? type.split("/")[1] : "jpg";
-  const name = payload.fileName?.trim() || `logo-${Date.now()}.${extension}`;
+  const uriExtensionMatch = payload.uri.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
+  const uriExtension = uriExtensionMatch?.[1]?.toLowerCase() || "";
+
+  const resolvedType =
+    payload.mimeType?.trim() ||
+    (uriExtension === "png"
+      ? "image/png"
+      : uriExtension === "webp"
+        ? "image/webp"
+        : uriExtension === "heic" || uriExtension === "heif"
+          ? "image/heic"
+          : "image/jpeg");
+
+  const resolvedExtension = (() => {
+    if (uriExtension) {
+      return uriExtension;
+    }
+    if (resolvedType.includes("/")) {
+      return resolvedType.split("/")[1].toLowerCase();
+    }
+    return "jpg";
+  })();
+
+  const normalizedExtension = resolvedExtension === "jpeg" ? "jpg" : resolvedExtension;
+  const name = payload.fileName?.trim() || `logo-${Date.now()}.${normalizedExtension}`;
 
   formData.append("outlet_id", payload.outletId);
   formData.append(
@@ -95,15 +117,12 @@ export async function uploadPrinterLogo(payload: UploadPrinterLogoPayload): Prom
     {
       uri: payload.uri,
       name,
-      type,
+      type: resolvedType,
     } as any
   );
 
-  const response = await httpClient.post<UploadPrinterLogoResponse>("/printer-note/logo", formData, {
-    headers: {
-      "Content-Type": "multipart/form-data",
-    },
-  });
+  // Let Axios/React Native set multipart boundary automatically.
+  const response = await httpClient.post<UploadPrinterLogoResponse>("/printer-note/logo", formData);
 
   return response.data.data;
 }

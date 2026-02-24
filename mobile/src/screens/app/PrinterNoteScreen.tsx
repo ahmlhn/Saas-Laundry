@@ -245,7 +245,7 @@ export function PrinterNoteScreen() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ["images"],
         allowsEditing: true,
         quality: 0.8,
       });
@@ -255,6 +255,10 @@ export function PrinterNoteScreen() {
       }
 
       const asset = result.assets[0];
+      if (typeof asset.fileSize === "number" && asset.fileSize > 4 * 1024 * 1024) {
+        setErrorMessage("Ukuran logo terlalu besar. Maksimal 4 MB.");
+        return;
+      }
       const uploadResult = await uploadPrinterLogo({
         outletId: selectedOutlet.id,
         uri: asset.uri,
