@@ -6,6 +6,7 @@ use App\Domain\Audit\AuditEventKeys;
 use App\Domain\Audit\AuditTrailService;
 use App\Domain\Billing\QuotaExceededException;
 use App\Domain\Billing\QuotaService;
+use App\Domain\Billing\TenantWriteAccessException;
 use App\Domain\Messaging\WaDispatchService;
 use App\Domain\Orders\OrderStatusTransitionValidator;
 use App\Http\Controllers\Controller;
@@ -122,6 +123,7 @@ class OrderController extends Controller
         /** @var User $user */
         $user = $request->user();
         $this->ensureRole($user, ['owner', 'admin', 'cashier']);
+        $this->ensureOperationalWriteAccess($user->tenant_id);
         $sourceChannel = $this->resolveSourceChannel($request, 'web');
         $actorUserId = $user->id;
 
@@ -266,6 +268,13 @@ class OrderController extends Controller
 
                 return $order;
             });
+        } catch (TenantWriteAccessException $e) {
+            return response()->json([
+                'reason_code' => 'SUBSCRIPTION_READ_ONLY',
+                'message' => 'Tenant subscription is not active for write operations.',
+                'subscription_state' => $e->subscriptionState,
+                'write_access_mode' => $e->writeAccessMode,
+            ], 423);
         } catch (QuotaExceededException $e) {
             return response()->json([
                 'reason_code' => 'QUOTA_EXCEEDED',
@@ -313,6 +322,7 @@ class OrderController extends Controller
         $user = $request->user();
         $this->ensureRole($user, ['owner', 'admin', 'cashier']);
         $this->ensureOrderAccess($user, $order);
+        $this->ensureOperationalWriteAccess($user->tenant_id);
         $sourceChannel = $this->resolveSourceChannel($request, 'web');
         $actorUserId = $user->id;
 
@@ -376,6 +386,7 @@ class OrderController extends Controller
         $user = $request->user();
         $this->ensureRole($user, ['owner', 'admin', 'worker']);
         $this->ensureOrderAccess($user, $order);
+        $this->ensureOperationalWriteAccess($user->tenant_id);
         $sourceChannel = $this->resolveSourceChannel($request, 'web');
 
         $validated = $request->validate([
@@ -442,6 +453,7 @@ class OrderController extends Controller
         $user = $request->user();
         $this->ensureRole($user, ['owner', 'admin', 'courier']);
         $this->ensureOrderAccess($user, $order);
+        $this->ensureOperationalWriteAccess($user->tenant_id);
         $sourceChannel = $this->resolveSourceChannel($request, 'web');
 
         if (! $order->is_pickup_delivery) {
@@ -533,6 +545,7 @@ class OrderController extends Controller
         $user = $request->user();
         $this->ensureRole($user, ['owner', 'admin']);
         $this->ensureOrderAccess($user, $order);
+        $this->ensureOperationalWriteAccess($user->tenant_id);
         $sourceChannel = $this->resolveSourceChannel($request, 'web');
 
         if (! $order->is_pickup_delivery) {
@@ -590,6 +603,7 @@ class OrderController extends Controller
         $user = $request->user();
         $this->ensureRole($user, ['owner', 'admin', 'cashier']);
         $this->ensureOrderAccess($user, $order);
+        $this->ensureOperationalWriteAccess($user->tenant_id);
         $sourceChannel = $this->resolveSourceChannel($request, 'web');
 
         if ($user->hasRole('cashier') && in_array((string) $order->courier_status, ['pickup_on_the_way', 'picked_up', 'at_outlet', 'delivery_pending', 'delivery_on_the_way', 'delivered'], true)) {
@@ -692,6 +706,24 @@ class OrderController extends Controller
             'reason_code' => 'ROLE_ACCESS_DENIED',
             'message' => 'You are not allowed to perform this action.',
         ], 403));
+    }
+
+    private function ensureOperationalWriteAccess(?string $tenantId): void
+    {
+        if (! is_string($tenantId) || $tenantId === '') {
+            return;
+        }
+
+        try {
+            $this->quotaService->ensureTenantWriteAccess($tenantId);
+        } catch (TenantWriteAccessException $e) {
+            abort(response()->json([
+                'reason_code' => 'SUBSCRIPTION_READ_ONLY',
+                'message' => 'Tenant subscription is not active for write operations.',
+                'subscription_state' => $e->subscriptionState,
+                'write_access_mode' => $e->writeAccessMode,
+            ], 423));
+        }
     }
 
     private function resolveSourceChannel(Request $request, string $fallback = 'web'): string

@@ -6,6 +6,7 @@ use App\Domain\Audit\AuditEventKeys;
 use App\Domain\Audit\AuditTrailService;
 use App\Domain\Billing\QuotaExceededException;
 use App\Domain\Billing\QuotaService;
+use App\Domain\Billing\TenantWriteAccessException;
 use App\Domain\Messaging\WaDispatchService;
 use App\Domain\Orders\OrderStatusTransitionValidator;
 use App\Http\Controllers\Controller;
@@ -308,6 +309,7 @@ class OrderBoardController extends Controller
         /** @var User $user */
         $user = $request->user();
         $this->ensurePanelAccess($user, $tenant);
+        $this->ensureOperationalWriteAccess($tenant->id);
 
         $validated = $request->validate([
             'outlet_id' => ['required', 'uuid'],
@@ -633,6 +635,7 @@ class OrderBoardController extends Controller
         /** @var User $user */
         $user = $request->user();
         $this->ensurePanelAccess($user, $tenant);
+        $this->ensureOperationalWriteAccess($tenant->id);
 
         $validated = $request->validate([
             'laundry_status' => ['required', 'string', 'in:received,washing,drying,ironing,ready,completed'],
@@ -676,6 +679,7 @@ class OrderBoardController extends Controller
         /** @var User $user */
         $user = $request->user();
         $this->ensurePanelAccess($user, $tenant);
+        $this->ensureOperationalWriteAccess($tenant->id);
 
         $validated = $request->validate([
             'courier_status' => ['required', 'string', 'in:pickup_pending,pickup_on_the_way,picked_up,at_outlet,delivery_pending,delivery_on_the_way,delivered'],
@@ -719,6 +723,7 @@ class OrderBoardController extends Controller
         /** @var User $user */
         $user = $request->user();
         $this->ensurePanelAccess($user, $tenant);
+        $this->ensureOperationalWriteAccess($tenant->id);
 
         $validated = $request->validate([
             'courier_user_id' => ['required', 'integer', 'min:1'],
@@ -770,6 +775,7 @@ class OrderBoardController extends Controller
         /** @var User $user */
         $user = $request->user();
         $this->ensurePanelAccess($user, $tenant);
+        $this->ensureOperationalWriteAccess($tenant->id);
 
         $validated = $request->validate([
             'amount' => ['nullable', 'integer', 'min:1'],
@@ -876,6 +882,7 @@ class OrderBoardController extends Controller
         /** @var User $user */
         $user = $request->user();
         $this->ensurePanelAccess($user, $tenant);
+        $this->ensureOperationalWriteAccess($tenant->id);
 
         $validated = $request->validate([
             'action' => ['required', 'string', 'in:mark-ready,mark-completed,courier-delivery-pending,courier-delivery-otw,courier-delivered,assign-courier'],
@@ -1468,6 +1475,21 @@ class OrderBoardController extends Controller
             'delivered' => ['delivered'],
             default => ['pickup_pending'],
         };
+    }
+
+    private function ensureOperationalWriteAccess(string $tenantId): void
+    {
+        try {
+            $this->quotaService->ensureTenantWriteAccess($tenantId);
+        } catch (TenantWriteAccessException $exception) {
+            throw ValidationException::withMessages([
+                'subscription' => [sprintf(
+                    'Operasi write diblokir: subscription_state=%s, write_access_mode=%s.',
+                    (string) ($exception->subscriptionState ?? 'unknown'),
+                    (string) ($exception->writeAccessMode ?? 'unknown'),
+                )],
+            ]);
+        }
     }
 
     private function normalizePhone(string $phone): ?string

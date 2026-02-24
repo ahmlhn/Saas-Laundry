@@ -49,9 +49,33 @@ export const httpClient = axios.create({
   timeout: 15000,
   headers: {
     Accept: "application/json",
-    "Content-Type": "application/json",
     "X-Source-Channel": "mobile",
   },
+});
+
+httpClient.interceptors.request.use((config) => {
+  const data = config.data as unknown;
+  const isFormDataPayload =
+    (typeof FormData !== "undefined" && data instanceof FormData) ||
+    (typeof data === "object" && data !== null && typeof (data as { append?: unknown }).append === "function");
+
+  if (isFormDataPayload) {
+    const headers = config.headers as {
+      set?: (name: string, value: string | undefined) => void;
+      delete?: (name: string) => void;
+      [key: string]: unknown;
+    } | undefined;
+
+    if (headers?.delete) {
+      headers.delete("Content-Type");
+      headers.delete("content-type");
+    } else if (headers) {
+      delete headers["Content-Type"];
+      delete headers["content-type"];
+    }
+  }
+
+  return config;
 });
 
 httpClient.interceptors.response.use(

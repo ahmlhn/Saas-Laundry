@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Domain\Billing\QuotaExceededException;
 use App\Domain\Billing\QuotaService;
+use App\Domain\Billing\TenantWriteAccessException;
 use App\Domain\Invoices\InvoiceLeaseService;
 use App\Domain\Messaging\WaDispatchService;
 use App\Domain\Orders\OrderStatusTransitionValidator;
@@ -256,6 +257,15 @@ class SyncController extends Controller
     {
         $type = strtoupper($mutation['type']);
 
+        try {
+            $this->quotaService->ensureTenantWriteAccess($user->tenant_id);
+        } catch (TenantWriteAccessException $e) {
+            throw new SyncRejectException(
+                reasonCode: 'SUBSCRIPTION_READ_ONLY',
+                message: 'Tenant subscription is not active for write operations.',
+            );
+        }
+
         return match ($type) {
             'ORDER_CREATE' => $this->applyOrderCreateMutation($user, $device, $mutation, $sourceChannel),
             'ORDER_ADD_PAYMENT' => $this->applyOrderAddPaymentMutation($user, $mutation, $sourceChannel),
@@ -273,6 +283,15 @@ class SyncController extends Controller
     private function applyOrderCreateMutation(User $user, Device $device, array $mutation, string $sourceChannel): array
     {
         $this->ensureRole($user, ['owner', 'admin', 'cashier']);
+
+        try {
+            $this->quotaService->ensureTenantWriteAccess($user->tenant_id);
+        } catch (TenantWriteAccessException $e) {
+            throw new SyncRejectException(
+                reasonCode: 'SUBSCRIPTION_READ_ONLY',
+                message: 'Tenant subscription is not active for write operations.',
+            );
+        }
 
         $payload = $mutation['payload'] ?? [];
 
@@ -321,6 +340,11 @@ class SyncController extends Controller
         $result = DB::transaction(function () use ($validated, $user, $device, $outlet, $orderTime, $sourceChannel): array {
             try {
                 $this->quotaService->consumeOrderSlot($user->tenant_id, $orderTime->format('Y-m'));
+            } catch (TenantWriteAccessException $e) {
+                throw new SyncRejectException(
+                    reasonCode: 'SUBSCRIPTION_READ_ONLY',
+                    message: 'Tenant subscription is not active for write operations.',
+                );
             } catch (QuotaExceededException $e) {
                 throw new SyncRejectException(
                     reasonCode: 'QUOTA_EXCEEDED',

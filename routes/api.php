@@ -13,10 +13,12 @@ use App\Http\Controllers\Api\PromotionController;
 use App\Http\Controllers\Api\ServiceCatalogController;
 use App\Http\Controllers\Api\ServiceProcessTagController;
 use App\Http\Controllers\Api\ShippingZoneController;
+use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\SyncController;
 use App\Http\Controllers\Api\TenantManagementController;
 use App\Http\Controllers\Api\UserManagementController;
 use App\Http\Controllers\Api\WaController;
+use App\Http\Controllers\Api\PlatformSubscriptionController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', static fn () => response()->json([
@@ -100,6 +102,22 @@ Route::middleware(['auth:sanctum'])->group(function (): void {
     Route::get('/billing/quota', [BillingController::class, 'quota']);
     Route::get('/billing/entries', [BillingController::class, 'entries']);
     Route::post('/billing/entries', [BillingController::class, 'storeEntry']);
+    Route::get('/subscriptions/current', [SubscriptionController::class, 'current']);
+    Route::get('/subscriptions/plans', [SubscriptionController::class, 'plans']);
+    Route::post('/subscriptions/change-request', [SubscriptionController::class, 'storeChangeRequest']);
+    Route::delete('/subscriptions/change-request/{changeRequestId}', [SubscriptionController::class, 'cancelChangeRequest']);
+    Route::get('/subscriptions/invoices', [SubscriptionController::class, 'invoices']);
+    Route::get('/subscriptions/invoices/{invoiceId}', [SubscriptionController::class, 'showInvoice']);
+    Route::post('/subscriptions/invoices/{invoiceId}/proof', [SubscriptionController::class, 'uploadInvoiceProof']);
+
+    Route::prefix('/platform/subscriptions')->group(function (): void {
+        Route::get('/tenants', [PlatformSubscriptionController::class, 'tenants']);
+        Route::get('/tenants/{tenant}', [PlatformSubscriptionController::class, 'tenantDetail']);
+        Route::post('/invoices/{invoiceId}/verify', [PlatformSubscriptionController::class, 'verifyInvoice']);
+        Route::post('/tenants/{tenant}/suspend', [PlatformSubscriptionController::class, 'suspendTenant']);
+        Route::post('/tenants/{tenant}/activate', [PlatformSubscriptionController::class, 'activateTenant']);
+    });
+
     Route::get('/printer-note/settings', [PrinterNoteController::class, 'showSettings']);
     Route::put('/printer-note/settings', [PrinterNoteController::class, 'upsertSettings']);
     Route::post('/printer-note/logo', [PrinterNoteController::class, 'uploadLogo']);

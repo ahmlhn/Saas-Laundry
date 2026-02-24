@@ -1,4 +1,4 @@
-export type UserRole = "owner" | "tenant_manager" | "admin" | "cashier" | "worker" | "courier";
+export type UserRole = "platform_owner" | "platform_billing" | "owner" | "tenant_manager" | "admin" | "cashier" | "worker" | "courier";
 
 const WA_ALLOWED_PLAN_KEYS = new Set(["premium", "pro"]);
 

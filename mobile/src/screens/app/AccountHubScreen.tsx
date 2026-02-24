@@ -101,6 +101,13 @@ export function AccountHubScreen() {
       locked: !tenantAllowed,
     },
     {
+      title: "Langganan Tenant",
+      subtitle: "Plan aktif, invoice, dan perubahan paket",
+      icon: "receipt-outline",
+      route: "SubscriptionCenter",
+      allowedRoles: ["owner"],
+    },
+    {
       title: "Zona Antar",
       subtitle: "Atur radius, biaya, dan ETA antar per outlet",
       icon: "navigate-outline",

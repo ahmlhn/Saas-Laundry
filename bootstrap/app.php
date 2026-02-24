@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\AttachRequestContext;
 use App\Http\Middleware\EnsureOutletAccess;
+use App\Http\Middleware\EnsurePlatformWebAccess;
 use App\Http\Middleware\EnsureTenantPathAccess;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -22,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'outlet.access' => EnsureOutletAccess::class,
             'tenant.path' => EnsureTenantPathAccess::class,
+            'platform.web' => EnsurePlatformWebAccess::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

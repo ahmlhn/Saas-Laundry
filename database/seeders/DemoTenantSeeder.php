@@ -6,12 +6,15 @@ use App\Models\Outlet;
 use App\Models\OutletService;
 use App\Models\Plan;
 use App\Models\QuotaUsage;
+use App\Models\QuotaUsageCycle;
 use App\Models\Role;
 use App\Models\Service;
+use App\Models\SubscriptionCycle;
 use App\Models\Tenant;
 use App\Models\TenantSubscription;
 use App\Models\User;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
 
 class DemoTenantSeeder extends Seeder
@@ -35,6 +38,8 @@ class DemoTenantSeeder extends Seeder
             $tenant->forceFill([
                 'current_plan_id' => $plan->id,
                 'status' => 'active',
+                'subscription_state' => 'active',
+                'write_access_mode' => 'full',
             ])->save();
         }
 
@@ -158,5 +163,41 @@ class DemoTenantSeeder extends Seeder
             ['tenant_id' => $tenant->id, 'period' => $period],
             ['orders_used' => 0]
         );
+
+        $cycleStart = Carbon::now()->startOfMonth();
+        $cycleEnd = $cycleStart->copy()->addDays(30)->subSecond();
+
+        $cycle = SubscriptionCycle::query()->firstOrCreate(
+            [
+                'tenant_id' => $tenant->id,
+                'cycle_start_at' => $cycleStart,
+            ],
+            [
+                'plan_id' => $plan->id,
+                'orders_limit_snapshot' => $plan->orders_limit,
+                'status' => 'active',
+                'cycle_end_at' => $cycleEnd,
+                'activated_at' => $cycleStart,
+                'auto_renew' => true,
+                'source' => 'seed_demo',
+            ]
+        );
+
+        QuotaUsageCycle::query()->firstOrCreate(
+            [
+                'tenant_id' => $tenant->id,
+                'cycle_id' => $cycle->id,
+            ],
+            [
+                'orders_limit_snapshot' => $plan->orders_limit,
+                'orders_used' => 0,
+            ]
+        );
+
+        $tenant->forceFill([
+            'current_subscription_cycle_id' => $cycle->id,
+            'subscription_state' => 'active',
+            'write_access_mode' => 'full',
+        ])->save();
     }
 }

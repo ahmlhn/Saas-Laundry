@@ -5,6 +5,9 @@ use App\Http\Controllers\Web\BillingController;
 use App\Http\Controllers\Web\DashboardController;
 use App\Http\Controllers\Web\ManagementController;
 use App\Http\Controllers\Web\OrderBoardController;
+use App\Http\Controllers\Web\SubscriptionController;
+use App\Http\Controllers\Web\Platform\AuthController as PlatformAuthController;
+use App\Http\Controllers\Web\Platform\SubscriptionController as PlatformSubscriptionController;
 use App\Http\Controllers\Web\WaSettingsController;
 use App\Models\Tenant;
 use Illuminate\Support\Facades\Route;
@@ -54,6 +57,10 @@ Route::prefix('t/{tenant}')->group(function (): void {
         Route::get('/billing', [BillingController::class, 'index'])->name('tenant.billing.index');
         Route::get('/billing/export', [BillingController::class, 'export'])->name('tenant.billing.export');
         Route::post('/billing/collections/{order}', [BillingController::class, 'updateCollection'])->name('tenant.billing.collection.update');
+        Route::get('/subscription', [SubscriptionController::class, 'index'])->name('tenant.subscription.index');
+        Route::post('/subscription/change-request', [SubscriptionController::class, 'storeChangeRequest'])->name('tenant.subscription.change-request.store');
+        Route::delete('/subscription/change-request/{changeRequestId}', [SubscriptionController::class, 'cancelChangeRequest'])->name('tenant.subscription.change-request.cancel');
+        Route::post('/subscription/invoices/{invoiceId}/proof', [SubscriptionController::class, 'uploadProof'])->name('tenant.subscription.invoices.proof.upload');
         Route::get('/orders', [OrderBoardController::class, 'index'])->name('tenant.orders.index');
         Route::get('/orders/export', [OrderBoardController::class, 'export'])->name('tenant.orders.export');
         Route::get('/orders/create', [OrderBoardController::class, 'create'])->name('tenant.orders.create');
@@ -90,5 +97,22 @@ Route::prefix('t/{tenant}')->group(function (): void {
 
         Route::get('/wa', [WaSettingsController::class, 'index'])->name('tenant.wa.index');
         Route::post('/wa/provider-config', [WaSettingsController::class, 'upsertProviderConfig'])->name('tenant.wa.provider-config');
+    });
+});
+
+Route::prefix('platform')->group(function (): void {
+    Route::middleware('guest')->group(function (): void {
+        Route::get('/login', [PlatformAuthController::class, 'create'])->name('platform.login');
+        Route::post('/login', [PlatformAuthController::class, 'store'])->name('platform.login.store');
+    });
+
+    Route::middleware(['auth', 'platform.web'])->group(function (): void {
+        Route::post('/logout', [PlatformAuthController::class, 'destroy'])->name('platform.logout');
+
+        Route::get('/subscriptions', [PlatformSubscriptionController::class, 'index'])->name('platform.subscriptions.index');
+        Route::get('/subscriptions/tenants/{tenant}', [PlatformSubscriptionController::class, 'show'])->name('platform.subscriptions.show');
+        Route::post('/subscriptions/invoices/{invoiceId}/verify', [PlatformSubscriptionController::class, 'verifyInvoice'])->name('platform.subscriptions.invoices.verify');
+        Route::post('/subscriptions/tenants/{tenant}/suspend', [PlatformSubscriptionController::class, 'suspendTenant'])->name('platform.subscriptions.tenants.suspend');
+        Route::post('/subscriptions/tenants/{tenant}/activate', [PlatformSubscriptionController::class, 'activateTenant'])->name('platform.subscriptions.tenants.activate');
     });
 });

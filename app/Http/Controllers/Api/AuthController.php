@@ -9,7 +9,9 @@ use App\Http\Controllers\Controller;
 use App\Models\Outlet;
 use App\Models\Plan;
 use App\Models\QuotaUsage;
+use App\Models\QuotaUsageCycle;
 use App\Models\Role;
+use App\Models\SubscriptionCycle;
 use App\Models\Tenant;
 use App\Models\TenantSubscription;
 use App\Models\User;
@@ -54,7 +56,7 @@ class AuthController extends Controller
 
         $user = $canResolveUser
             ? User::query()
-                ->with(['tenant.currentPlan', 'roles:id,key,name', 'outlets:id,tenant_id,name,code,timezone'])
+                ->with(['tenant.currentPlan', 'tenant.currentSubscriptionCycle.plan', 'roles:id,key,name', 'outlets:id,tenant_id,name,code,timezone'])
                 ->where(function ($query) use ($normalizedEmail, $phoneCandidates): void {
                     if ($normalizedEmail !== null) {
                         $query->orWhereRaw('LOWER(email) = ?', [$normalizedEmail]);
@@ -276,7 +278,7 @@ class AuthController extends Controller
         $email = strtolower($googleIdentity['email']);
 
         $user = User::query()
-            ->with(['tenant.currentPlan', 'roles:id,key,name', 'outlets:id,tenant_id,name,code,timezone'])
+            ->with(['tenant.currentPlan', 'tenant.currentSubscriptionCycle.plan', 'roles:id,key,name', 'outlets:id,tenant_id,name,code,timezone'])
             ->whereRaw('LOWER(email) = ?', [$email])
             ->first();
 
@@ -391,10 +393,16 @@ class AuthController extends Controller
 
         /** @var User $user */
         $user = DB::transaction(function () use ($validated, $normalizedPhone, $selectedPlan, $ownerRole): User {
+            $now = now();
+            $cycleStart = $now->copy();
+            $cycleEnd = $cycleStart->copy()->addDays(30)->subSecond();
+
             $tenant = Tenant::query()->create([
                 'name' => trim((string) $validated['tenant_name']),
                 'current_plan_id' => $selectedPlan->id,
                 'status' => 'active',
+                'subscription_state' => 'active',
+                'write_access_mode' => 'full',
             ]);
 
             $outletName = trim((string) ($validated['outlet_name'] ?? ''));
@@ -432,8 +440,8 @@ class AuthController extends Controller
                 ],
                 [
                     'plan_id' => $selectedPlan->id,
-                    'starts_at' => now()->startOfMonth(),
-                    'ends_at' => now()->endOfMonth(),
+                    'starts_at' => $now->copy()->startOfMonth(),
+                    'ends_at' => $now->copy()->endOfMonth(),
                     'status' => 'active',
                 ]
             );
@@ -448,10 +456,37 @@ class AuthController extends Controller
                 ]
             );
 
+            $cycle = SubscriptionCycle::query()->create([
+                'tenant_id' => $tenant->id,
+                'plan_id' => $selectedPlan->id,
+                'orders_limit_snapshot' => $selectedPlan->orders_limit,
+                'status' => 'active',
+                'cycle_start_at' => $cycleStart,
+                'cycle_end_at' => $cycleEnd,
+                'activated_at' => $cycleStart,
+                'auto_renew' => true,
+                'source' => 'self_service_register',
+                'created_by' => null,
+                'updated_by' => null,
+            ]);
+
+            QuotaUsageCycle::query()->create([
+                'tenant_id' => $tenant->id,
+                'cycle_id' => $cycle->id,
+                'orders_limit_snapshot' => $selectedPlan->orders_limit,
+                'orders_used' => 0,
+            ]);
+
+            $tenant->forceFill([
+                'current_subscription_cycle_id' => $cycle->id,
+                'subscription_state' => 'active',
+                'write_access_mode' => 'full',
+            ])->save();
+
             return $user;
         });
 
-        $user->loadMissing(['tenant.currentPlan', 'roles:id,key,name', 'outlets:id,tenant_id,name,code,timezone']);
+        $user->loadMissing(['tenant.currentPlan', 'tenant.currentSubscriptionCycle.plan', 'roles:id,key,name', 'outlets:id,tenant_id,name,code,timezone']);
 
         $token = $user->createToken($validated['device_name'] ?? 'api-device')->plainTextToken;
 
@@ -650,7 +685,7 @@ class AuthController extends Controller
     public function me(Request $request): JsonResponse
     {
         /** @var User $user */
-        $user = $request->user()->loadMissing(['tenant.currentPlan', 'roles:id,key,name', 'outlets:id,tenant_id,name,code,timezone']);
+        $user = $request->user()->loadMissing(['tenant.currentPlan', 'tenant.currentSubscriptionCycle.plan', 'roles:id,key,name', 'outlets:id,tenant_id,name,code,timezone']);
 
         return response()->json([
             'data' => $this->buildUserContext($user),
@@ -660,19 +695,50 @@ class AuthController extends Controller
     private function buildUserContext(User $user): array
     {
         $period = now()->format('Y-m');
-        $quotaUsage = null;
+        $roleKeys = $user->roles->pluck('key')->values();
+        $workspace = $user->tenant_id
+            ? 'tenant'
+            : ($roleKeys->contains(fn (string $role): bool => in_array($role, ['platform_owner', 'platform_billing'], true)) ? 'platform' : 'tenant');
+
+        $subscriptionState = 'active';
+        $writeAccessMode = 'full';
+        $cycleStartAt = null;
+        $cycleEndAt = null;
+        $planKey = null;
+        $ordersLimit = null;
+        $ordersUsed = 0;
+        $ordersRemaining = null;
+        $canCreateOrder = false;
 
         if ($user->tenant_id) {
-            $quotaUsage = QuotaUsage::query()
-                ->where('tenant_id', $user->tenant_id)
-                ->where('period', $period)
-                ->first();
-        }
+            $planKey = $user->tenant?->currentPlan?->key;
+            $subscriptionState = (string) ($user->tenant?->subscription_state ?: 'active');
+            $writeAccessMode = (string) ($user->tenant?->write_access_mode ?: 'full');
+            $cycle = $user->tenant?->currentSubscriptionCycle;
 
-        $planKey = $user->tenant?->currentPlan?->key;
-        $ordersLimit = $user->tenant?->currentPlan?->orders_limit;
-        $ordersUsed = $quotaUsage?->orders_used ?? 0;
-        $ordersRemaining = is_null($ordersLimit) ? null : max($ordersLimit - $ordersUsed, 0);
+            if ($cycle) {
+                $cycleStartAt = $cycle->cycle_start_at?->toIso8601String();
+                $cycleEndAt = $cycle->cycle_end_at?->toIso8601String();
+                $ordersLimit = $cycle->orders_limit_snapshot ?? $cycle->plan?->orders_limit ?? $user->tenant?->currentPlan?->orders_limit;
+                $quotaUsageCycle = QuotaUsageCycle::query()
+                    ->where('tenant_id', $user->tenant_id)
+                    ->where('cycle_id', $cycle->id)
+                    ->first();
+                $ordersUsed = (int) ($quotaUsageCycle?->orders_used ?? 0);
+            } else {
+                $quotaUsage = QuotaUsage::query()
+                    ->where('tenant_id', $user->tenant_id)
+                    ->where('period', $period)
+                    ->first();
+                $ordersLimit = $user->tenant?->currentPlan?->orders_limit;
+                $ordersUsed = (int) ($quotaUsage?->orders_used ?? 0);
+            }
+
+            $ordersRemaining = is_null($ordersLimit) ? null : max((int) $ordersLimit - $ordersUsed, 0);
+            $canCreateOrder = $subscriptionState === 'active'
+                && $writeAccessMode === 'full'
+                && (is_null($ordersLimit) || $ordersRemaining > 0);
+        }
 
         return [
             'user' => [
@@ -683,7 +749,7 @@ class AuthController extends Controller
                 'phone' => $user->phone,
                 'status' => $user->status,
             ],
-            'roles' => $user->roles->pluck('key')->values(),
+            'roles' => $roleKeys,
             'allowed_outlets' => $user->outlets->map(fn ($outlet): array => [
                 'id' => $outlet->id,
                 'tenant_id' => $outlet->tenant_id,
@@ -691,6 +757,7 @@ class AuthController extends Controller
                 'code' => $outlet->code,
                 'timezone' => $outlet->timezone,
             ])->values(),
+            'workspace' => $workspace,
             'plan' => [
                 'key' => $planKey,
                 'orders_limit' => $ordersLimit,
@@ -700,7 +767,13 @@ class AuthController extends Controller
                 'orders_limit' => $ordersLimit,
                 'orders_used' => $ordersUsed,
                 'orders_remaining' => $ordersRemaining,
-                'can_create_order' => is_null($ordersLimit) || $ordersRemaining > 0,
+                'can_create_order' => $canCreateOrder,
+            ],
+            'subscription' => [
+                'state' => $subscriptionState,
+                'write_access_mode' => $writeAccessMode,
+                'cycle_start_at' => $cycleStartAt,
+                'cycle_end_at' => $cycleEndAt,
             ],
         ];
     }

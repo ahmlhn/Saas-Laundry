@@ -14,10 +14,24 @@ class Plan extends Model
         'key',
         'name',
         'orders_limit',
+        'monthly_price_amount',
+        'currency',
+        'is_active',
+        'display_order',
     ];
 
     public function tenants(): HasMany
     {
         return $this->hasMany(Tenant::class, 'current_plan_id');
+    }
+
+    public function subscriptionCycles(): HasMany
+    {
+        return $this->hasMany(SubscriptionCycle::class);
+    }
+
+    public function subscriptionChangeRequests(): HasMany
+    {
+        return $this->hasMany(SubscriptionChangeRequest::class, 'target_plan_id');
     }
 }

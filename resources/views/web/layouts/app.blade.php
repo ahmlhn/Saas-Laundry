@@ -51,6 +51,16 @@
                     </span>
                     <span class="panel-link-text">Billing &amp; Kuota</span>
                 </a>
+                @if($user->hasRole('owner'))
+                    <a href="{{ route('tenant.subscription.index', ['tenant' => $tenant->id]) }}" class="panel-link {{ request()->routeIs('tenant.subscription.*') ? 'is-active' : '' }}">
+                        <span class="panel-link-icon">
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path d="M5 7H19M7 11H17M9 15H15M5 4H19C20.1 4 21 4.9 21 6V18C21 19.1 20.1 20 19 20H5C3.9 20 3 19.1 3 18V6C3 4.9 3.9 4 5 4Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </span>
+                        <span class="panel-link-text">Langganan</span>
+                    </a>
+                @endif
                 <a href="{{ route('tenant.orders.index', ['tenant' => $tenant->id]) }}" class="panel-link {{ request()->routeIs('tenant.orders.*') ? 'is-active' : '' }}">
                     <span class="panel-link-icon">
                         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">

@@ -85,6 +85,7 @@ export type AccountStackParamList = {
       }
     | undefined;
   TenantManagement: undefined;
+  SubscriptionCenter: undefined;
   FinanceTools: undefined;
   PrinterNote: undefined;
   HelpInfo: undefined;
