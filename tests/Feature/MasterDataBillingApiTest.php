@@ -651,15 +651,23 @@ class MasterDataBillingApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.id', $this->cashier->id);
 
+        $activeUserCount = User::query()
+            ->where('tenant_id', $this->tenant->id)
+            ->count();
+
         $this->apiAs($this->admin)
             ->getJson('/api/users')
             ->assertOk()
-            ->assertJsonCount(4, 'data');
+            ->assertJsonCount($activeUserCount, 'data');
+
+        $allUserCount = User::withTrashed()
+            ->where('tenant_id', $this->tenant->id)
+            ->count();
 
         $includeDeletedResponse = $this->apiAs($this->admin)
             ->getJson('/api/users?include_deleted=1')
             ->assertOk()
-            ->assertJsonCount(5, 'data');
+            ->assertJsonCount($allUserCount, 'data');
 
         $archivedCashier = collect($includeDeletedResponse->json('data'))->firstWhere('id', $this->cashier->id);
 
