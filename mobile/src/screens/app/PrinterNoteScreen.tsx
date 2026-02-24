@@ -3,7 +3,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as ImagePicker from "expo-image-picker";
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
@@ -36,7 +36,19 @@ export function PrinterNoteScreen() {
   const [form, setForm] = useState<PrinterNoteSettings | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [saveFeedbackModal, setSaveFeedbackModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    tone: "success" | "error";
+  }>({
+    visible: false,
+    title: "",
+    message: "",
+    tone: "success",
+  });
   const bootstrapRequestSeqRef = useRef(0);
+  const contentScrollRef = useRef<ScrollView | null>(null);
 
   useEffect(() => {
     const requestSeq = bootstrapRequestSeqRef.current + 1;
@@ -86,6 +98,36 @@ export function PrinterNoteScreen() {
     }
   }
 
+  function focusFeedback(): void {
+    setTimeout(() => {
+      contentScrollRef.current?.scrollToEnd({ animated: true });
+    }, 0);
+  }
+
+  function notifySaveSuccess(message: string): void {
+    setSuccessMessage(message);
+    setErrorMessage(null);
+    setSaveFeedbackModal({
+      visible: true,
+      title: "Berhasil",
+      message,
+      tone: "success",
+    });
+    Alert.alert("Berhasil", message);
+  }
+
+  function notifySaveError(message: string): void {
+    setErrorMessage(message);
+    setSuccessMessage(null);
+    setSaveFeedbackModal({
+      visible: true,
+      title: "Gagal Menyimpan",
+      message,
+      tone: "error",
+    });
+    Alert.alert("Gagal Menyimpan", message);
+  }
+
   function updateForm<K extends keyof PrinterNoteSettings>(key: K, value: PrinterNoteSettings[K]): void {
     setForm((current) => (current ? { ...current, [key]: value } : current));
     setErrorMessage(null);
@@ -98,7 +140,7 @@ export function PrinterNoteScreen() {
     }
 
     if (!selectedOutlet) {
-      setErrorMessage("Pilih outlet aktif sebelum menyimpan pengaturan.");
+      notifySaveError("Pilih outlet aktif sebelum menyimpan pengaturan.");
       return;
     }
 
@@ -109,66 +151,73 @@ export function PrinterNoteScreen() {
     const normalizedPrefix = form.customPrefix.trim().toUpperCase().replace(/\s+/g, "");
 
     if (!normalizedProfileName) {
-      setErrorMessage("Profil nota wajib diisi.");
+      notifySaveError("Profil nota wajib diisi.");
       return;
     }
 
     if (normalizedProfileName.length > 32) {
-      setErrorMessage("Profil nota maksimal 32 karakter.");
+      notifySaveError("Profil nota maksimal 32 karakter.");
       return;
     }
 
     if (normalizedDescription.length > 80) {
-      setErrorMessage("Keterangan 1 maksimal 80 karakter.");
+      notifySaveError("Keterangan 1 maksimal 80 karakter.");
       return;
     }
 
     if (normalizedFooterNote.length > 200) {
-      setErrorMessage("Catatan kaki nota maksimal 200 karakter.");
+      notifySaveError("Catatan kaki nota maksimal 200 karakter.");
       return;
     }
 
     if (normalizedPhone && !/^\+?\d{8,15}$/.test(normalizedPhone)) {
-      setErrorMessage("Format nomor telepon tidak valid.");
+      notifySaveError("Format nomor telepon tidak valid.");
       return;
     }
 
     if (form.numberingMode === "custom" && !normalizedPrefix) {
-      setErrorMessage("Nomor nota custom membutuhkan prefix.");
+      notifySaveError("Nomor nota custom membutuhkan prefix.");
       return;
     }
 
     if (normalizedPrefix && !/^[A-Z0-9/_\.-]+$/.test(normalizedPrefix)) {
-      setErrorMessage("Prefix custom hanya boleh huruf, angka, /, _, ., atau -.");
+      notifySaveError("Prefix custom hanya boleh huruf, angka, /, _, ., atau -.");
       return;
     }
 
     if (normalizedPrefix.length > 24) {
-      setErrorMessage("Prefix custom maksimal 24 karakter.");
+      notifySaveError("Prefix custom maksimal 24 karakter.");
       return;
     }
 
     setSaving(true);
     setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const normalized: PrinterNoteSettings = {
+      ...form,
+      profileName: normalizedProfileName,
+      descriptionLine: normalizedDescription,
+      phone: normalizedPhone,
+      footerNote: normalizedFooterNote,
+      customPrefix: form.numberingMode === "custom" ? normalizedPrefix : "",
+    };
 
     try {
-      const normalized: PrinterNoteSettings = {
-        ...form,
-        profileName: normalizedProfileName,
-        descriptionLine: normalizedDescription,
-        phone: normalizedPhone,
-        footerNote: normalizedFooterNote,
-        customPrefix: form.numberingMode === "custom" ? normalizedPrefix : "",
-      };
       const synced = await upsertPrinterNoteSettingsToServer({
         outletId: selectedOutlet.id,
         settings: normalized,
       });
       await setPrinterNoteSettings(synced, selectedOutlet.id);
       setForm(synced);
-      setSuccessMessage("Pengaturan nota tersimpan dan tersinkron.");
-    } catch {
-      setErrorMessage("Gagal menyimpan pengaturan nota.");
+      notifySaveSuccess("Pengaturan nota tersimpan dan tersinkron.");
+      focusFeedback();
+    } catch (error) {
+      // Fallback: tetap simpan lokal agar input tidak hilang saat sync server gagal.
+      await setPrinterNoteSettings(normalized, selectedOutlet.id);
+      setForm(normalized);
+      notifySaveError(`Pengaturan tersimpan di perangkat, namun sinkron server gagal.\n${getApiErrorMessage(error)}`);
+      focusFeedback();
     } finally {
       setSaving(false);
     }
@@ -221,8 +270,10 @@ export function PrinterNoteScreen() {
       await setPrinterNoteSettings(nextForm, selectedOutlet.id);
       setForm(nextForm);
       setSuccessMessage("Logo nota berhasil diunggah.");
+      focusFeedback();
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error));
+      focusFeedback();
     } finally {
       setUploadingLogo(false);
     }
@@ -250,8 +301,10 @@ export function PrinterNoteScreen() {
       await setPrinterNoteSettings(nextForm, selectedOutlet.id);
       setForm(nextForm);
       setSuccessMessage("Logo nota berhasil dihapus.");
+      focusFeedback();
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error));
+      focusFeedback();
     } finally {
       setRemovingLogo(false);
     }
@@ -274,7 +327,7 @@ export function PrinterNoteScreen() {
   }
 
   return (
-    <AppScreen contentContainerStyle={styles.content} scroll>
+    <AppScreen contentContainerStyle={styles.content} scroll scrollRef={contentScrollRef}>
       <AppPanel style={styles.heroPanel}>
         <View style={styles.heroTopRow}>
           <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}>
@@ -420,6 +473,19 @@ export function PrinterNoteScreen() {
             <View style={[styles.toggleKnob, form.showCustomerReceipt ? styles.toggleKnobActive : null]} />
           </Pressable>
 
+          {successMessage ? (
+            <View style={styles.successWrap}>
+              <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={16} />
+              <Text style={styles.successText}>{successMessage}</Text>
+            </View>
+          ) : null}
+          {errorMessage ? (
+            <View style={styles.errorWrap}>
+              <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
+              <Text style={styles.errorText}>{errorMessage}</Text>
+            </View>
+          ) : null}
+
           <AppButton
             disabled={saving || !selectedOutlet}
             leftElement={<Ionicons color={theme.colors.primaryContrast} name="save-outline" size={17} />}
@@ -429,19 +495,25 @@ export function PrinterNoteScreen() {
           />
         </AppPanel>
       )}
-
-      {successMessage ? (
-        <View style={styles.successWrap}>
-          <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={16} />
-          <Text style={styles.successText}>{successMessage}</Text>
+      <Modal animationType="fade" onRequestClose={() => setSaveFeedbackModal((prev) => ({ ...prev, visible: false }))} transparent visible={saveFeedbackModal.visible}>
+        <View style={styles.feedbackModalBackdrop}>
+          <View
+            style={[
+              styles.feedbackModalCard,
+              saveFeedbackModal.tone === "success" ? styles.feedbackModalCardSuccess : styles.feedbackModalCardError,
+            ]}
+          >
+            <View style={styles.feedbackModalHeader}>
+              <Ionicons color={saveFeedbackModal.tone === "success" ? theme.colors.success : theme.colors.danger} name={saveFeedbackModal.tone === "success" ? "checkmark-circle" : "alert-circle"} size={18} />
+              <Text style={styles.feedbackModalTitle}>{saveFeedbackModal.title}</Text>
+            </View>
+            <Text style={styles.feedbackModalMessage}>{saveFeedbackModal.message}</Text>
+            <Pressable onPress={() => setSaveFeedbackModal((prev) => ({ ...prev, visible: false }))} style={({ pressed }) => [styles.feedbackModalButton, pressed ? styles.heroIconButtonPressed : null]}>
+              <Text style={styles.feedbackModalButtonText}>OK</Text>
+            </Pressable>
+          </View>
         </View>
-      ) : null}
-      {errorMessage ? (
-        <View style={styles.errorWrap}>
-          <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
-          <Text style={styles.errorText}>{errorMessage}</Text>
-        </View>
-      ) : null}
+      </Modal>
     </AppScreen>
   );
 }
@@ -747,6 +819,64 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 18,
+    },
+    feedbackModalBackdrop: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.32)",
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 20,
+    },
+    feedbackModalCard: {
+      width: "100%",
+      maxWidth: 420,
+      borderRadius: theme.radii.lg,
+      borderWidth: 1,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      gap: 10,
+    },
+    feedbackModalCardSuccess: {
+      borderColor: theme.mode === "dark" ? "#1d5b3f" : "#bde7cd",
+    },
+    feedbackModalCardError: {
+      borderColor: theme.mode === "dark" ? "#6c3242" : "#f0bbc5",
+    },
+    feedbackModalHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    feedbackModalTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 14,
+      lineHeight: 18,
+    },
+    feedbackModalMessage: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12.5,
+      lineHeight: 18,
+    },
+    feedbackModalButton: {
+      alignSelf: "flex-end",
+      minWidth: 74,
+      borderWidth: 1,
+      borderColor: theme.colors.info,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.primarySoft,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    feedbackModalButtonText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+      lineHeight: 16,
     },
   });
 }
