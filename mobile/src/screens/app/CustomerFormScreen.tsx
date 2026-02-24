@@ -3,7 +3,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
@@ -67,6 +67,59 @@ export function CustomerFormScreen() {
     [dialCode]
   );
 
+  function navigateToQuickAction(preselectCustomerId?: string): void {
+    const tabNavigation = navigation.getParent<NavigationProp<AppTabParamList>>();
+    if (!tabNavigation) {
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+      } else {
+        navigation.navigate("AccountHub");
+      }
+      return;
+    }
+
+    navigation.reset({
+      index: 0,
+      routes: [{ name: "AccountHub" }],
+    });
+    tabNavigation.navigate("QuickActionTab", {
+      openCreateStamp: Date.now(),
+      preselectCustomerId,
+    });
+  }
+
+  function closeFormScreen(): void {
+    if (route.params.returnToQuickAction) {
+      navigateToQuickAction();
+      return;
+    }
+
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    navigation.navigate("AccountHub");
+  }
+
+  useEffect(() => {
+    if (!route.params.returnToQuickAction) {
+      return;
+    }
+
+    const unsubscribe = navigation.addListener("beforeRemove", (event) => {
+      const actionType = event.data.action.type;
+      if (actionType !== "GO_BACK" && actionType !== "POP" && actionType !== "POP_TO_TOP") {
+        return;
+      }
+
+      event.preventDefault();
+      navigateToQuickAction();
+    });
+
+    return unsubscribe;
+  }, [navigation, route.params.returnToQuickAction]);
+
   async function handleSave(): Promise<void> {
     if (!canCreateOrEdit || saving) {
       return;
@@ -104,7 +157,7 @@ export function CustomerFormScreen() {
           notes: composedNotes || undefined,
         });
 
-        navigation.goBack();
+        closeFormScreen();
         return;
       } else {
         const createdCustomer = await createCustomer({
@@ -114,17 +167,12 @@ export function CustomerFormScreen() {
         });
 
         if (route.params.returnToQuickAction) {
-          const tabNavigation = navigation.getParent<NavigationProp<AppTabParamList>>();
-          navigation.popToTop();
-          tabNavigation?.navigate("QuickActionTab", {
-            openCreateStamp: Date.now(),
-            preselectCustomerId: createdCustomer.id,
-          });
+          navigateToQuickAction(createdCustomer.id);
           return;
         }
       }
 
-      navigation.goBack();
+      closeFormScreen();
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error));
     } finally {
@@ -142,7 +190,7 @@ export function CustomerFormScreen() {
 
           <View style={styles.heroContent}>
             <View style={styles.heroTopRow}>
-              <Pressable onPress={() => navigation.goBack()} style={styles.topIconButton}>
+              <Pressable onPress={closeFormScreen} style={styles.topIconButton}>
                 <Ionicons color="#eaf6ff" name="arrow-back" size={21} />
               </Pressable>
 

@@ -34,10 +34,53 @@ interface ListCustomersParams {
   forceRefresh?: boolean;
 }
 
+export interface CustomerListPage {
+  items: Customer[];
+  page: number;
+  hasMore: boolean;
+  total: number | null;
+}
+
 interface UpsertCustomerPayload {
   name: string;
   phone: string;
   notes?: string;
+}
+
+export async function listCustomersPage(params: Omit<ListCustomersParams, "fetchAll"> = {}): Promise<CustomerListPage> {
+  const query = params.query?.trim() || "";
+  const limit = Math.min(params.limit ?? 40, 100);
+  const page = Math.max(params.page ?? 1, 1);
+  const includeDeleted = params.includeDeleted ? "1" : "0";
+  const cacheKey = `customers:list:page:${query}:${limit}:${includeDeleted}:page-${page}`;
+
+  if (!params.forceRefresh) {
+    const cached = getCachedValue<CustomerListPage>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+  }
+
+  const response = await httpClient.get<CustomersResponse>("/customers", {
+    params: {
+      q: query || undefined,
+      limit,
+      page,
+      include_deleted: toQueryBoolean(params.includeDeleted),
+    },
+  });
+
+  const responseHasMore = response.data.meta?.has_more;
+  const fallbackHasMore = response.data.data.length >= limit;
+  const result: CustomerListPage = {
+    items: response.data.data,
+    page,
+    hasMore: typeof responseHasMore === "boolean" ? responseHasMore : fallbackHasMore,
+    total: response.data.meta?.total ?? null,
+  };
+
+  setCachedValue(cacheKey, result, 20_000);
+  return result;
 }
 
 export async function listCustomers(params: ListCustomersParams = {}): Promise<Customer[]> {
@@ -56,17 +99,15 @@ export async function listCustomers(params: ListCustomersParams = {}): Promise<C
   }
 
   if (!fetchAll) {
-    const response = await httpClient.get<CustomersResponse>("/customers", {
-      params: {
-        q: query || undefined,
-        limit,
-        page,
-        include_deleted: toQueryBoolean(params.includeDeleted),
-      },
+    const pageResult = await listCustomersPage({
+      query,
+      limit,
+      page,
+      includeDeleted: params.includeDeleted,
+      forceRefresh: params.forceRefresh,
     });
-
-    setCachedValue(cacheKey, response.data.data, 20_000);
-    return response.data.data;
+    setCachedValue(cacheKey, pageResult.items, 20_000);
+    return pageResult.items;
   }
 
   const merged: Customer[] = [];
@@ -79,16 +120,15 @@ export async function listCustomers(params: ListCustomersParams = {}): Promise<C
     guard += 1;
     let addedInPage = 0;
 
-    const response = await httpClient.get<CustomersResponse>("/customers", {
-      params: {
-        q: query || undefined,
-        limit,
-        page: nextPage,
-        include_deleted: toQueryBoolean(params.includeDeleted),
-      },
+    const pageResult = await listCustomersPage({
+      query,
+      limit,
+      page: nextPage,
+      includeDeleted: params.includeDeleted,
+      forceRefresh: params.forceRefresh,
     });
 
-    for (const customer of response.data.data) {
+    for (const customer of pageResult.items) {
       if (seen.has(customer.id)) {
         continue;
       }
@@ -98,8 +138,7 @@ export async function listCustomers(params: ListCustomersParams = {}): Promise<C
       addedInPage += 1;
     }
 
-    const responseHasMore = response.data.meta?.has_more;
-    hasMore = typeof responseHasMore === "boolean" ? responseHasMore : response.data.data.length >= limit && addedInPage > 0;
+    hasMore = pageResult.hasMore && addedInPage > 0;
     nextPage += 1;
   }
 

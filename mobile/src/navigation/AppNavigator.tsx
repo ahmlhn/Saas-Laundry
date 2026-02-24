@@ -3,7 +3,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Pressable, StyleSheet, View, useWindowDimensions, type GestureResponderEvent } from "react-native";
 import { HomeDashboardScreen } from "../screens/app/HomeDashboardScreen";
 import { OrderDetailScreen } from "../screens/app/OrderDetailScreen";
 import { OrdersTodayScreen } from "../screens/app/OrdersTodayScreen";
@@ -92,12 +92,14 @@ function QuickActionTabButton(props: BottomTabBarButtonProps) {
   const minEdge = Math.min(width, height);
   const isTablet = minEdge >= 600;
   const buttonSize = isTablet ? 64 : isLandscape ? 54 : 60;
-  const wrapperTopIdle = isLandscape ? -10 : -16;
-  const wrapperTopActive = isLandscape ? -4 : -8;
+  const wrapperTopIdle = isLandscape ? -10 : -14;
+  const wrapperTopActive = isLandscape ? -13 : -18;
   const haloSize = buttonSize + (isTablet ? 16 : 14);
+  const focusRingSize = haloSize + (isTablet ? 10 : 8);
   const isActive = Boolean(props.accessibilityState?.selected);
 
-  function handlePress(): void {
+  function handlePress(event: GestureResponderEvent): void {
+    props.onPress?.(event);
     navigation.navigate("QuickActionTab", {
       openCreateStamp: Date.now(),
     });
@@ -113,21 +115,34 @@ function QuickActionTabButton(props: BottomTabBarButtonProps) {
       style={({ pressed }) => [
         styles.quickActionButtonWrap,
         {
-          gap: isActive ? 0 : 6,
           top: isActive ? wrapperTopActive : wrapperTopIdle,
-          transform: [{ scale: pressed ? 0.95 : 1 }],
-          opacity: pressed ? 0.92 : 1,
+          transform: [{ translateY: isActive ? -2 : 0 }, { scale: pressed ? 0.93 : isActive ? 1.1 : 1 }],
+          opacity: pressed ? 0.9 : 1,
         },
       ]}
     >
+      {isActive ? (
+        <View
+          style={[
+            styles.quickActionFocusRing,
+            {
+              width: focusRingSize,
+              height: focusRingSize,
+              borderColor: theme.mode === "dark" ? "rgba(133,206,255,0.65)" : "rgba(31,163,232,0.5)",
+            },
+          ]}
+        />
+      ) : null}
       <View
         style={[
           styles.quickActionHalo,
           {
             width: haloSize,
             height: haloSize,
-            borderColor: theme.mode === "dark" ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.92)",
-            backgroundColor: theme.mode === "dark" ? "rgba(13,77,123,0.22)" : "rgba(31,163,232,0.14)",
+            borderColor: theme.mode === "dark" ? (isActive ? "rgba(133,206,255,0.7)" : "rgba(255,255,255,0.18)") : isActive ? "rgba(31,163,232,0.58)" : "rgba(255,255,255,0.92)",
+            backgroundColor: theme.mode === "dark" ? (isActive ? "rgba(35,130,201,0.48)" : "rgba(13,77,123,0.22)") : isActive ? "rgba(31,163,232,0.3)" : "rgba(31,163,232,0.14)",
+            opacity: isActive ? 1 : 0.7,
+            transform: [{ scale: isActive ? 1.1 : 1 }],
           },
         ]}
       />
@@ -135,33 +150,45 @@ function QuickActionTabButton(props: BottomTabBarButtonProps) {
         style={[
           styles.quickActionButton,
           {
-            borderColor: theme.colors.surface,
-            backgroundColor: isActive ? theme.colors.info : theme.colors.primaryStrong,
+            borderColor: isActive ? theme.colors.info : theme.colors.surface,
+            backgroundColor: isActive ? theme.colors.surface : theme.colors.primaryStrong,
             width: buttonSize,
             height: buttonSize,
-            shadowColor: isActive ? theme.colors.info : theme.colors.primaryStrong,
-            shadowOpacity: theme.mode === "dark" ? 0.35 : 0.22,
-            shadowRadius: 8,
-            shadowOffset: { width: 0, height: 4 },
-            elevation: 6,
+            borderWidth: isActive ? 4 : 4,
+            shadowColor: theme.mode === "dark" ? "#000" : "#0d2f45",
+            shadowOpacity: theme.mode === "dark" ? (isActive ? 0.52 : 0.28) : isActive ? 0.3 : 0.15,
+            shadowRadius: isActive ? 12 : 7,
+            shadowOffset: { width: 0, height: isActive ? 8 : 3 },
+            elevation: isActive ? 10 : 5,
           },
         ]}
       >
-        <Ionicons color={theme.colors.primaryContrast} name={isActive ? "add-circle" : "add"} size={isTablet ? 30 : 28} />
+        {isActive ? (
+          <View style={[styles.quickActionActivePlus, { width: isTablet ? 42 : 38, height: isTablet ? 42 : 38 }]}>
+            <View
+              style={[
+                styles.quickActionPlusBarHorizontal,
+                {
+                  backgroundColor: theme.colors.info,
+                  height: isTablet ? 10 : 9,
+                },
+              ]}
+            />
+            <View
+              style={[
+                styles.quickActionPlusBarVertical,
+                {
+                  backgroundColor: theme.colors.info,
+                  width: isTablet ? 10 : 9,
+                },
+              ]}
+            />
+          </View>
+        ) : (
+          <Ionicons color={theme.colors.primaryContrast} name="add" size={isTablet ? 30 : 28} />
+        )}
       </View>
-      {!isActive ? (
-        <View
-          style={[
-            styles.quickActionCaption,
-            {
-              backgroundColor: theme.mode === "dark" ? "#0f2f44" : "#eff8ff",
-              borderColor: theme.mode === "dark" ? "rgba(102,191,255,0.35)" : "rgba(31,163,232,0.3)",
-            },
-          ]}
-        >
-          <Text style={[styles.quickActionCaptionText, { color: theme.colors.info }]}>Tambah</Text>
-        </View>
-      ) : null}
+      {isActive ? <View style={[styles.quickActionActiveDot, { backgroundColor: theme.colors.info }]} /> : null}
     </Pressable>
   );
 }
@@ -280,7 +307,6 @@ const styles = StyleSheet.create({
   quickActionButtonWrap: {
     justifyContent: "center",
     alignItems: "center",
-    gap: 6,
     position: "relative",
   },
   quickActionHalo: {
@@ -288,24 +314,34 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
   },
+  quickActionFocusRing: {
+    position: "absolute",
+    borderRadius: 999,
+    borderWidth: 1.5,
+  },
   quickActionButton: {
     borderRadius: 999,
     borderWidth: 4,
     alignItems: "center",
     justifyContent: "center",
   },
-  quickActionCaption: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    minWidth: 58,
+  quickActionActivePlus: {
     alignItems: "center",
+    justifyContent: "center",
   },
-  quickActionCaptionText: {
-    fontSize: 10.5,
-    letterSpacing: 0.2,
-    fontWeight: "700",
-    textTransform: "uppercase",
+  quickActionPlusBarHorizontal: {
+    width: "100%",
+    borderRadius: 999,
+  },
+  quickActionPlusBarVertical: {
+    position: "absolute",
+    height: "100%",
+    borderRadius: 999,
+  },
+  quickActionActiveDot: {
+    marginTop: 6,
+    width: 6,
+    height: 6,
+    borderRadius: 999,
   },
 });
