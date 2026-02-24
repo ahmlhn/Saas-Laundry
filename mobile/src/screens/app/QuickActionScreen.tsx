@@ -1845,20 +1845,6 @@ export function QuickActionScreen() {
                                 <Text numberOfLines={1} style={[styles.customerItemAddress, !entry.address ? styles.customerItemAddressMuted : null]}>
                                   {entry.address || "Alamat belum diisi"}
                                 </Text>
-                                <Text
-                                  numberOfLines={1}
-                                  style={[
-                                    styles.customerItemDetail,
-                                    !entry.profile.gender && !entry.profile.email?.trim() ? styles.customerItemAddressMuted : null,
-                                  ]}
-                                >
-                                  {entry.profile.gender || entry.profile.email?.trim()
-                                    ? [entry.profile.gender ? mapGenderLabel(entry.profile.gender) : "", entry.profile.email?.trim() || ""].filter(Boolean).join(" • ")
-                                    : "Profil tambahan belum diisi"}
-                                </Text>
-                                <Text numberOfLines={1} style={[styles.customerItemNote, !entry.profile.note?.trim() ? styles.customerItemAddressMuted : null]}>
-                                  {entry.profile.note?.trim() || "Tanpa catatan"}
-                                </Text>
                               </View>
                               <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={16} />
                             </Pressable>

@@ -906,9 +906,55 @@ class MasterDataBillingApiTest extends TestCase
         $this->assertIsString($storedPath);
         Storage::disk('public')->assertExists($storedPath);
 
+        $this->apiAs($this->cashier)
+            ->putJson('/api/printer-note/settings', [
+                'outlet_id' => $this->outletA->id,
+                'profile_name' => 'INDAH LAUNDRY',
+                'description_line' => 'Layanan cepat dan rapi',
+                'phone' => '6281234567890',
+                'numbering_mode' => 'custom',
+                'custom_prefix' => 'INDAH/TRX',
+                'footer_note' => 'Terima kasih sudah menggunakan layanan kami.',
+                'share_enota' => true,
+                'show_customer_receipt' => false,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.profile_name', 'INDAH LAUNDRY')
+            ->assertJsonPath('data.numbering_mode', 'custom')
+            ->assertJsonPath('data.custom_prefix', 'INDAH/TRX')
+            ->assertJsonPath('data.show_customer_receipt', false);
+
+        $settingsResponse = $this->apiAs($this->cashier)
+            ->getJson('/api/printer-note/settings?outlet_id='.$this->outletA->id)
+            ->assertOk();
+
+        $this->assertSame('INDAH LAUNDRY', (string) $settingsResponse->json('data.profile_name'));
+        $this->assertIsString($settingsResponse->json('data.logo_url'));
+
+        $this->apiAs($this->cashier)
+            ->deleteJson('/api/printer-note/logo', [
+                'outlet_id' => $this->outletA->id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.logo_url', '');
+
+        Storage::disk('public')->assertMissing($storedPath);
+
         $this->assertDatabaseHas('audit_events', [
             'tenant_id' => $this->tenant->id,
             'event_key' => 'PRINTER_NOTE_LOGO_UPLOADED',
+            'entity_type' => 'printer_logo',
+            'channel' => 'api',
+        ]);
+        $this->assertDatabaseHas('audit_events', [
+            'tenant_id' => $this->tenant->id,
+            'event_key' => 'PRINTER_NOTE_SETTINGS_UPDATED',
+            'entity_type' => 'printer_note_settings',
+            'channel' => 'api',
+        ]);
+        $this->assertDatabaseHas('audit_events', [
+            'tenant_id' => $this->tenant->id,
+            'event_key' => 'PRINTER_NOTE_LOGO_REMOVED',
             'entity_type' => 'printer_logo',
             'channel' => 'api',
         ]);
@@ -922,12 +968,32 @@ class MasterDataBillingApiTest extends TestCase
             ->assertStatus(403)
             ->assertJsonPath('reason_code', 'ROLE_ACCESS_DENIED');
 
+        $this->apiAs($this->worker)
+            ->putJson('/api/printer-note/settings', [
+                'outlet_id' => $this->outletA->id,
+                'profile_name' => 'Worker Update',
+                'description_line' => null,
+                'phone' => null,
+                'numbering_mode' => 'default',
+                'custom_prefix' => null,
+                'footer_note' => null,
+                'share_enota' => true,
+                'show_customer_receipt' => true,
+            ])
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'ROLE_ACCESS_DENIED');
+
         $this->apiAs($this->admin)->post('/api/printer-note/logo', [
             'outlet_id' => $this->outletB->id,
             'logo' => UploadedFile::fake()->create('logo3.png', 120, 'image/png'),
         ], [
             'Accept' => 'application/json',
         ])
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'OUTLET_ACCESS_DENIED');
+
+        $this->apiAs($this->admin)
+            ->getJson('/api/printer-note/settings?outlet_id='.$this->outletB->id)
             ->assertStatus(403)
             ->assertJsonPath('reason_code', 'OUTLET_ACCESS_DENIED');
     }

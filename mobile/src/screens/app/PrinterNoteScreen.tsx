@@ -1,13 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as ImagePicker from "expo-image-picker";
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
-import { uploadPrinterLogo } from "../../features/settings/printerNoteApi";
+import { getPrinterNoteSettingsFromServer, removePrinterLogo, upsertPrinterNoteSettingsToServer, uploadPrinterLogo } from "../../features/settings/printerNoteApi";
 import { getPrinterNoteSettings, setPrinterNoteSettings } from "../../features/settings/printerNoteStorage";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AccountStackParamList } from "../../navigation/types";
@@ -32,28 +32,57 @@ export function PrinterNoteScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [removingLogo, setRemovingLogo] = useState(false);
   const [form, setForm] = useState<PrinterNoteSettings | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const bootstrapRequestSeqRef = useRef(0);
 
   useEffect(() => {
-    void bootstrap();
+    const requestSeq = bootstrapRequestSeqRef.current + 1;
+    bootstrapRequestSeqRef.current = requestSeq;
+    void bootstrap(requestSeq, selectedOutlet?.id ?? null, selectedOutlet?.name ?? "");
   }, [selectedOutlet?.id]);
 
-  async function bootstrap(): Promise<void> {
+  async function bootstrap(requestSeq: number, outletId: string | null, outletName: string): Promise<void> {
     setLoading(true);
     setErrorMessage(null);
 
     try {
-      const stored = await getPrinterNoteSettings();
-      setForm({
+      const stored = await getPrinterNoteSettings(outletId);
+      let merged = {
         ...stored,
-        profileName: stored.profileName || selectedOutlet?.name || "",
-      });
+        profileName: stored.profileName || outletName || "",
+      };
+
+      if (outletId) {
+        try {
+          const fromServer = await getPrinterNoteSettingsFromServer(outletId);
+          merged = {
+            ...merged,
+            ...fromServer,
+            profileName: fromServer.profileName || merged.profileName || outletName || "",
+          };
+          await setPrinterNoteSettings(merged, outletId);
+        } catch {
+          // Keep local cache when server sync fails.
+        }
+      }
+
+      if (requestSeq !== bootstrapRequestSeqRef.current) {
+        return;
+      }
+
+      setForm(merged);
     } catch {
+      if (requestSeq !== bootstrapRequestSeqRef.current) {
+        return;
+      }
       setErrorMessage("Gagal memuat pengaturan nota.");
     } finally {
-      setLoading(false);
+      if (requestSeq === bootstrapRequestSeqRef.current) {
+        setLoading(false);
+      }
     }
   }
 
@@ -68,18 +97,54 @@ export function PrinterNoteScreen() {
       return;
     }
 
-    if (!form.profileName.trim()) {
+    if (!selectedOutlet) {
+      setErrorMessage("Pilih outlet aktif sebelum menyimpan pengaturan.");
+      return;
+    }
+
+    const normalizedProfileName = form.profileName.trim();
+    const normalizedDescription = form.descriptionLine.trim();
+    const normalizedPhone = form.phone.replace(/[^\d+]/g, "").trim();
+    const normalizedFooterNote = form.footerNote.trim();
+    const normalizedPrefix = form.customPrefix.trim().toUpperCase().replace(/\s+/g, "");
+
+    if (!normalizedProfileName) {
       setErrorMessage("Profil nota wajib diisi.");
       return;
     }
 
-    if (form.profileName.trim().length > 32) {
+    if (normalizedProfileName.length > 32) {
       setErrorMessage("Profil nota maksimal 32 karakter.");
       return;
     }
 
-    if (form.numberingMode === "custom" && !form.customPrefix.trim()) {
+    if (normalizedDescription.length > 80) {
+      setErrorMessage("Keterangan 1 maksimal 80 karakter.");
+      return;
+    }
+
+    if (normalizedFooterNote.length > 200) {
+      setErrorMessage("Catatan kaki nota maksimal 200 karakter.");
+      return;
+    }
+
+    if (normalizedPhone && !/^\+?\d{8,15}$/.test(normalizedPhone)) {
+      setErrorMessage("Format nomor telepon tidak valid.");
+      return;
+    }
+
+    if (form.numberingMode === "custom" && !normalizedPrefix) {
       setErrorMessage("Nomor nota custom membutuhkan prefix.");
+      return;
+    }
+
+    if (normalizedPrefix && !/^[A-Z0-9/_\.-]+$/.test(normalizedPrefix)) {
+      setErrorMessage("Prefix custom hanya boleh huruf, angka, /, _, ., atau -.");
+      return;
+    }
+
+    if (normalizedPrefix.length > 24) {
+      setErrorMessage("Prefix custom maksimal 24 karakter.");
       return;
     }
 
@@ -89,15 +154,19 @@ export function PrinterNoteScreen() {
     try {
       const normalized: PrinterNoteSettings = {
         ...form,
-        profileName: form.profileName.trim(),
-        descriptionLine: form.descriptionLine.trim(),
-        phone: form.phone.trim(),
-        footerNote: form.footerNote.trim(),
-        customPrefix: form.customPrefix.trim(),
+        profileName: normalizedProfileName,
+        descriptionLine: normalizedDescription,
+        phone: normalizedPhone,
+        footerNote: normalizedFooterNote,
+        customPrefix: form.numberingMode === "custom" ? normalizedPrefix : "",
       };
-      await setPrinterNoteSettings(normalized);
-      setForm(normalized);
-      setSuccessMessage("Pengaturan nota tersimpan di perangkat ini.");
+      const synced = await upsertPrinterNoteSettingsToServer({
+        outletId: selectedOutlet.id,
+        settings: normalized,
+      });
+      await setPrinterNoteSettings(synced, selectedOutlet.id);
+      setForm(synced);
+      setSuccessMessage("Pengaturan nota tersimpan dan tersinkron.");
     } catch {
       setErrorMessage("Gagal menyimpan pengaturan nota.");
     } finally {
@@ -106,7 +175,7 @@ export function PrinterNoteScreen() {
   }
 
   async function handleUploadLogo(): Promise<void> {
-    if (!form || uploadingLogo) {
+    if (!form || uploadingLogo || removingLogo) {
       return;
     }
 
@@ -149,13 +218,42 @@ export function PrinterNoteScreen() {
         logoUrl: uploadResult.url,
       };
 
-      await setPrinterNoteSettings(nextForm);
+      await setPrinterNoteSettings(nextForm, selectedOutlet.id);
       setForm(nextForm);
-      setSuccessMessage("Logo nota berhasil diunggah dan disimpan.");
+      setSuccessMessage("Logo nota berhasil diunggah.");
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error));
     } finally {
       setUploadingLogo(false);
+    }
+  }
+
+  async function handleRemoveLogo(): Promise<void> {
+    if (!form || uploadingLogo || removingLogo || !form.logoUrl) {
+      return;
+    }
+
+    if (!selectedOutlet) {
+      setErrorMessage("Pilih outlet aktif sebelum menghapus logo.");
+      return;
+    }
+
+    setRemovingLogo(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      await removePrinterLogo(selectedOutlet.id);
+      const nextForm: PrinterNoteSettings = {
+        ...form,
+        logoUrl: "",
+      };
+      await setPrinterNoteSettings(nextForm, selectedOutlet.id);
+      setForm(nextForm);
+      setSuccessMessage("Logo nota berhasil dihapus.");
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error));
+    } finally {
+      setRemovingLogo(false);
     }
   }
 
@@ -199,13 +297,15 @@ export function PrinterNoteScreen() {
         </View>
       ) : (
         <AppPanel style={styles.panel}>
+          {!selectedOutlet ? <Text style={styles.outletHint}>Pilih outlet aktif terlebih dulu agar pengaturan tersimpan dan sinkron lintas perangkat.</Text> : null}
+
           <View style={styles.rowBetween}>
             <View style={styles.logoInfo}>
               <Text style={styles.label}>Logo Nota</Text>
               <Text style={styles.helper}>Upload logo tersimpan di server agar konsisten lintas perangkat.</Text>
             </View>
             <AppButton
-              disabled={uploadingLogo || !selectedOutlet}
+              disabled={uploadingLogo || removingLogo || !selectedOutlet}
               leftElement={<Ionicons color={theme.colors.info} name="image-outline" size={17} />}
               loading={uploadingLogo}
               onPress={() => void handleUploadLogo()}
@@ -221,6 +321,16 @@ export function PrinterNoteScreen() {
               <Text style={styles.logoPlaceholderText}>Belum ada logo. Upload dari galeri perangkat.</Text>
             </View>
           )}
+          {form.logoUrl ? (
+            <Pressable
+              disabled={uploadingLogo || removingLogo || !selectedOutlet}
+              onPress={() => void handleRemoveLogo()}
+              style={({ pressed }) => [styles.logoDangerAction, pressed ? styles.heroIconButtonPressed : null, uploadingLogo || removingLogo || !selectedOutlet ? styles.logoDangerActionDisabled : null]}
+            >
+              {removingLogo ? <ActivityIndicator color={theme.colors.danger} size="small" /> : <Ionicons color={theme.colors.danger} name="trash-outline" size={15} />}
+              <Text style={styles.logoDangerActionText}>Hapus Logo</Text>
+            </Pressable>
+          ) : null}
 
           <Text style={styles.label}>Profil Nota</Text>
           <TextInput
@@ -234,6 +344,7 @@ export function PrinterNoteScreen() {
 
           <Text style={styles.label}>Keterangan 1</Text>
           <TextInput
+            maxLength={80}
             onChangeText={(value) => updateForm("descriptionLine", value)}
             placeholder="Tagline atau alamat singkat"
             placeholderTextColor={theme.colors.textMuted}
@@ -244,6 +355,7 @@ export function PrinterNoteScreen() {
           <Text style={styles.label}>Telp.</Text>
           <TextInput
             keyboardType="phone-pad"
+            maxLength={20}
             onChangeText={(value) => updateForm("phone", value)}
             placeholder="Nomor telepon outlet"
             placeholderTextColor={theme.colors.textMuted}
@@ -253,6 +365,7 @@ export function PrinterNoteScreen() {
 
           <Text style={styles.label}>Catatan Kaki Nota</Text>
           <TextInput
+            maxLength={200}
             multiline
             onChangeText={(value) => updateForm("footerNote", value)}
             placeholder="Contoh: Pengambilan maksimal jam 8 malam."
@@ -282,7 +395,8 @@ export function PrinterNoteScreen() {
 
           {form.numberingMode === "custom" ? (
             <TextInput
-              onChangeText={(value) => updateForm("customPrefix", value)}
+              maxLength={24}
+              onChangeText={(value) => updateForm("customPrefix", value.toUpperCase().replace(/\s+/g, ""))}
               placeholder="Prefix custom (contoh OUTLET-A/TRX)"
               placeholderTextColor={theme.colors.textMuted}
               style={styles.input}
@@ -291,8 +405,9 @@ export function PrinterNoteScreen() {
           ) : null}
 
           <View style={styles.previewWrap}>
-            <Text style={styles.previewLabel}>Preview Nomor Nota</Text>
+            <Text style={styles.previewLabel}>Contoh Format Nomor Nota</Text>
             <Text style={styles.previewValue}>{buildPreviewNumber()}</Text>
+            <Text style={styles.previewHint}>Nomor final mengikuti urutan transaksi saat order dibuat.</Text>
           </View>
 
           <Pressable onPress={() => updateForm("shareEnota", !form.shareEnota)} style={styles.toggleRow}>
@@ -306,7 +421,7 @@ export function PrinterNoteScreen() {
           </Pressable>
 
           <AppButton
-            disabled={saving}
+            disabled={saving || !selectedOutlet}
             leftElement={<Ionicons color={theme.colors.primaryContrast} name="save-outline" size={17} />}
             loading={saving}
             onPress={() => void handleSave()}
@@ -412,6 +527,18 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     panel: {
       gap: theme.spacing.sm,
     },
+    outletHint: {
+      color: theme.colors.warning,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+      lineHeight: 16,
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? "#6a5830" : "#f2dca2",
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.mode === "dark" ? "#4b3f26" : "#fff8e8",
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
     rowBetween: {
       flexDirection: isTablet || isCompactLandscape ? "row" : "column",
       alignItems: isTablet || isCompactLandscape ? "flex-start" : "stretch",
@@ -451,6 +578,27 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontFamily: theme.fonts.medium,
       fontSize: 11,
       lineHeight: 16,
+    },
+    logoDangerAction: {
+      alignSelf: "flex-start",
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? "#6c3242" : "#f0bbc5",
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.mode === "dark" ? "#482633" : "#fff1f4",
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    logoDangerActionDisabled: {
+      opacity: 0.55,
+    },
+    logoDangerActionText: {
+      color: theme.colors.danger,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11.5,
+      lineHeight: 15,
     },
     label: {
       color: theme.colors.textSecondary,
@@ -525,6 +673,12 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.semibold,
       fontSize: 13,
+    },
+    previewHint: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 10.5,
+      lineHeight: 14,
     },
     toggleRow: {
       flexDirection: "row",

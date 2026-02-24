@@ -100,5 +100,8 @@ Route::middleware(['auth:sanctum'])->group(function (): void {
     Route::get('/billing/quota', [BillingController::class, 'quota']);
     Route::get('/billing/entries', [BillingController::class, 'entries']);
     Route::post('/billing/entries', [BillingController::class, 'storeEntry']);
+    Route::get('/printer-note/settings', [PrinterNoteController::class, 'showSettings']);
+    Route::put('/printer-note/settings', [PrinterNoteController::class, 'upsertSettings']);
     Route::post('/printer-note/logo', [PrinterNoteController::class, 'uploadLogo']);
+    Route::delete('/printer-note/logo', [PrinterNoteController::class, 'deleteLogo']);
 });
