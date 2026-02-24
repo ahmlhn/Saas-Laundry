@@ -2,8 +2,10 @@ import { httpClient } from "../../lib/httpClient";
 import type {
   SubscriptionChangeRequest,
   SubscriptionCurrentPayload,
+  SubscriptionGatewayStatus,
   SubscriptionInvoice,
   SubscriptionInvoiceProofUploadPayload,
+  SubscriptionPaymentIntentPayload,
   SubscriptionPlanOption,
 } from "../../types/subscription";
 
@@ -40,6 +42,16 @@ export async function listSubscriptionInvoices(limit = 30): Promise<Subscription
       limit,
     },
   });
+  return response.data.data;
+}
+
+export async function createSubscriptionQrisIntent(invoiceId: string): Promise<SubscriptionPaymentIntentPayload> {
+  const response = await httpClient.post<DataResponse<SubscriptionPaymentIntentPayload>>(`/subscriptions/invoices/${invoiceId}/qris-intent`);
+  return response.data.data;
+}
+
+export async function getSubscriptionInvoicePaymentStatus(invoiceId: string): Promise<SubscriptionGatewayStatus> {
+  const response = await httpClient.get<DataResponse<SubscriptionGatewayStatus>>(`/subscriptions/invoices/${invoiceId}/payment-status`);
   return response.data.data;
 }
 

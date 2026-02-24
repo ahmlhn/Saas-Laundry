@@ -60,6 +60,7 @@ Route::prefix('t/{tenant}')->group(function (): void {
         Route::get('/subscription', [SubscriptionController::class, 'index'])->name('tenant.subscription.index');
         Route::post('/subscription/change-request', [SubscriptionController::class, 'storeChangeRequest'])->name('tenant.subscription.change-request.store');
         Route::delete('/subscription/change-request/{changeRequestId}', [SubscriptionController::class, 'cancelChangeRequest'])->name('tenant.subscription.change-request.cancel');
+        Route::post('/subscription/invoices/{invoiceId}/qris-intent', [SubscriptionController::class, 'createQrisIntent'])->name('tenant.subscription.invoices.qris-intent');
         Route::post('/subscription/invoices/{invoiceId}/proof', [SubscriptionController::class, 'uploadProof'])->name('tenant.subscription.invoices.proof.upload');
         Route::get('/orders', [OrderBoardController::class, 'index'])->name('tenant.orders.index');
         Route::get('/orders/export', [OrderBoardController::class, 'export'])->name('tenant.orders.export');

@@ -11,6 +11,8 @@ import { StatusPill } from "../../components/ui/StatusPill";
 import {
   cancelSubscriptionChangeRequest,
   createSubscriptionChangeRequest,
+  createSubscriptionQrisIntent,
+  getSubscriptionInvoicePaymentStatus,
   getSubscriptionCurrent,
   listSubscriptionInvoices,
   listSubscriptionPlans,
@@ -47,6 +49,7 @@ export function SubscriptionCenterScreen() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [uploadingInvoiceId, setUploadingInvoiceId] = useState<string | null>(null);
+  const [qrisInvoiceId, setQrisInvoiceId] = useState<string | null>(null);
   const [current, setCurrent] = useState<SubscriptionCurrentPayload | null>(null);
   const [plans, setPlans] = useState<SubscriptionPlanOption[]>([]);
   const [invoices, setInvoices] = useState<SubscriptionInvoice[]>([]);
@@ -161,6 +164,27 @@ export function SubscriptionCenterScreen() {
       setErrorMessage(getApiErrorMessage(error));
     } finally {
       setUploadingInvoiceId(null);
+    }
+  }
+
+  async function handleGenerateQris(invoiceId: string): Promise<void> {
+    if (!isOwner || qrisInvoiceId) {
+      return;
+    }
+
+    setQrisInvoiceId(invoiceId);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      await createSubscriptionQrisIntent(invoiceId);
+      const status = await getSubscriptionInvoicePaymentStatus(invoiceId);
+      await loadData();
+      setSuccessMessage(`QRIS intent siap. Status gateway: ${status.invoice.gateway_status ?? "intent_created"}.`);
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error));
+    } finally {
+      setQrisInvoiceId(null);
     }
   }
 
@@ -293,14 +317,36 @@ export function SubscriptionCenterScreen() {
                         {invoice.status.toUpperCase()} | {formatMoney(invoice.amount_total)} | due{" "}
                         {invoice.due_at ? new Date(invoice.due_at).toLocaleDateString("id-ID") : "-"}
                       </Text>
+                      {invoice.payment_method === "bri_qris" ? (
+                        <>
+                          <Text style={styles.planMeta}>
+                            gateway {invoice.gateway_status?.toUpperCase() ?? "WAITING"} | ref {invoice.gateway_reference ?? "-"}
+                          </Text>
+                          <Text style={styles.planMeta}>
+                            exp {invoice.qris_expired_at ? new Date(invoice.qris_expired_at).toLocaleString("id-ID") : "-"}
+                          </Text>
+                        </>
+                      ) : (
+                        <Text style={styles.planMeta}>proofs {invoice.proofs_count ?? 0} file</Text>
+                      )}
                     </View>
-                    <AppButton
-                      disabled={uploadingInvoiceId !== null}
-                      leftElement={<Ionicons color={theme.colors.info} name="cloud-upload-outline" size={16} />}
-                      onPress={() => void handleUploadProof(invoice.id)}
-                      title={uploadingInvoiceId === invoice.id ? "Uploading..." : "Upload"}
-                      variant="secondary"
-                    />
+                    {invoice.payment_method === "bri_qris" ? (
+                      <AppButton
+                        disabled={qrisInvoiceId !== null}
+                        leftElement={<Ionicons color={theme.colors.info} name="qr-code-outline" size={16} />}
+                        onPress={() => void handleGenerateQris(invoice.id)}
+                        title={qrisInvoiceId === invoice.id ? "Menyiapkan..." : "QRIS"}
+                        variant="secondary"
+                      />
+                    ) : (
+                      <AppButton
+                        disabled={uploadingInvoiceId !== null}
+                        leftElement={<Ionicons color={theme.colors.info} name="cloud-upload-outline" size={16} />}
+                        onPress={() => void handleUploadProof(invoice.id)}
+                        title={uploadingInvoiceId === invoice.id ? "Uploading..." : "Upload"}
+                        variant="secondary"
+                      />
+                    )}
                   </View>
                 ))
               )}

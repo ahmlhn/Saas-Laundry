@@ -6,6 +6,7 @@ use App\Domain\Audit\AuditEventKeys;
 use App\Domain\Audit\AuditTrailService;
 use App\Http\Controllers\Controller;
 use App\Models\SubscriptionInvoice;
+use App\Models\SubscriptionPaymentEvent;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
@@ -70,16 +71,27 @@ class SubscriptionController extends Controller
         ]);
 
         $invoices = SubscriptionInvoice::query()
-            ->with(['proofs' => fn ($query) => $query->latest('created_at')])
+            ->with([
+                'proofs' => fn ($query) => $query->latest('created_at'),
+                'paymentEvents' => fn ($query) => $query->latest('received_at'),
+            ])
             ->where('tenant_id', $tenant->id)
             ->latest('issued_at')
             ->paginate(20)
             ->withQueryString();
 
+        $paymentEvents = SubscriptionPaymentEvent::query()
+            ->with('invoice:id,invoice_no')
+            ->where('tenant_id', $tenant->id)
+            ->latest('received_at')
+            ->limit(30)
+            ->get();
+
         return view('web.platform.subscriptions.show', [
             'user' => $user,
             'tenant' => $tenant,
             'invoices' => $invoices,
+            'paymentEvents' => $paymentEvents,
         ]);
     }
 
@@ -101,6 +113,12 @@ class SubscriptionController extends Controller
         if (! $invoice) {
             throw ValidationException::withMessages([
                 'platform' => ['Invoice langganan tidak ditemukan.'],
+            ]);
+        }
+
+        if ($invoice->payment_method === 'bri_qris') {
+            throw ValidationException::withMessages([
+                'platform' => ['Invoice bri_qris diverifikasi otomatis oleh webhook gateway.'],
             ]);
         }
 

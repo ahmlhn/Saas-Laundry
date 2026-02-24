@@ -108,4 +108,5 @@ export type AppTabParamList = {
 export type AppRootStackParamList = {
   OutletSelect: undefined;
   MainTabs: undefined;
+  PlatformHub: undefined;
 };

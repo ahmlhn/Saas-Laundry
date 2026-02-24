@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BillingController;
+use App\Http\Controllers\Api\BriPaymentWebhookController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\InvoiceRangeController;
 use App\Http\Controllers\Api\OutletManagementController;
@@ -34,6 +35,8 @@ Route::prefix('auth')->group(function (): void {
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:auth-login');
     Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
 });
+
+Route::post('/payments/bri/qris/webhook', [BriPaymentWebhookController::class, 'qris']);
 
 Route::middleware(['auth:sanctum', 'outlet.access'])->group(function (): void {
     Route::get('/me', [AuthController::class, 'me']);
@@ -108,11 +111,14 @@ Route::middleware(['auth:sanctum'])->group(function (): void {
     Route::delete('/subscriptions/change-request/{changeRequestId}', [SubscriptionController::class, 'cancelChangeRequest']);
     Route::get('/subscriptions/invoices', [SubscriptionController::class, 'invoices']);
     Route::get('/subscriptions/invoices/{invoiceId}', [SubscriptionController::class, 'showInvoice']);
+    Route::post('/subscriptions/invoices/{invoiceId}/qris-intent', [SubscriptionController::class, 'createQrisIntent']);
+    Route::get('/subscriptions/invoices/{invoiceId}/payment-status', [SubscriptionController::class, 'paymentStatus']);
     Route::post('/subscriptions/invoices/{invoiceId}/proof', [SubscriptionController::class, 'uploadInvoiceProof']);
 
     Route::prefix('/platform/subscriptions')->group(function (): void {
         Route::get('/tenants', [PlatformSubscriptionController::class, 'tenants']);
         Route::get('/tenants/{tenant}', [PlatformSubscriptionController::class, 'tenantDetail']);
+        Route::get('/payments/events', [PlatformSubscriptionController::class, 'paymentEvents']);
         Route::post('/invoices/{invoiceId}/verify', [PlatformSubscriptionController::class, 'verifyInvoice']);
         Route::post('/tenants/{tenant}/suspend', [PlatformSubscriptionController::class, 'suspendTenant']);
         Route::post('/tenants/{tenant}/activate', [PlatformSubscriptionController::class, 'activateTenant']);

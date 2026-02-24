@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Web;
 use App\Domain\Audit\AuditEventKeys;
 use App\Domain\Audit\AuditTrailService;
 use App\Domain\Billing\QuotaService;
+use App\Domain\Subscription\SubscriptionPaymentGatewayService;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Web\Concerns\EnsuresWebPanelAccess;
 use App\Models\Plan;
@@ -28,6 +29,7 @@ class SubscriptionController extends Controller
     public function __construct(
         private readonly QuotaService $quotaService,
         private readonly AuditTrailService $auditTrail,
+        private readonly SubscriptionPaymentGatewayService $paymentGatewayService,
     ) {
     }
 
@@ -58,6 +60,10 @@ class SubscriptionController extends Controller
             ->first();
 
         $invoices = SubscriptionInvoice::query()
+            ->with([
+                'paymentIntents' => fn ($query) => $query->latest('created_at'),
+                'paymentEvents' => fn ($query) => $query->latest('received_at'),
+            ])
             ->withCount('proofs')
             ->where('tenant_id', $tenant->id)
             ->latest('issued_at')
@@ -192,6 +198,43 @@ class SubscriptionController extends Controller
             ->with('status', 'Request perubahan paket dibatalkan.');
     }
 
+    public function createQrisIntent(Request $request, Tenant $tenant, string $invoiceId): RedirectResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensurePanelAccess($user, $tenant);
+        $this->ensureOwnerOnly($user);
+
+        $invoice = SubscriptionInvoice::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('id', $invoiceId)
+            ->first();
+
+        if (! $invoice) {
+            throw ValidationException::withMessages([
+                'subscription' => ['Invoice langganan tidak ditemukan.'],
+            ]);
+        }
+
+        if ($invoice->payment_method !== 'bri_qris') {
+            throw ValidationException::withMessages([
+                'subscription' => ['QRIS hanya tersedia untuk invoice payment method bri_qris.'],
+            ]);
+        }
+
+        try {
+            $this->paymentGatewayService->createQrisIntent($invoice, $user);
+        } catch (\Throwable) {
+            throw ValidationException::withMessages([
+                'subscription' => ['Gagal membuat QRIS intent. Coba lagi beberapa saat.'],
+            ]);
+        }
+
+        return redirect()
+            ->route('tenant.subscription.index', ['tenant' => $tenant->id])
+            ->with('status', 'QRIS intent berhasil dibuat.');
+    }
+
     public function uploadProof(Request $request, Tenant $tenant, string $invoiceId): RedirectResponse
     {
         /** @var User $user */
@@ -212,6 +255,12 @@ class SubscriptionController extends Controller
         if (! $invoice) {
             throw ValidationException::withMessages([
                 'subscription' => ['Invoice langganan tidak ditemukan.'],
+            ]);
+        }
+
+        if ($invoice->payment_method === 'bri_qris') {
+            throw ValidationException::withMessages([
+                'subscription' => ['Upload bukti hanya untuk invoice legacy bank transfer.'],
             ]);
         }
 

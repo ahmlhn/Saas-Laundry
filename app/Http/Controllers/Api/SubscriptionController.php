@@ -5,11 +5,14 @@ namespace App\Http\Controllers\Api;
 use App\Domain\Audit\AuditEventKeys;
 use App\Domain\Audit\AuditTrailService;
 use App\Domain\Billing\QuotaService;
+use App\Domain\Subscription\SubscriptionPaymentGatewayService;
 use App\Http\Controllers\Api\Concerns\EnsuresApiAccess;
 use App\Http\Controllers\Controller;
 use App\Models\Plan;
 use App\Models\SubscriptionChangeRequest;
 use App\Models\SubscriptionInvoice;
+use App\Models\SubscriptionPaymentEvent;
+use App\Models\SubscriptionPaymentIntent;
 use App\Models\SubscriptionPaymentProof;
 use App\Models\Tenant;
 use App\Models\User;
@@ -26,6 +29,7 @@ class SubscriptionController extends Controller
     public function __construct(
         private readonly QuotaService $quotaService,
         private readonly AuditTrailService $auditTrail,
+        private readonly SubscriptionPaymentGatewayService $paymentGatewayService,
     ) {
     }
 
@@ -318,7 +322,11 @@ class SubscriptionController extends Controller
         }
 
         $invoice = SubscriptionInvoice::query()
-            ->with(['proofs' => fn ($query) => $query->latest('created_at')])
+            ->with([
+                'proofs' => fn ($query) => $query->latest('created_at'),
+                'paymentIntents' => fn ($query) => $query->latest('created_at'),
+                'paymentEvents' => fn ($query) => $query->latest('received_at'),
+            ])
             ->where('tenant_id', $user->tenant_id)
             ->where('id', $invoiceId)
             ->first();
@@ -333,7 +341,112 @@ class SubscriptionController extends Controller
         return response()->json([
             'data' => array_merge($this->serializeInvoice($invoice), [
                 'proofs' => $invoice->proofs->map(fn (SubscriptionPaymentProof $proof): array => $this->serializeProof($proof))->values(),
+                'latest_intent' => $invoice->paymentIntents->first()
+                    ? $this->serializeIntent($invoice->paymentIntents->first())
+                    : null,
+                'latest_event' => $invoice->paymentEvents->first()
+                    ? $this->serializeEvent($invoice->paymentEvents->first())
+                    : null,
             ]),
+        ]);
+    }
+
+    public function createQrisIntent(Request $request, string $invoiceId): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner']);
+
+        if (! $user->tenant_id) {
+            return response()->json([
+                'reason_code' => 'DATA_NOT_FOUND',
+                'message' => 'Tenant scope is not available for this account.',
+            ], 404);
+        }
+
+        $invoice = SubscriptionInvoice::query()
+            ->where('tenant_id', $user->tenant_id)
+            ->where('id', $invoiceId)
+            ->first();
+
+        if (! $invoice) {
+            return response()->json([
+                'reason_code' => 'DATA_NOT_FOUND',
+                'message' => 'Subscription invoice not found.',
+            ], 404);
+        }
+
+        if ($invoice->payment_method !== 'bri_qris') {
+            return response()->json([
+                'reason_code' => 'PAYMENT_METHOD_NOT_SUPPORTED',
+                'message' => 'QRIS intent is only available for bri_qris invoices.',
+            ], 422);
+        }
+
+        try {
+            $intent = $this->paymentGatewayService->createQrisIntent($invoice, $user);
+        } catch (\Throwable $error) {
+            report($error);
+
+            return response()->json([
+                'reason_code' => 'GATEWAY_REQUEST_FAILED',
+                'message' => 'Failed to create QRIS payment intent.',
+            ], 422);
+        }
+
+        $invoice = $invoice->fresh();
+
+        return response()->json([
+            'data' => [
+                'invoice' => $this->serializeInvoice($invoice),
+                'intent' => $this->serializeIntent($intent),
+            ],
+        ], 201);
+    }
+
+    public function paymentStatus(Request $request, string $invoiceId): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner']);
+
+        if (! $user->tenant_id) {
+            return response()->json([
+                'reason_code' => 'DATA_NOT_FOUND',
+                'message' => 'Tenant scope is not available for this account.',
+            ], 404);
+        }
+
+        $invoice = SubscriptionInvoice::query()
+            ->with([
+                'paymentIntents' => fn ($query) => $query->latest('created_at'),
+                'paymentEvents' => fn ($query) => $query->latest('received_at'),
+            ])
+            ->where('tenant_id', $user->tenant_id)
+            ->where('id', $invoiceId)
+            ->first();
+
+        if (! $invoice) {
+            return response()->json([
+                'reason_code' => 'DATA_NOT_FOUND',
+                'message' => 'Subscription invoice not found.',
+            ], 404);
+        }
+
+        return response()->json([
+            'data' => [
+                'invoice' => $this->serializeInvoice($invoice),
+                'latest_intent' => $invoice->paymentIntents->first()
+                    ? $this->serializeIntent($invoice->paymentIntents->first())
+                    : null,
+                'latest_event' => $invoice->paymentEvents->first()
+                    ? $this->serializeEvent($invoice->paymentEvents->first())
+                    : null,
+                'events' => $invoice->paymentEvents
+                    ->take(10)
+                    ->map(fn (SubscriptionPaymentEvent $event): array => $this->serializeEvent($event))
+                    ->values(),
+            ],
         ]);
     }
 
@@ -365,6 +478,13 @@ class SubscriptionController extends Controller
                 'reason_code' => 'DATA_NOT_FOUND',
                 'message' => 'Subscription invoice not found.',
             ], 404);
+        }
+
+        if ($invoice->payment_method === 'bri_qris') {
+            return response()->json([
+                'reason_code' => 'LEGACY_PROOF_ONLY',
+                'message' => 'Proof upload is only available for legacy bank_transfer invoices.',
+            ], 422);
         }
 
         /** @var UploadedFile $proofFile */
@@ -493,11 +613,65 @@ class SubscriptionController extends Controller
             'tax_included' => (bool) $invoice->tax_included,
             'payment_method' => $invoice->payment_method,
             'status' => $invoice->status,
+            'gateway_provider' => $invoice->gateway_provider,
+            'gateway_reference' => $invoice->gateway_reference,
+            'gateway_status' => $invoice->gateway_status,
+            'gateway_paid_amount' => $invoice->gateway_paid_amount !== null ? (int) $invoice->gateway_paid_amount : null,
+            'gateway_updated_at' => $invoice->gateway_updated_at?->toIso8601String(),
+            'qris_payload' => $invoice->qris_payload,
+            'qris_expired_at' => $invoice->qris_expired_at?->toIso8601String(),
             'issued_at' => $invoice->issued_at?->toIso8601String(),
             'due_at' => $invoice->due_at?->toIso8601String(),
             'paid_verified_at' => $invoice->paid_verified_at?->toIso8601String(),
             'created_at' => $invoice->created_at?->toIso8601String(),
             'updated_at' => $invoice->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeIntent(SubscriptionPaymentIntent $intent): array
+    {
+        return [
+            'id' => $intent->id,
+            'invoice_id' => $intent->invoice_id,
+            'tenant_id' => $intent->tenant_id,
+            'provider' => $intent->provider,
+            'intent_reference' => $intent->intent_reference,
+            'amount_total' => (int) $intent->amount_total,
+            'currency' => $intent->currency,
+            'status' => $intent->status,
+            'qris_payload' => $intent->qris_payload,
+            'expires_at' => $intent->expires_at?->toIso8601String(),
+            'created_at' => $intent->created_at?->toIso8601String(),
+            'updated_at' => $intent->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeEvent(SubscriptionPaymentEvent $event): array
+    {
+        return [
+            'id' => $event->id,
+            'invoice_id' => $event->invoice_id,
+            'tenant_id' => $event->tenant_id,
+            'provider' => $event->provider,
+            'gateway_event_id' => $event->gateway_event_id,
+            'event_type' => $event->event_type,
+            'event_status' => $event->event_status,
+            'amount_total' => $event->amount_total !== null ? (int) $event->amount_total : null,
+            'currency' => $event->currency,
+            'gateway_reference' => $event->gateway_reference,
+            'signature_valid' => (bool) $event->signature_valid,
+            'process_status' => $event->process_status,
+            'rejection_reason' => $event->rejection_reason,
+            'received_at' => $event->received_at?->toIso8601String(),
+            'processed_at' => $event->processed_at?->toIso8601String(),
+            'created_at' => $event->created_at?->toIso8601String(),
+            'updated_at' => $event->updated_at?->toIso8601String(),
         ];
     }
 

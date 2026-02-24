@@ -38,6 +38,7 @@ import { OutletsScreen } from "../screens/app/OutletsScreen";
 import { ShippingZonesScreen } from "../screens/app/ShippingZonesScreen";
 import { TenantManagementScreen } from "../screens/app/TenantManagementScreen";
 import { SubscriptionCenterScreen } from "../screens/app/SubscriptionCenterScreen";
+import { PlatformSubscriptionHubScreen } from "../screens/app/PlatformSubscriptionHubScreen";
 import { canSeeQuickActionTab, canSeeReportsTab } from "../lib/accessControl";
 
 const RootStack = createNativeStackNavigator<AppRootStackParamList>();
@@ -286,8 +287,9 @@ function MainTabsNavigator() {
 }
 
 export function AppNavigator() {
-  const { selectedOutlet } = useSession();
+  const { selectedOutlet, session } = useSession();
   const theme = useAppTheme();
+  const isPlatformWorkspace = session?.workspace === "platform";
 
   return (
     <RootStack.Navigator
@@ -296,7 +298,9 @@ export function AppNavigator() {
         contentStyle: { backgroundColor: theme.colors.background },
       }}
     >
-      {selectedOutlet ? (
+      {isPlatformWorkspace ? (
+        <RootStack.Screen name="PlatformHub" component={PlatformSubscriptionHubScreen} />
+      ) : selectedOutlet ? (
         <RootStack.Screen name="MainTabs" component={MainTabsNavigator} />
       ) : (
         <RootStack.Screen name="OutletSelect" component={OutletSelectScreen} />

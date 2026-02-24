@@ -2,10 +2,12 @@
 
 namespace App\Console\Commands;
 
+use App\Domain\Subscription\SubscriptionPaymentGatewayService;
 use App\Models\SubscriptionCycle;
 use App\Models\SubscriptionInvoice;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class GenerateSubscriptionRenewalInvoicesCommand extends Command
@@ -16,6 +18,12 @@ class GenerateSubscriptionRenewalInvoicesCommand extends Command
         {--dry-run : Only show what would be generated}';
 
     protected $description = 'Generate subscription renewal invoices for cycles ending at H-N (default H-7).';
+
+    public function __construct(
+        private readonly SubscriptionPaymentGatewayService $paymentGatewayService,
+    ) {
+        parent::__construct();
+    }
 
     public function handle(): int
     {
@@ -44,6 +52,8 @@ class GenerateSubscriptionRenewalInvoicesCommand extends Command
 
         $created = 0;
         $skipped = 0;
+        $gatewayProvider = (string) config('subscription.billing_gateway_provider', 'bri_qris');
+        $paymentMethod = $gatewayProvider === 'bri_qris' ? 'bri_qris' : 'bank_transfer';
 
         foreach ($cycles as $cycle) {
             $alreadyExists = SubscriptionInvoice::query()
@@ -73,20 +83,35 @@ class GenerateSubscriptionRenewalInvoicesCommand extends Command
                 continue;
             }
 
-            SubscriptionInvoice::query()->create([
+            $invoice = SubscriptionInvoice::query()->create([
                 'tenant_id' => $cycle->tenant_id,
                 'cycle_id' => $cycle->id,
                 'invoice_no' => $invoiceNo,
                 'amount_total' => $amount,
                 'currency' => $cycle->plan?->currency ?: 'IDR',
                 'tax_included' => true,
-                'payment_method' => 'bank_transfer',
+                'payment_method' => $paymentMethod,
+                'gateway_provider' => $paymentMethod === 'bri_qris' ? 'bri_qris' : null,
                 'issued_at' => now(),
                 'due_at' => $cycle->cycle_end_at,
                 'status' => 'issued',
                 'created_by' => null,
                 'updated_by' => null,
             ]);
+
+            if ($paymentMethod === 'bri_qris') {
+                try {
+                    $this->paymentGatewayService->createQrisIntent($invoice, null, true);
+                } catch (\Throwable $error) {
+                    Log::warning('subscription_renewal_qris_intent_failed', [
+                        'invoice_id' => $invoice->id,
+                        'tenant_id' => $invoice->tenant_id,
+                        'error' => $error->getMessage(),
+                    ]);
+
+                    $this->warn("WARN tenant={$cycle->tenant_id} cycle={$cycle->id} invoice={$invoiceNo} reason=qris_intent_failed");
+                }
+            }
 
             $created++;
             $this->line("CREATE tenant={$cycle->tenant_id} cycle={$cycle->id} invoice_no={$invoiceNo} amount={$amount}");

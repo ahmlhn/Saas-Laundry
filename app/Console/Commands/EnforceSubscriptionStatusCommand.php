@@ -18,6 +18,7 @@ class EnforceSubscriptionStatusCommand extends Command
     {
         $tenantId = (string) ($this->option('tenant') ?? '');
         $dryRun = (bool) $this->option('dry-run');
+        $suspendPolicy = strtoupper((string) config('subscription.suspend_policy', 'H_PLUS_1'));
 
         $query = Tenant::query()->orderBy('name');
 
@@ -48,15 +49,24 @@ class EnforceSubscriptionStatusCommand extends Command
                 ->where('status', 'overdue')
                 ->exists();
 
+            $hasSuspendOverdue = SubscriptionInvoice::query()
+                ->where('tenant_id', $tenant->id)
+                ->whereIn('status', ['issued', 'pending_verification', 'overdue'])
+                ->where('due_at', '<=', now()->subDay())
+                ->exists();
+
             $fromState = (string) ($tenant->subscription_state ?: 'active');
             $fromWriteMode = (string) ($tenant->write_access_mode ?: 'full');
             $toState = $fromState;
             $toWriteMode = $fromWriteMode;
 
-            if ($hasOverdue && $fromState !== 'suspended') {
+            if ($suspendPolicy === 'H_PLUS_1' && $hasSuspendOverdue) {
+                $toState = 'suspended';
+                $toWriteMode = 'read_only';
+            } elseif ($hasOverdue) {
                 $toState = 'past_due';
                 $toWriteMode = 'read_only';
-            } elseif (! $hasOverdue && $fromState === 'past_due') {
+            } else {
                 $toState = 'active';
                 $toWriteMode = 'full';
             }
@@ -82,7 +92,7 @@ class EnforceSubscriptionStatusCommand extends Command
             $this->line("UPDATED tenant={$tenant->id} {$fromState}/{$fromWriteMode} -> {$toState}/{$toWriteMode}");
         }
 
-        $this->info("Enforce status summary: changed={$changed}, unchanged={$unchanged}, dry_run=".($dryRun ? 'yes' : 'no'));
+        $this->info("Enforce status summary: changed={$changed}, unchanged={$unchanged}, policy={$suspendPolicy}, dry_run=".($dryRun ? 'yes' : 'no'));
 
         return self::SUCCESS;
     }

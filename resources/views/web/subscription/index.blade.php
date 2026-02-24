@@ -105,40 +105,67 @@
             <tr>
                 <th>Invoice</th>
                 <th>Status</th>
+                <th>Payment Method</th>
                 <th>Nominal</th>
                 <th>Jatuh Tempo</th>
-                <th>Bukti</th>
+                <th>Pembayaran</th>
             </tr>
             </thead>
             <tbody>
             @forelse($invoices as $invoice)
+                @php
+                    $latestIntent = $invoice->paymentIntents->first();
+                    $latestEvent = $invoice->paymentEvents->first();
+                @endphp
                 <tr>
                     <td>
                         <p class="row-title">{{ $invoice->invoice_no }}</p>
                         <p class="row-subtitle">Terbit {{ $invoice->issued_at?->format('d M Y H:i') ?? '-' }}</p>
                     </td>
                     <td>{{ strtoupper((string) $invoice->status) }}</td>
+                    <td>{{ strtoupper((string) $invoice->payment_method) }}</td>
                     <td>Rp{{ number_format((int) $invoice->amount_total) }}</td>
                     <td>{{ $invoice->due_at?->format('d M Y H:i') ?? '-' }}</td>
                     <td>
-                        <p class="row-subtitle">{{ number_format((int) $invoice->proofs_count) }} file</p>
-                        <form method="POST" action="{{ route('tenant.subscription.invoices.proof.upload', ['tenant' => $tenant->id, 'invoiceId' => $invoice->id]) }}" enctype="multipart/form-data" class="filters-grid" style="margin-top:8px;">
-                            @csrf
-                            <div>
-                                <input type="file" name="proof_file" accept=".jpg,.jpeg,.png,.pdf" required>
-                            </div>
-                            <div>
-                                <input type="text" name="note" maxlength="500" placeholder="Catatan bukti (opsional)">
-                            </div>
-                            <div class="filter-actions">
-                                <button class="btn btn-muted" type="submit">Upload Bukti</button>
-                            </div>
-                        </form>
+                        @if($invoice->payment_method === 'bri_qris')
+                            <p class="row-subtitle">Gateway: {{ strtoupper((string) ($invoice->gateway_status ?? 'WAITING')) }}</p>
+                            <p class="row-subtitle">Reference: {{ $invoice->gateway_reference ?? '-' }}</p>
+                            @if($latestEvent)
+                                <p class="row-subtitle">
+                                    Event: {{ strtoupper((string) $latestEvent->process_status) }}
+                                    | {{ $latestEvent->received_at?->format('d M Y H:i') ?? '-' }}
+                                </p>
+                            @endif
+                            @if($latestIntent)
+                                <p class="row-subtitle">QRIS expire: {{ $latestIntent->expires_at?->format('d M Y H:i') ?? '-' }}</p>
+                            @endif
+                            <form method="POST" action="{{ route('tenant.subscription.invoices.qris-intent', ['tenant' => $tenant->id, 'invoiceId' => $invoice->id]) }}" style="margin-top:8px;">
+                                @csrf
+                                <button class="btn btn-muted" type="submit">Refresh QRIS Intent</button>
+                            </form>
+                            @if($invoice->qris_payload)
+                                <p class="row-subtitle" style="margin-top:8px;word-break:break-all;">Payload: {{ $invoice->qris_payload }}</p>
+                            @endif
+                        @else
+                            <p class="row-subtitle">{{ number_format((int) $invoice->proofs_count) }} file</p>
+                            <form method="POST" action="{{ route('tenant.subscription.invoices.proof.upload', ['tenant' => $tenant->id, 'invoiceId' => $invoice->id]) }}" enctype="multipart/form-data" class="filters-grid" style="margin-top:8px;">
+                                @csrf
+                                <div>
+                                    <input type="file" name="proof_file" accept=".jpg,.jpeg,.png,.pdf" required>
+                                </div>
+                                <div>
+                                    <input type="text" name="note" maxlength="500" placeholder="Catatan bukti (opsional)">
+                                </div>
+                                <div class="filter-actions">
+                                    <button class="btn btn-muted" type="submit">Upload Bukti</button>
+                                </div>
+                            </form>
+                        @endif
                     </td>
                 </tr>
             @empty
                 <tr>
-                    <td colspan="5">Belum ada invoice langganan.</td>
+                    <td colspan="6">Belum ada invoice langganan.</td>
                 </tr>
             @endforelse
             </tbody>
