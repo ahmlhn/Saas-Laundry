@@ -14,6 +14,86 @@ interface CreateOrderResponse {
   data: OrderDetail;
 }
 
+interface AddOrderPaymentResponse {
+  data: {
+    id: string;
+    order_id: string;
+    amount: number;
+    method: string;
+    paid_at: string | null;
+    notes: string | null;
+    created_at: string;
+    updated_at: string;
+  };
+  order?: OrderDetail;
+}
+
+export interface OrderQrisIntentPayload {
+  id: string;
+  order_id: string;
+  provider: string;
+  intent_reference: string;
+  amount_total: number;
+  currency: string;
+  status: string;
+  qris_payload: string | null;
+  expires_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface OrderQrisEventPayload {
+  id: string;
+  order_id: string | null;
+  provider: string;
+  intent_id: string | null;
+  gateway_event_id: string;
+  event_type: string;
+  event_status: string | null;
+  amount_total: number | null;
+  currency: string | null;
+  gateway_reference: string | null;
+  signature_valid: boolean;
+  process_status: string;
+  rejection_reason: string | null;
+  received_at: string | null;
+  processed_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface OrderQrisIntentResult {
+  order: {
+    id: string;
+    order_code: string;
+    total_amount: number;
+    paid_amount: number;
+    due_amount: number;
+  };
+  intent: OrderQrisIntentPayload;
+}
+
+export interface OrderQrisPaymentStatusPayload {
+  order: {
+    id: string;
+    order_code: string;
+    total_amount: number;
+    paid_amount: number;
+    due_amount: number;
+  };
+  latest_intent: OrderQrisIntentPayload | null;
+  latest_event: OrderQrisEventPayload | null;
+  events: OrderQrisEventPayload[];
+}
+
+interface CreateOrderQrisIntentResponse {
+  data: OrderQrisIntentResult;
+}
+
+interface OrderQrisPaymentStatusResponse {
+  data: OrderQrisPaymentStatusPayload;
+}
+
 interface ListOrdersParams {
   outletId: string;
   limit?: number;
@@ -44,6 +124,14 @@ interface CreateOrderPayload {
   isPickupDelivery?: boolean;
   shippingFeeAmount?: number;
   discountAmount?: number;
+}
+
+interface AddOrderPaymentPayload {
+  orderId: string;
+  amount: number;
+  method: string;
+  paidAt?: string;
+  notes?: string;
 }
 
 export async function listOrders(params: ListOrdersParams): Promise<OrderSummary[]> {
@@ -99,6 +187,32 @@ export async function createOrder(payload: CreateOrderPayload): Promise<OrderDet
   });
 
   invalidateCache("orders:list:");
+  return response.data.data;
+}
+
+export async function addOrderPayment(payload: AddOrderPaymentPayload): Promise<OrderDetail | null> {
+  const response = await httpClient.post<AddOrderPaymentResponse>(`/orders/${payload.orderId}/payments`, {
+    amount: payload.amount,
+    method: payload.method,
+    paid_at: payload.paidAt,
+    notes: payload.notes?.trim() || undefined,
+  });
+
+  invalidateCache("orders:list:");
+  return response.data.order ?? null;
+}
+
+export async function createOrderQrisIntent(payload: { orderId: string; amount?: number }): Promise<OrderQrisIntentResult> {
+  const response = await httpClient.post<CreateOrderQrisIntentResponse>(`/orders/${payload.orderId}/payments/qris-intent`, {
+    amount: payload.amount,
+  });
+
+  invalidateCache("orders:list:");
+  return response.data.data;
+}
+
+export async function getOrderQrisPaymentStatus(orderId: string): Promise<OrderQrisPaymentStatusPayload> {
+  const response = await httpClient.get<OrderQrisPaymentStatusResponse>(`/orders/${orderId}/payments/qris-status`);
   return response.data.data;
 }
 

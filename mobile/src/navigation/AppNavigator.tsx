@@ -18,6 +18,7 @@ import { CustomersScreen } from "../screens/app/CustomersScreen";
 import { CustomerDetailScreen } from "../screens/app/CustomerDetailScreen";
 import { CustomerFormScreen } from "../screens/app/CustomerFormScreen";
 import { FinanceToolsScreen } from "../screens/app/FinanceToolsScreen";
+import { PaymentGatewayScreen } from "../screens/app/PaymentGatewayScreen";
 import { PrinterNoteScreen } from "../screens/app/PrinterNoteScreen";
 import { HelpInfoScreen } from "../screens/app/HelpInfoScreen";
 import { WhatsAppToolsScreen } from "../screens/app/WhatsAppToolsScreen";
@@ -80,6 +81,7 @@ function AccountTabNavigator() {
       <AccountStack.Screen name="TenantManagement" component={TenantManagementScreen} />
       <AccountStack.Screen name="SubscriptionCenter" component={SubscriptionCenterScreen} />
       <AccountStack.Screen name="FinanceTools" component={FinanceToolsScreen} />
+      <AccountStack.Screen name="PaymentGateway" component={PaymentGatewayScreen} />
       <AccountStack.Screen name="PrinterNote" component={PrinterNoteScreen} />
       <AccountStack.Screen name="HelpInfo" component={HelpInfoScreen} />
       <AccountStack.Screen name="WhatsAppTools" component={WhatsAppToolsScreen} />
@@ -94,9 +96,7 @@ function QuickActionTabButton(props: BottomTabBarButtonProps) {
   const isLandscape = width > height;
   const minEdge = Math.min(width, height);
   const isTablet = minEdge >= 600;
-  const buttonSize = isTablet ? 64 : isLandscape ? 54 : 60;
-  const wrapperTopIdle = isLandscape ? -10 : -14;
-  const wrapperTopActive = isLandscape ? -13 : -18;
+  const buttonSize = isTablet ? 54 : isLandscape ? 50 : 52;
   const haloSize = buttonSize + (isTablet ? 16 : 14);
   const focusRingSize = haloSize + (isTablet ? 10 : 8);
   const isActive = Boolean(props.accessibilityState?.selected);
@@ -118,8 +118,8 @@ function QuickActionTabButton(props: BottomTabBarButtonProps) {
       style={({ pressed }) => [
         styles.quickActionButtonWrap,
         {
-          top: isActive ? wrapperTopActive : wrapperTopIdle,
-          transform: [{ translateY: isActive ? -2 : 0 }, { scale: pressed ? 0.93 : isActive ? 1.1 : 1 }],
+          top: 0,
+          transform: [{ scale: pressed ? 0.93 : 1 }],
           opacity: pressed ? 0.9 : 1,
         },
       ]}
@@ -159,10 +159,10 @@ function QuickActionTabButton(props: BottomTabBarButtonProps) {
             height: buttonSize,
             borderWidth: isActive ? 4 : 4,
             shadowColor: theme.mode === "dark" ? "#000" : "#0d2f45",
-            shadowOpacity: theme.mode === "dark" ? (isActive ? 0.52 : 0.28) : isActive ? 0.3 : 0.15,
-            shadowRadius: isActive ? 12 : 7,
-            shadowOffset: { width: 0, height: isActive ? 8 : 3 },
-            elevation: isActive ? 10 : 5,
+            shadowOpacity: theme.mode === "dark" ? (isActive ? 0.3 : 0.18) : isActive ? 0.18 : 0.1,
+            shadowRadius: isActive ? 8 : 4,
+            shadowOffset: { width: 0, height: isActive ? 4 : 2 },
+            elevation: isActive ? 5 : 2,
           },
         ]}
       >

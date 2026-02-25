@@ -87,6 +87,7 @@ export type AccountStackParamList = {
   TenantManagement: undefined;
   SubscriptionCenter: undefined;
   FinanceTools: undefined;
+  PaymentGateway: undefined;
   PrinterNote: undefined;
   HelpInfo: undefined;
   WhatsAppTools: undefined;

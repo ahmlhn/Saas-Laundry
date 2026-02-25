@@ -9,10 +9,13 @@ use App\Domain\Billing\QuotaService;
 use App\Domain\Billing\TenantWriteAccessException;
 use App\Domain\Messaging\WaDispatchService;
 use App\Domain\Orders\OrderStatusTransitionValidator;
+use App\Domain\Orders\OrderPaymentGatewayService;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\OrderPaymentEvent;
+use App\Models\OrderPaymentIntent;
 use App\Models\OutletService;
 use App\Models\Payment;
 use App\Models\Service;
@@ -30,6 +33,7 @@ class OrderController extends Controller
         private readonly QuotaService $quotaService,
         private readonly WaDispatchService $waDispatchService,
         private readonly AuditTrailService $auditTrail,
+        private readonly OrderPaymentGatewayService $orderPaymentGatewayService,
     ) {
     }
 
@@ -378,6 +382,106 @@ class OrderController extends Controller
             'data' => $payment,
             'order' => $order->fresh(['payments']),
         ], 201);
+    }
+
+    public function createQrisIntent(Request $request, Order $order): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner', 'admin', 'cashier']);
+        $this->ensureOrderAccess($user, $order);
+        $this->ensureOperationalWriteAccess($user->tenant_id);
+
+        $validated = $request->validate([
+            'amount' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        $freshOrder = $order->fresh();
+        if (! $freshOrder) {
+            return response()->json([
+                'reason_code' => 'DATA_NOT_FOUND',
+                'message' => 'Order not found.',
+            ], 404);
+        }
+
+        if ((int) $freshOrder->due_amount <= 0) {
+            return response()->json([
+                'reason_code' => 'PAYMENT_ALREADY_SETTLED',
+                'message' => 'Order already paid. QRIS intent is not required.',
+            ], 422);
+        }
+
+        $amount = (int) ($validated['amount'] ?? $freshOrder->due_amount);
+
+        if ($amount > (int) $freshOrder->due_amount) {
+            return response()->json([
+                'reason_code' => 'VALIDATION_FAILED',
+                'message' => 'QRIS amount exceeds current due amount.',
+            ], 422);
+        }
+
+        try {
+            $intent = $this->orderPaymentGatewayService->createQrisIntent($freshOrder, $amount, $user);
+        } catch (\Throwable $error) {
+            report($error);
+
+            return response()->json([
+                'reason_code' => 'GATEWAY_REQUEST_FAILED',
+                'message' => 'Failed to create QRIS payment intent.',
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => [
+                'order' => [
+                    'id' => $freshOrder->id,
+                    'order_code' => $freshOrder->order_code,
+                    'total_amount' => (int) $freshOrder->total_amount,
+                    'paid_amount' => (int) $freshOrder->paid_amount,
+                    'due_amount' => (int) $freshOrder->due_amount,
+                ],
+                'intent' => $this->serializeOrderPaymentIntent($intent),
+            ],
+        ], 201);
+    }
+
+    public function qrisPaymentStatus(Request $request, Order $order): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner', 'admin', 'cashier']);
+        $this->ensureOrderAccess($user, $order);
+
+        $latestIntent = OrderPaymentIntent::query()
+            ->where('order_id', $order->id)
+            ->latest('created_at')
+            ->first();
+
+        $latestEvent = OrderPaymentEvent::query()
+            ->where('order_id', $order->id)
+            ->latest('received_at')
+            ->first();
+
+        $events = OrderPaymentEvent::query()
+            ->where('order_id', $order->id)
+            ->latest('received_at')
+            ->limit(10)
+            ->get();
+
+        return response()->json([
+            'data' => [
+                'order' => [
+                    'id' => $order->id,
+                    'order_code' => $order->order_code,
+                    'total_amount' => (int) $order->total_amount,
+                    'paid_amount' => (int) $order->paid_amount,
+                    'due_amount' => (int) $order->due_amount,
+                ],
+                'latest_intent' => $latestIntent ? $this->serializeOrderPaymentIntent($latestIntent) : null,
+                'latest_event' => $latestEvent ? $this->serializeOrderPaymentEvent($latestEvent) : null,
+                'events' => $events->map(fn (OrderPaymentEvent $event): array => $this->serializeOrderPaymentEvent($event))->values(),
+            ],
+        ]);
     }
 
     public function updateLaundryStatus(Request $request, Order $order, OrderStatusTransitionValidator $validator): JsonResponse
@@ -779,5 +883,45 @@ class OrderController extends Controller
     private function generateOrderCode(): string
     {
         return 'ORD-'.strtoupper(Str::random(8));
+    }
+
+    private function serializeOrderPaymentIntent(OrderPaymentIntent $intent): array
+    {
+        return [
+            'id' => $intent->id,
+            'order_id' => $intent->order_id,
+            'provider' => $intent->provider,
+            'intent_reference' => $intent->intent_reference,
+            'amount_total' => (int) $intent->amount_total,
+            'currency' => $intent->currency,
+            'status' => $intent->status,
+            'qris_payload' => $intent->qris_payload,
+            'expires_at' => $intent->expires_at?->toIso8601String(),
+            'created_at' => $intent->created_at?->toIso8601String(),
+            'updated_at' => $intent->updated_at?->toIso8601String(),
+        ];
+    }
+
+    private function serializeOrderPaymentEvent(OrderPaymentEvent $event): array
+    {
+        return [
+            'id' => $event->id,
+            'order_id' => $event->order_id,
+            'provider' => $event->provider,
+            'intent_id' => $event->intent_id,
+            'gateway_event_id' => $event->gateway_event_id,
+            'event_type' => $event->event_type,
+            'event_status' => $event->event_status,
+            'amount_total' => $event->amount_total !== null ? (int) $event->amount_total : null,
+            'currency' => $event->currency,
+            'gateway_reference' => $event->gateway_reference,
+            'signature_valid' => (bool) $event->signature_valid,
+            'process_status' => $event->process_status,
+            'rejection_reason' => $event->rejection_reason,
+            'received_at' => $event->received_at?->toIso8601String(),
+            'processed_at' => $event->processed_at?->toIso8601String(),
+            'created_at' => $event->created_at?->toIso8601String(),
+            'updated_at' => $event->updated_at?->toIso8601String(),
+        ];
     }
 }

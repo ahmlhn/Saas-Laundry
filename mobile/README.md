@@ -119,3 +119,16 @@ npm run typecheck
   - HP kecil (sekitar 360x640),
   - HP besar (sekitar 412x915),
   - tablet portrait (sekitar 768x1024).
+
+## 8) Catatan Pengembangan: Layanan Paket Pelanggan
+
+- Status saat ini:
+  - Card `Data Paket` di langkah 1 (`Tambah Pesanan`) hanya tampil jika payload customer memang membawa data paket.
+  - Jika data paket tidak ada, card tidak dirender agar UI tetap bersih.
+- Kontrak data yang direkomendasikan dari API customer:
+  - `package_summary.active_count` (jumlah paket aktif pelanggan)
+  - `package_summary.remaining_quota_label` (teks sisa kuota, contoh: `3 kg`, `2 pcs`, `-`)
+- Backlog pengembangan lanjutan:
+  - Tambah endpoint/detail paket pelanggan aktif (nama paket, masa berlaku, sisa kuota per paket).
+  - Integrasi validasi pemakaian paket saat create order (apply ke item yang eligible).
+  - Tampilkan riwayat pemakaian paket per pelanggan di screen detail pelanggan/order.
