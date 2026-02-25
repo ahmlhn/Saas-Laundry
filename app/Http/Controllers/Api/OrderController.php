@@ -289,14 +289,12 @@ class OrderController extends Controller
             ], 422);
         }
 
-        if ($order->is_pickup_delivery) {
-            $this->waDispatchService->enqueueOrderEvent($order, 'WA_PICKUP_CONFIRM', metadata: [
-                'event' => 'order_created',
-                'source' => 'api',
-                'actor_user_id' => $user->id,
-                'source_channel' => $sourceChannel,
-            ]);
-        }
+        $this->waDispatchService->enqueueOrderEvent($order, 'WA_PICKUP_CONFIRM', metadata: [
+            'event' => 'order_created',
+            'source' => 'api',
+            'actor_user_id' => $user->id,
+            'source_channel' => $sourceChannel,
+        ]);
 
         $this->auditTrail->record(
             eventKey: AuditEventKeys::ORDER_CREATED,

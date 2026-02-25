@@ -194,6 +194,46 @@ class WaApiTest extends TestCase
         $this->assertSame(2, WaMessage::query()->where('order_id', $orderId)->count());
     }
 
+    public function test_non_pickup_order_creation_also_enqueues_wa_confirmation_message(): void
+    {
+        $this->setPlan('premium');
+
+        $this->apiAs($this->admin)->postJson('/api/wa/provider-config', [
+            'provider_key' => 'mock',
+            'credentials' => [
+                'token' => 'demo-token',
+            ],
+            'is_active' => true,
+        ])->assertOk();
+
+        $response = $this->apiAs($this->admin)->postJson('/api/orders', [
+            'outlet_id' => $this->outlet->id,
+            'order_code' => 'ORD-WA-002',
+            'is_pickup_delivery' => false,
+            'customer' => [
+                'name' => 'Pelanggan Non Pickup',
+                'phone' => '081211110000',
+            ],
+            'items' => [
+                [
+                    'service_id' => $this->service->id,
+                    'weight_kg' => 1.8,
+                ],
+            ],
+        ])->assertCreated();
+
+        $orderId = $response->json('data.id');
+
+        $this->assertDatabaseHas('wa_messages', [
+            'tenant_id' => $this->tenant->id,
+            'order_id' => $orderId,
+            'template_id' => 'WA_PICKUP_CONFIRM',
+            'status' => 'sent',
+            'created_by' => $this->admin->id,
+            'source_channel' => 'system',
+        ]);
+    }
+
     public function test_send_job_retries_transient_failure_until_failed(): void
     {
         $this->setPlan('premium');

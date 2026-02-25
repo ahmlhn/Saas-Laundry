@@ -25,10 +25,10 @@ import { AppPanel } from "../../components/ui/AppPanel";
 import { listCustomers, listCustomersPage } from "../../features/customers/customerApi";
 import { formatCustomerPhoneDisplay } from "../../features/customers/customerPhone";
 import { parseCustomerProfileMeta } from "../../features/customers/customerProfileNote";
-import { addOrderPayment, createOrder, createOrderQrisIntent, listOrders } from "../../features/orders/orderApi";
+import { addOrderPayment, createOrder, listOrders } from "../../features/orders/orderApi";
 import { listPromotionSections } from "../../features/promotions/promoApi";
 import { listServices } from "../../features/services/serviceApi";
-import { hasAnyRole } from "../../lib/accessControl";
+import { hasAnyRole, isWaPlanEligible } from "../../lib/accessControl";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AppTabParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
@@ -120,7 +120,7 @@ function parseDiscountPercentInput(raw: string): number {
 type PromoSource = "automatic" | "selection" | "voucher";
 type ManualDiscountType = "amount" | "percent";
 type PaymentFlowType = "later" | "now";
-type PaymentMethodType = "cash" | "transfer" | "qris" | "other";
+type PaymentMethodType = "cash" | "transfer" | "other";
 
 interface PaymentMethodOption {
   value: PaymentMethodType;
@@ -131,7 +131,6 @@ interface PaymentMethodOption {
 const PAYMENT_METHOD_OPTIONS: PaymentMethodOption[] = [
   { value: "cash", label: "Tunai", icon: "cash-outline" },
   { value: "transfer", label: "Transfer", icon: "card-outline" },
-  { value: "qris", label: "QRIS", icon: "qr-code-outline" },
   { value: "other", label: "Lainnya", icon: "wallet-outline" },
 ];
 
@@ -320,25 +319,6 @@ function formatDateShort(value: string | null): string {
   }).format(date);
 }
 
-function formatDateTimeShort(value: string | null): string {
-  if (!value) {
-    return "-";
-  }
-
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) {
-    return "-";
-  }
-
-  return new Intl.DateTimeFormat("id-ID", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
 function toNonNegativeInt(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     return Math.max(0, Math.round(value));
@@ -441,6 +421,7 @@ export function QuickActionScreen() {
 
   const roles = session?.roles ?? [];
   const canCreateOrder = hasAnyRole(roles, ["owner", "admin", "cashier"]);
+  const waAutoEligible = isWaPlanEligible(session?.plan.key);
 
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [step, setStep] = useState<Step>("customer");
@@ -843,7 +824,7 @@ export function QuickActionScreen() {
     setManualDiscountType(draft.manualDiscountType === "percent" ? "percent" : "amount");
     setPaymentFlowType(draft.paymentFlowType === "now" ? "now" : "later");
     setPaymentMethodType(
-      draft.paymentMethodType === "transfer" || draft.paymentMethodType === "qris" || draft.paymentMethodType === "other" ? draft.paymentMethodType : "cash",
+      draft.paymentMethodType === "transfer" || draft.paymentMethodType === "other" ? draft.paymentMethodType : "cash",
     );
     setPaidAmountInput(draft.paidAmountInput ?? "");
     setOrderNotes(draft.orderNotes);
@@ -1661,13 +1642,12 @@ export function QuickActionScreen() {
   );
   const paymentInputExceededTotal = paymentTenderedAmount > total;
   const paymentNowAmountInvalid = paymentFlowType === "now" && total > 0 && paymentTenderedAmount <= 0;
-  const isQrisPaymentNow = paymentFlowType === "now" && paymentMethodType === "qris" && total > 0;
   const selectedPaymentMethodOption = useMemo(
     () => PAYMENT_METHOD_OPTIONS.find((option) => option.value === paymentMethodType) ?? PAYMENT_METHOD_OPTIONS[0],
     [paymentMethodType],
   );
-  const paymentAppliedLabel = isQrisPaymentNow ? "Nominal QRIS" : "Pembayaran Tercatat";
-  const paymentRemainingLabel = isQrisPaymentNow ? "Estimasi Sisa Tagihan" : "Sisa Tagihan";
+  const paymentAppliedLabel = "Pembayaran Tercatat";
+  const paymentRemainingLabel = "Sisa Tagihan";
   const paymentFlowSummaryLabel = paymentFlowType === "now" ? "Bayar Sekarang" : "Bayar Nanti";
   const discountExceedsLimit = totalDiscountAmount > discountLimitBaseAmount;
   const appliedPromoNote = useMemo(() => {
@@ -2107,7 +2087,7 @@ export function QuickActionScreen() {
     }
 
     if (paymentFlowType === "now" && total > 0 && paymentTenderedAmount <= 0) {
-      setErrorMessage(paymentMethodType === "qris" ? "Isi nominal QRIS dulu sebelum simpan pesanan." : "Isi nominal dibayar dulu sebelum simpan pesanan.");
+      setErrorMessage("Isi nominal dibayar dulu sebelum simpan pesanan.");
       setStep("payment");
       return;
     }
@@ -2141,26 +2121,14 @@ export function QuickActionScreen() {
       const remainingPaymentAmount = Math.max(createdTotalAmount - appliedPaymentAmount, 0);
       const createdPaymentChangeAmount = paymentMethodType === "cash" ? Math.max(tenderedAmount - createdTotalAmount, 0) : 0;
       const shouldCapturePaymentNow = paymentFlowType === "now" && createdTotalAmount > 0 && appliedPaymentAmount > 0;
-      const shouldCreateQrisIntent = shouldCapturePaymentNow && paymentMethodType === "qris";
       let paymentCaptureErrorMessage: string | null = null;
-      let qrisIntentReference: string | null = null;
-      let qrisIntentExpiry: string | null = null;
       if (shouldCapturePaymentNow) {
         try {
-          if (shouldCreateQrisIntent) {
-            const qrisIntent = await createOrderQrisIntent({
-              orderId: created.id,
-              amount: appliedPaymentAmount,
-            });
-            qrisIntentReference = qrisIntent.intent.intent_reference ?? null;
-            qrisIntentExpiry = qrisIntent.intent.expires_at ?? null;
-          } else {
-            await addOrderPayment({
-              orderId: created.id,
-              amount: appliedPaymentAmount,
-              method: paymentMethodType,
-            });
-          }
+          await addOrderPayment({
+            orderId: created.id,
+            amount: appliedPaymentAmount,
+            method: paymentMethodType,
+          });
         } catch (error) {
           paymentCaptureErrorMessage = getApiErrorMessage(error);
         }
@@ -2168,45 +2136,26 @@ export function QuickActionScreen() {
 
       await refreshSession();
       setLastCreatedOrderId(created.id);
+      const waNoticeSuffix = waAutoEligible ? " Notifikasi WhatsApp order baru diproses otomatis jika provider aktif." : "";
       if (paymentCaptureErrorMessage) {
         setActionMessage(
-          shouldCreateQrisIntent
-            ? `Order ${created.order_code} berhasil dibuat, tapi QRIS BRI belum berhasil dibuat. Coba buat QRIS dari detail order. (${paymentCaptureErrorMessage})`
-            : `Order ${created.order_code} berhasil dibuat, tapi pembayaran belum tercatat. Silakan catat dari detail order. (${paymentCaptureErrorMessage})`,
+          `Order ${created.order_code} berhasil dibuat, tapi pembayaran belum tercatat. Silakan catat dari detail order. (${paymentCaptureErrorMessage})${waNoticeSuffix}`,
         );
       } else if (paymentFlowType === "now" && createdTotalAmount > 0) {
-        if (shouldCreateQrisIntent) {
-          const expiryLabel = qrisIntentExpiry ? formatDateTimeShort(qrisIntentExpiry) : "-";
-          const referenceLabel = qrisIntentReference ? ` Ref ${qrisIntentReference}.` : "";
-          if (remainingPaymentAmount > 0) {
-            setActionMessage(
-              `Order ${created.order_code} berhasil dibuat. Intent QRIS BRI ${formatMoney(appliedPaymentAmount)} siap dipakai.${referenceLabel} Berlaku sampai ${expiryLabel}. Estimasi sisa tagihan ${formatMoney(remainingPaymentAmount)} setelah pembayaran masuk.`,
-            );
-          } else {
-            setActionMessage(
-              `Order ${created.order_code} berhasil dibuat. Intent QRIS BRI ${formatMoney(appliedPaymentAmount)} siap dipakai.${referenceLabel} Berlaku sampai ${expiryLabel}. Pembayaran akan tercatat otomatis saat webhook diterima.`,
-            );
-          }
-          clearSavedDraftSnapshot();
-          setShowCreateForm(false);
-          resetDraft();
-          return;
-        }
-
         const paymentMethodLabel = PAYMENT_METHOD_OPTIONS.find((option) => option.value === paymentMethodType)?.label ?? "Tunai";
         if (remainingPaymentAmount > 0) {
           setActionMessage(
-            `Order ${created.order_code} berhasil dibuat. Pembayaran ${formatMoney(appliedPaymentAmount)} tercatat (${paymentMethodLabel}), sisa tagihan ${formatMoney(remainingPaymentAmount)}.`,
+            `Order ${created.order_code} berhasil dibuat. Pembayaran ${formatMoney(appliedPaymentAmount)} tercatat (${paymentMethodLabel}), sisa tagihan ${formatMoney(remainingPaymentAmount)}.${waNoticeSuffix}`,
           );
         } else if (createdPaymentChangeAmount > 0) {
-          setActionMessage(`Order ${created.order_code} berhasil dibuat dan lunas. Kembalian ${formatMoney(createdPaymentChangeAmount)}.`);
+          setActionMessage(`Order ${created.order_code} berhasil dibuat dan lunas. Kembalian ${formatMoney(createdPaymentChangeAmount)}.${waNoticeSuffix}`);
         } else {
-          setActionMessage(`Order ${created.order_code} berhasil dibuat dan dibayar (${paymentMethodLabel}).`);
+          setActionMessage(`Order ${created.order_code} berhasil dibuat dan dibayar (${paymentMethodLabel}).${waNoticeSuffix}`);
         }
       } else if (paymentFlowType === "later") {
-        setActionMessage(`Order ${created.order_code} berhasil dibuat. Pembayaran ditandai bayar nanti.`);
+        setActionMessage(`Order ${created.order_code} berhasil dibuat. Pembayaran ditandai bayar nanti.${waNoticeSuffix}`);
       } else {
-        setActionMessage(`Order ${created.order_code} berhasil dibuat.`);
+        setActionMessage(`Order ${created.order_code} berhasil dibuat.${waNoticeSuffix}`);
       }
       clearSavedDraftSnapshot();
       setShowCreateForm(false);
@@ -2242,9 +2191,7 @@ export function QuickActionScreen() {
       ? "Lanjut Pembayaran"
       : step === "payment"
         ? paymentFlowType === "now" && total > 0
-          ? paymentMethodType === "qris"
-            ? "Buat QRIS & Simpan"
-            : "Bayar & Simpan"
+          ? "Bayar & Simpan"
           : "Simpan Pesanan"
         : "Lanjut";
   const primaryDisabledHint = useMemo(() => {
@@ -2277,7 +2224,7 @@ export function QuickActionScreen() {
     }
 
     if (step === "payment" && paymentNowAmountInvalid) {
-      return paymentMethodType === "qris" ? "Isi nominal QRIS dulu." : "Isi nominal dibayar dulu.";
+      return "Isi nominal dibayar dulu.";
     }
 
     if (voucherCodeRejected) {
@@ -2289,7 +2236,7 @@ export function QuickActionScreen() {
     }
 
     return "Lengkapi pembayaran dulu untuk menyimpan pesanan.";
-  }, [discountExceedsLimit, paymentMethodType, paymentNowAmountInvalid, primaryDisabled, step, submitting, voucherCodeRejected]);
+  }, [discountExceedsLimit, paymentNowAmountInvalid, primaryDisabled, step, submitting, voucherCodeRejected]);
   const startCreateTitle = hasSavedDraft ? "Lanjutkan Draft" : "Buat Pesanan Baru";
   const startCreateIconName: keyof typeof Ionicons.glyphMap = hasSavedDraft ? "document-text-outline" : "bag-add-outline";
 
@@ -3265,9 +3212,7 @@ export function QuickActionScreen() {
                         ) : null}
                         {total > 0 ? (
                           <Text style={styles.reviewPromoHint}>
-                            {paymentMethodType === "qris"
-                              ? "Untuk QRIS, sistem membuat intent QRIS BRI dan pembayaran dicatat otomatis setelah webhook masuk."
-                              : `Pembayaran ${selectedPaymentMethodOption.label.toLowerCase()} disimpan sebesar nominal tercatat.`}
+                            {`Pembayaran ${selectedPaymentMethodOption.label.toLowerCase()} disimpan sebesar nominal tercatat.`}
                           </Text>
                         ) : (
                           <Text style={styles.reviewPromoHint}>Total pesanan Rp 0. Order akan tersimpan tanpa pembayaran tambahan.</Text>

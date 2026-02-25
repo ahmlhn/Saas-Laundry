@@ -137,13 +137,6 @@ export function AccountHubScreen() {
       locked: !canManageFinance(roles),
     },
     {
-      title: "Payment Gateway",
-      subtitle: "Set API BRI QRIS dan cek data transaksi QRIS",
-      icon: "qr-code-outline",
-      route: "PaymentGateway",
-      allowedRoles: ["owner", "admin"],
-    },
-    {
       title: "Printer & Nota",
       subtitle: "Profil nota, nomor nota, tampilan struk",
       icon: "print-outline",

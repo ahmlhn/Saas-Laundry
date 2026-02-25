@@ -3,13 +3,16 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Linking, Pressable, Share, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { StatusPill } from "../../components/ui/StatusPill";
-import { getOrderDetail, updateCourierStatus, updateLaundryStatus } from "../../features/orders/orderApi";
+import { extractCustomerPhoneDigits } from "../../features/customers/customerPhone";
+import { addOrderPayment, getOrderDetail, updateCourierStatus, updateLaundryStatus } from "../../features/orders/orderApi";
+import { buildOrderReceiptText, buildOrderWhatsAppMessage } from "../../features/orders/orderReceipt";
 import { formatStatusLabel, getNextCourierStatus, getNextLaundryStatus, resolveCourierTone, resolveLaundryTone } from "../../features/orders/orderStatus";
+import { isWaPlanEligible } from "../../lib/accessControl";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { OrdersStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
@@ -19,11 +22,41 @@ import type { OrderDetail } from "../../types/order";
 
 type Navigation = NativeStackNavigationProp<OrdersStackParamList, "OrderDetail">;
 type DetailRoute = RouteProp<OrdersStackParamList, "OrderDetail">;
+type PaymentMethodType = "cash" | "transfer" | "other";
+
+interface PaymentMethodOption {
+  value: PaymentMethodType;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}
+
+const MAX_MONEY_INPUT_DIGITS = 9;
+const PAYMENT_METHOD_OPTIONS: PaymentMethodOption[] = [
+  { value: "cash", label: "Tunai", icon: "cash-outline" },
+  { value: "transfer", label: "Transfer", icon: "card-outline" },
+  { value: "other", label: "Lainnya", icon: "wallet-outline" },
+];
 
 const currencyFormatter = new Intl.NumberFormat("id-ID");
 
 function formatMoney(value: number): string {
   return `Rp ${currencyFormatter.format(value)}`;
+}
+
+function normalizeMoneyInput(raw: string): string {
+  const digitsOnly = raw.replace(/[^\d]/g, "");
+  const withoutLeadingZeros = digitsOnly.replace(/^0+(?=\d)/, "");
+  return withoutLeadingZeros.slice(0, MAX_MONEY_INPUT_DIGITS);
+}
+
+function parseMoneyInput(raw: string): number {
+  const normalized = normalizeMoneyInput(raw);
+  if (!normalized) {
+    return 0;
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
 function formatDateTime(value: string | null | undefined): string {
@@ -71,15 +104,43 @@ export function OrderDetailScreen() {
   const [updatingLaundry, setUpdatingLaundry] = useState(false);
   const [updatingCourier, setUpdatingCourier] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [paymentMethodType, setPaymentMethodType] = useState<PaymentMethodType>("cash");
+  const [paymentAmountInput, setPaymentAmountInput] = useState("");
+  const [submittingPayment, setSubmittingPayment] = useState(false);
+  const [sharingProductionReceipt, setSharingProductionReceipt] = useState(false);
+  const [sharingCustomerReceipt, setSharingCustomerReceipt] = useState(false);
+  const [openingWhatsApp, setOpeningWhatsApp] = useState(false);
 
   const roles = session?.roles ?? [];
   const canUpdateLaundry = hasAnyRole(roles, ["owner", "admin", "worker"]);
   const canUpdateCourier = hasAnyRole(roles, ["owner", "admin", "courier"]);
+  const canManagePayment = hasAnyRole(roles, ["owner", "admin", "cashier"]);
+  const waAutoEligible = isWaPlanEligible(session?.plan.key);
   const outletLabel = selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "Outlet belum dipilih";
 
   useEffect(() => {
     void loadDetail();
   }, [route.params.orderId, selectedOutlet?.id]);
+
+  useEffect(() => {
+    if (!detail) {
+      setPaymentAmountInput("");
+      return;
+    }
+
+    setPaymentAmountInput((current) => {
+      const normalizedCurrent = normalizeMoneyInput(current);
+      if (normalizedCurrent !== "") {
+        return normalizedCurrent;
+      }
+
+      if (detail.due_amount <= 0) {
+        return "";
+      }
+
+      return normalizeMoneyInput(`${detail.due_amount}`);
+    });
+  }, [detail?.id, detail?.due_amount]);
 
   async function loadDetail(): Promise<void> {
     setLoading(true);
@@ -111,6 +172,22 @@ export function OrderDetailScreen() {
   }, [detail?.courier_status, detail?.laundry_status]);
   const canShowStatusActions =
     (canUpdateLaundry && Boolean(nextLaundryStatus)) || (canUpdateCourier && Boolean(detail?.is_pickup_delivery) && Boolean(nextCourierStatus));
+  const paymentTenderedAmount = useMemo(() => parseMoneyInput(paymentAmountInput), [paymentAmountInput]);
+  const paymentAppliedAmount = useMemo(() => {
+    if (!detail) {
+      return 0;
+    }
+
+    return Math.min(paymentTenderedAmount, Math.max(detail.due_amount, 0));
+  }, [detail, paymentTenderedAmount]);
+  const paymentInputExceededDue = useMemo(() => {
+    if (!detail) {
+      return false;
+    }
+
+    return paymentTenderedAmount > Math.max(detail.due_amount, 0);
+  }, [detail, paymentTenderedAmount]);
+  const paymentMethodLabel = useMemo(() => PAYMENT_METHOD_OPTIONS.find((item) => item.value === paymentMethodType)?.label ?? "Tunai", [paymentMethodType]);
 
   async function handleNextLaundry(): Promise<void> {
     if (!detail || !nextLaundryStatus || updatingLaundry) {
@@ -157,6 +234,116 @@ export function OrderDetailScreen() {
       setErrorMessage(getApiErrorMessage(error));
     } finally {
       setUpdatingCourier(false);
+    }
+  }
+
+  function handlePaymentAmountChange(value: string): void {
+    setPaymentAmountInput(normalizeMoneyInput(value));
+    setErrorMessage(null);
+    setActionMessage(null);
+  }
+
+  async function handleSubmitPayment(): Promise<void> {
+    if (!detail || submittingPayment) {
+      return;
+    }
+
+    if (detail.due_amount <= 0) {
+      setErrorMessage("Order sudah lunas.");
+      return;
+    }
+
+    if (paymentAppliedAmount <= 0) {
+      setErrorMessage("Isi nominal bayar terlebih dulu.");
+      return;
+    }
+
+    setSubmittingPayment(true);
+    setErrorMessage(null);
+    setActionMessage(null);
+
+    try {
+      await addOrderPayment({
+        orderId: detail.id,
+        amount: paymentAppliedAmount,
+        method: paymentMethodType,
+      });
+
+      const latest = await getOrderDetail(detail.id);
+      setDetail(latest);
+
+      if (latest.due_amount > 0) {
+        setActionMessage(
+          `Pembayaran ${formatMoney(paymentAppliedAmount)} tercatat (${paymentMethodLabel}), sisa tagihan ${formatMoney(latest.due_amount)}.`,
+        );
+      } else {
+        setActionMessage(`Pembayaran ${formatMoney(paymentAppliedAmount)} tercatat dan order lunas.`);
+      }
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error));
+    } finally {
+      setSubmittingPayment(false);
+    }
+  }
+
+  async function handleShareReceipt(kind: "production" | "customer"): Promise<void> {
+    if (!detail) {
+      return;
+    }
+
+    const setLoading = kind === "production" ? setSharingProductionReceipt : setSharingCustomerReceipt;
+
+    setLoading(true);
+    setErrorMessage(null);
+    setActionMessage(null);
+
+    try {
+      const receiptText = buildOrderReceiptText({
+        kind,
+        order: detail,
+        outletLabel,
+      });
+      await Share.share({
+        title: kind === "production" ? "Nota Produksi Laundry" : "Nota Konsumen Laundry",
+        message: receiptText,
+      });
+
+      setActionMessage(
+        kind === "production"
+          ? "Nota produksi siap dibagikan. Pilih layanan print untuk cetak."
+          : "Nota konsumen siap dibagikan. Pilih layanan print untuk cetak.",
+      );
+    } catch {
+      setErrorMessage("Gagal membuka menu cetak atau bagikan nota.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleOpenWhatsApp(): Promise<void> {
+    if (!detail || openingWhatsApp) {
+      return;
+    }
+
+    const customerPhone = extractCustomerPhoneDigits(detail.customer?.phone_normalized ?? "");
+    if (!customerPhone) {
+      setErrorMessage("Nomor WhatsApp pelanggan belum valid.");
+      return;
+    }
+
+    setOpeningWhatsApp(true);
+    setErrorMessage(null);
+    setActionMessage(null);
+
+    try {
+      const waMessage = buildOrderWhatsAppMessage(detail, outletLabel);
+      const url = `https://wa.me/${customerPhone}?text=${encodeURIComponent(waMessage)}`;
+      await Linking.openURL(url);
+      setActionMessage("WhatsApp dibuka. Silakan kirim pesannya dari aplikasi WA.");
+    } catch {
+      setErrorMessage("Gagal membuka WhatsApp di perangkat ini.");
+    } finally {
+      setOpeningWhatsApp(false);
     }
   }
 
@@ -231,6 +418,128 @@ export function OrderDetailScreen() {
               </View>
             </View>
           </AppPanel>
+
+          <AppPanel style={styles.actionPanel}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Nota & Notifikasi</Text>
+              <Ionicons color={theme.colors.info} name="print-outline" size={16} />
+            </View>
+
+            <View style={[styles.actionStack, isTablet || isCompactLandscape ? styles.actionStackWide : null]}>
+              <View style={styles.actionButtonWrap}>
+                <AppButton
+                  disabled={sharingProductionReceipt || sharingCustomerReceipt || openingWhatsApp}
+                  leftElement={<Ionicons color={theme.colors.info} name="print-outline" size={17} />}
+                  loading={sharingProductionReceipt}
+                  onPress={() => void handleShareReceipt("production")}
+                  title="Cetak Nota Produksi"
+                  variant="secondary"
+                />
+              </View>
+              <View style={styles.actionButtonWrap}>
+                <AppButton
+                  disabled={sharingProductionReceipt || sharingCustomerReceipt || openingWhatsApp}
+                  leftElement={<Ionicons color={theme.colors.info} name="receipt-outline" size={17} />}
+                  loading={sharingCustomerReceipt}
+                  onPress={() => void handleShareReceipt("customer")}
+                  title="Cetak Nota Konsumen"
+                  variant="secondary"
+                />
+              </View>
+            </View>
+
+            <AppButton
+              disabled={sharingProductionReceipt || sharingCustomerReceipt || openingWhatsApp}
+              leftElement={<Ionicons color={theme.colors.textPrimary} name="logo-whatsapp" size={17} />}
+              loading={openingWhatsApp}
+              onPress={() => void handleOpenWhatsApp()}
+              title="Kirim WA Pesanan"
+              variant="ghost"
+            />
+            <Text style={styles.noteHint}>
+              {waAutoEligible
+                ? "Notifikasi WA order baru diproses otomatis jika provider WA aktif."
+                : "Notifikasi WA otomatis tersedia pada plan Premium/Pro."}
+            </Text>
+          </AppPanel>
+
+          {canManagePayment ? (
+            <AppPanel style={styles.actionPanel}>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionTitle}>Aksi Pembayaran</Text>
+                <Ionicons color={theme.colors.info} name="wallet-outline" size={15} />
+              </View>
+
+              {detail.due_amount <= 0 ? (
+                <Text style={styles.emptyText}>Order sudah lunas. Tidak ada pembayaran tambahan.</Text>
+              ) : (
+                <>
+                  <Text style={styles.paymentInputLabel}>Nominal Dibayar</Text>
+                  <TextInput
+                    keyboardType="numeric"
+                    onChangeText={handlePaymentAmountChange}
+                    placeholder="0"
+                    placeholderTextColor={theme.colors.textMuted}
+                    style={styles.paymentInput}
+                    value={paymentAmountInput}
+                  />
+
+                  <View style={styles.quickAmountRow}>
+                    <Pressable onPress={() => setPaymentAmountInput(normalizeMoneyInput(`${detail.due_amount}`))} style={({ pressed }) => [styles.quickAmountChip, pressed ? styles.heroIconButtonPressed : null]}>
+                      <Text style={styles.quickAmountChipText}>Lunas</Text>
+                    </Pressable>
+                    <Pressable onPress={() => setPaymentAmountInput(normalizeMoneyInput(`${Math.ceil(detail.due_amount / 2)}`))} style={({ pressed }) => [styles.quickAmountChip, pressed ? styles.heroIconButtonPressed : null]}>
+                      <Text style={styles.quickAmountChipText}>50%</Text>
+                    </Pressable>
+                    <Pressable onPress={() => setPaymentAmountInput("")} style={({ pressed }) => [styles.quickAmountChip, pressed ? styles.heroIconButtonPressed : null]}>
+                      <Text style={styles.quickAmountChipText}>Reset</Text>
+                    </Pressable>
+                  </View>
+
+                  <View style={styles.paymentMethodRow}>
+                    {PAYMENT_METHOD_OPTIONS.map((option) => {
+                      const active = paymentMethodType === option.value;
+                      return (
+                        <Pressable
+                          key={option.value}
+                          onPress={() => setPaymentMethodType(option.value)}
+                          style={({ pressed }) => [styles.paymentMethodChip, active ? styles.paymentMethodChipActive : null, pressed ? styles.heroIconButtonPressed : null]}
+                        >
+                          <Ionicons color={active ? theme.colors.info : theme.colors.textMuted} name={option.icon} size={13} />
+                          <Text style={[styles.paymentMethodChipText, active ? styles.paymentMethodChipTextActive : null]}>{option.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <View style={styles.paymentMetaGrid}>
+                    <View style={styles.paymentMetaCard}>
+                      <Text style={styles.paymentMetaLabel}>Nominal Tercatat</Text>
+                      <Text style={styles.paymentMetaValue}>{formatMoney(paymentAppliedAmount)}</Text>
+                    </View>
+                    <View style={styles.paymentMetaCard}>
+                      <Text style={styles.paymentMetaLabel}>Sisa Setelah Bayar</Text>
+                      <Text style={[styles.paymentMetaValue, detail.due_amount - paymentAppliedAmount > 0 ? styles.dueValue : styles.successValue]}>
+                        {formatMoney(Math.max(detail.due_amount - paymentAppliedAmount, 0))}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {paymentInputExceededDue ? (
+                    <Text style={styles.paymentHint}>Nominal di atas sisa tagihan. Sistem hanya akan mencatat maksimal {formatMoney(detail.due_amount)}.</Text>
+                  ) : null}
+
+                  <AppButton
+                    disabled={submittingPayment || paymentAppliedAmount <= 0}
+                    leftElement={<Ionicons color={theme.colors.primaryContrast} name="save-outline" size={17} />}
+                    loading={submittingPayment}
+                    onPress={() => void handleSubmitPayment()}
+                    title={`Catat Pembayaran (${paymentMethodLabel})`}
+                  />
+                </>
+              )}
+            </AppPanel>
+          ) : null}
 
           {canShowStatusActions ? (
             <AppPanel style={styles.actionPanel}>
@@ -450,6 +759,116 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
       fontSize: isTablet ? 16 : 15,
+    },
+    paymentInputLabel: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12.5,
+      marginTop: 1,
+    },
+    paymentInput: {
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.inputBg,
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 14,
+      minHeight: 42,
+      paddingHorizontal: 11,
+      paddingVertical: 8,
+    },
+    quickAmountRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 7,
+    },
+    quickAmountChip: {
+      minHeight: 32,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 10,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    quickAmountChipText: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+      lineHeight: 14,
+    },
+    paymentMethodRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 7,
+    },
+    paymentMethodChip: {
+      minHeight: 35,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 5,
+    },
+    paymentMethodChipActive: {
+      borderColor: theme.colors.info,
+      backgroundColor: theme.colors.primarySoft,
+    },
+    paymentMethodChipText: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+      lineHeight: 14,
+    },
+    paymentMethodChipTextActive: {
+      color: theme.colors.info,
+    },
+    paymentMetaGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    paymentMetaCard: {
+      minWidth: isTablet ? 180 : 145,
+      flexGrow: 1,
+      flexBasis: isCompactLandscape ? "31%" : "48%",
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      gap: 1,
+    },
+    paymentMetaLabel: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+    },
+    paymentMetaValue: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13,
+    },
+    paymentHint: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    noteHint: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+      lineHeight: 17,
     },
     paymentStatGrid: {
       flexDirection: "row",
