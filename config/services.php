@@ -42,4 +42,12 @@ return [
         ))),
     ],
 
+    'mpwa' => [
+        'base_url' => env('MPWA_BASE_URL', ''),
+        'api_key' => env('MPWA_API_KEY', ''),
+        'sender' => env('MPWA_SENDER', ''),
+        'send_path' => env('MPWA_SEND_PATH', '/send-message'),
+        'timeout_seconds' => (int) env('MPWA_TIMEOUT_SECONDS', 15),
+    ],
+
 ];

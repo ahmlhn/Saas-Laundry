@@ -146,12 +146,12 @@ export function AccountHubScreen() {
     },
     {
       title: "Kirim WA",
-      subtitle: waPlanAllowed ? "Sebarkan pesan dan notifikasi pelanggan" : "Butuh plan Premium/Pro untuk fitur WhatsApp.",
+      subtitle: waPlanAllowed ? "Sebarkan pesan dan notifikasi pelanggan" : "Buka untuk cek status fitur dan kebutuhan plan WhatsApp.",
       icon: "logo-whatsapp",
       badge: "Hot",
-      route: waPlanAllowed ? "WhatsAppTools" : undefined,
+      route: "WhatsAppTools",
       allowedRoles: ["owner", "admin"],
-      locked: !waPlanAllowed || !waAllowed,
+      locked: !waAllowed,
     },
     {
       title: "Profil Pemilik",

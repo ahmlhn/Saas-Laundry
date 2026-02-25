@@ -2,12 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { StatusPill } from "../../components/ui/StatusPill";
-import { listWaMessages, listWaProviders } from "../../features/wa/waApi";
+import { listWaMessages, listWaProviders, upsertWaProviderConfig } from "../../features/wa/waApi";
 import { canOpenWaModule, isWaPlanEligible } from "../../lib/accessControl";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AccountStackParamList } from "../../navigation/types";
@@ -32,6 +32,9 @@ export function WhatsAppToolsScreen() {
   const [loading, setLoading] = useState(true);
   const [providers, setProviders] = useState<WaProvider[]>([]);
   const [messages, setMessages] = useState<WaMessageSummary[]>([]);
+  const [senderInput, setSenderInput] = useState("");
+  const [savingSender, setSavingSender] = useState(false);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const roles = session?.roles ?? [];
@@ -56,10 +59,48 @@ export function WhatsAppToolsScreen() {
       const [providerData, messageData] = await Promise.all([listWaProviders(), listWaMessages(30)]);
       setProviders(providerData);
       setMessages(messageData);
+
+      const mpwaProvider = providerData.find((item) => item.key === "mpwa");
+      if (mpwaProvider?.sender) {
+        setSenderInput((current) => (current.trim() === "" ? mpwaProvider.sender?.trim() ?? "" : current));
+      }
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleSaveSender(): Promise<void> {
+    if (!roleAllowed || !planAllowed || savingSender) {
+      return;
+    }
+
+    const sender = senderInput.trim();
+    if (!sender) {
+      setErrorMessage("Sender WA wajib diisi.");
+      return;
+    }
+
+    setSavingSender(true);
+    setErrorMessage(null);
+    setActionMessage(null);
+
+    try {
+      await upsertWaProviderConfig({
+        providerKey: "mpwa",
+        credentials: {
+          sender,
+        },
+        isActive: true,
+      });
+
+      setActionMessage("Sender MPWA tersimpan untuk tenant ini.");
+      await loadData();
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error));
+    } finally {
+      setSavingSender(false);
     }
   }
 
@@ -71,6 +112,7 @@ export function WhatsAppToolsScreen() {
 
     return { delivered, sent, queued, failed };
   }, [messages]);
+  const mpwaProvider = useMemo(() => providers.find((item) => item.key === "mpwa") ?? null, [providers]);
 
   return (
     <AppScreen contentContainerStyle={styles.content} scroll>
@@ -109,6 +151,35 @@ export function WhatsAppToolsScreen() {
 
       {roleAllowed && planAllowed ? (
         <>
+          <AppPanel style={styles.panel}>
+            <View style={styles.panelHeader}>
+              <Text style={styles.sectionTitle}>Sender Tenant (MPWA)</Text>
+              {mpwaProvider?.is_active ? <StatusPill label="Aktif" tone="success" /> : <StatusPill label="Belum Aktif" tone="warning" />}
+            </View>
+            <Text style={styles.helperText}>Sender ini dipakai untuk notifikasi WA tenant. Contoh: `62812xxxxxxx` atau `device id` MPWA.</Text>
+            <TextInput
+              autoCapitalize="none"
+              autoCorrect={false}
+              onChangeText={(value) => {
+                setSenderInput(value);
+                setErrorMessage(null);
+                setActionMessage(null);
+              }}
+              placeholder="Isi sender MPWA tenant"
+              placeholderTextColor={theme.colors.textMuted}
+              style={styles.textInput}
+              value={senderInput}
+            />
+            <AppButton
+              disabled={savingSender || loading}
+              leftElement={<Ionicons color={theme.colors.primaryContrast} name="save-outline" size={17} />}
+              loading={savingSender}
+              onPress={() => void handleSaveSender()}
+              title="Simpan Sender Tenant"
+            />
+            {!mpwaProvider ? <Text style={styles.emptyText}>Provider MPWA belum tersedia. Jalankan migrasi terbaru dulu.</Text> : null}
+          </AppPanel>
+
           <AppPanel style={styles.panel}>
             <View style={styles.panelHeader}>
               <Text style={styles.sectionTitle}>Provider WA</Text>
@@ -176,6 +247,12 @@ export function WhatsAppToolsScreen() {
         <View style={styles.errorWrap}>
           <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
           <Text style={styles.errorText}>{errorMessage}</Text>
+        </View>
+      ) : null}
+      {actionMessage ? (
+        <View style={styles.successWrap}>
+          <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={16} />
+          <Text style={styles.successText}>{actionMessage}</Text>
         </View>
       ) : null}
     </AppScreen>
@@ -248,6 +325,12 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     panel: {
       gap: theme.spacing.sm,
     },
+    helperText: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 18,
+    },
     panelHeader: {
       flexDirection: "row",
       alignItems: "center",
@@ -259,6 +342,18 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontFamily: theme.fonts.bold,
       fontSize: isTablet ? 16 : 15,
       flex: 1,
+    },
+    textInput: {
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.inputBg,
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 13.5,
+      minHeight: 44,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
     },
     loadingWrap: {
       flexDirection: "row",
@@ -364,9 +459,27 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       alignItems: "center",
       gap: 8,
     },
+    successWrap: {
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? "#1d5b3f" : "#bde7cd",
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.mode === "dark" ? "#173f2d" : "#edf9f1",
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
     errorText: {
       flex: 1,
       color: theme.colors.danger,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 18,
+    },
+    successText: {
+      flex: 1,
+      color: theme.colors.success,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 18,

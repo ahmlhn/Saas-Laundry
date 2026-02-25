@@ -99,8 +99,23 @@
         </div>
 
         <div>
-            <label for="token">Token</label>
-            <input id="token" type="text" name="token" placeholder="token provider">
+            <label for="api_key">API Key / Token</label>
+            <input id="api_key" type="text" name="api_key" placeholder="api key mpwa">
+        </div>
+
+        <div>
+            <label for="sender">Sender / Device</label>
+            <input id="sender" type="text" name="sender" placeholder="62812xxxx (sender mpwa)">
+        </div>
+
+        <div>
+            <label for="base_url">Base URL (opsional)</label>
+            <input id="base_url" type="url" name="base_url" placeholder="https://domain-mpwa.example">
+        </div>
+
+        <div>
+            <label for="send_path">Send Path (opsional)</label>
+            <input id="send_path" type="text" name="send_path" placeholder="/send-message">
         </div>
 
         <div>

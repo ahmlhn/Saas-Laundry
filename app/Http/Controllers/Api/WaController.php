@@ -50,6 +50,7 @@ class WaController extends Controller
             'data' => $providers->map(function (WaProvider $provider) use ($configs): array {
                 /** @var WaProviderConfig|null $config */
                 $config = $configs->get($provider->id);
+                $sender = $this->extractSenderFromCredentials($config?->credentials_json);
 
                 return [
                     'id' => $provider->id,
@@ -58,6 +59,7 @@ class WaController extends Controller
                     'configured' => (bool) $config,
                     'is_active' => (bool) ($config?->is_active ?? false),
                     'credentials_set' => ! empty($config?->credentials_json),
+                    'sender' => $sender,
                     'updated_at' => $config?->updated_at?->toIso8601String(),
                 ];
             })->values(),
@@ -89,7 +91,12 @@ class WaController extends Controller
             ], 422);
         }
 
-        $credentials = (array) ($validated['credentials'] ?? []);
+        $existingConfig = WaProviderConfig::query()
+            ->where('tenant_id', $user->tenant_id)
+            ->where('provider_id', $provider->id)
+            ->first();
+
+        $credentials = $this->mergeCredentials($existingConfig?->credentials_json, (array) ($validated['credentials'] ?? []));
         $isActive = (bool) ($validated['is_active'] ?? true);
 
         $driver = $this->providerRegistry->driverForKey($provider->key);
@@ -322,5 +329,64 @@ class WaController extends Controller
             'reason_code' => 'OUTLET_ACCESS_DENIED',
             'message' => 'You do not have access to the requested outlet.',
         ], 403));
+    }
+
+    /**
+     * @param array<string, mixed>|null $existing
+     * @param array<string, mixed> $incoming
+     * @return array<string, mixed>
+     */
+    private function mergeCredentials(?array $existing, array $incoming): array
+    {
+        $base = is_array($existing) ? $existing : [];
+        $normalizedIncoming = [];
+
+        foreach ($incoming as $key => $value) {
+            if (! is_string($key) || trim($key) === '') {
+                continue;
+            }
+
+            if (is_string($value)) {
+                $trimmed = trim($value);
+                if ($trimmed === '') {
+                    continue;
+                }
+                $normalizedIncoming[$key] = $trimmed;
+                continue;
+            }
+
+            if (is_bool($value) || is_int($value) || is_float($value)) {
+                $normalizedIncoming[$key] = $value;
+                continue;
+            }
+
+            if (is_array($value) && $value !== []) {
+                $normalizedIncoming[$key] = $value;
+            }
+        }
+
+        return array_merge($base, $normalizedIncoming);
+    }
+
+    /**
+     * @param array<string, mixed>|null $credentials
+     */
+    private function extractSenderFromCredentials(?array $credentials): ?string
+    {
+        if (! is_array($credentials)) {
+            return null;
+        }
+
+        foreach (['sender', 'device', 'device_id'] as $key) {
+            $value = $credentials[$key] ?? null;
+            if (is_scalar($value)) {
+                $trimmed = trim((string) $value);
+                if ($trimmed !== '') {
+                    return $trimmed;
+                }
+            }
+        }
+
+        return null;
     }
 }

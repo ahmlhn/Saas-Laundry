@@ -114,6 +114,24 @@ class WaApiTest extends TestCase
             ]);
     }
 
+    public function test_premium_plan_can_configure_mpwa_provider(): void
+    {
+        $this->setPlan('premium');
+
+        $this->apiAs($this->admin)->postJson('/api/wa/provider-config', [
+            'provider_key' => 'mpwa',
+            'credentials' => [
+                'api_key' => 'mpwa-key',
+                'sender' => '628123450001',
+                'base_url' => 'https://mpwa.example.local',
+                'send_path' => '/send-message',
+            ],
+            'is_active' => true,
+        ])->assertOk()
+            ->assertJsonPath('data.provider_key', 'mpwa')
+            ->assertJsonPath('data.health.ok', true);
+    }
+
     public function test_upsert_template_is_audited(): void
     {
         $this->setPlan('premium');

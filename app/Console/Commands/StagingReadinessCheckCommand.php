@@ -245,14 +245,24 @@ class StagingReadinessCheckCommand extends Command
     private function checkWaProviderBaseline(array &$checks): void
     {
         if (! Schema::hasTable('wa_providers')) {
-            $checks[] = $this->check('wa.provider.mock_seed', 'fail', 'wa_providers table is missing.');
+            $checks[] = $this->check('wa.provider.baseline', 'fail', 'wa_providers table is missing.');
 
             return;
         }
 
+        $hasMpwa = DB::table('wa_providers')
+            ->where('key', 'mpwa')
+            ->exists();
+
         $hasMock = DB::table('wa_providers')
             ->where('key', 'mock')
             ->exists();
+
+        $checks[] = $this->check(
+            'wa.provider.mpwa_seed',
+            $hasMpwa ? 'pass' : 'warn',
+            $hasMpwa ? 'MPWA provider baseline exists.' : 'MPWA provider baseline not found.'
+        );
 
         $checks[] = $this->check(
             'wa.provider.mock_seed',

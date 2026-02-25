@@ -128,7 +128,11 @@ class WaSettingsController extends Controller
 
         $validated = $request->validate([
             'provider_key' => ['required', 'string', 'max:40'],
+            'api_key' => ['nullable', 'string', 'max:255'],
             'token' => ['nullable', 'string', 'max:255'],
+            'sender' => ['nullable', 'string', 'max:80'],
+            'base_url' => ['nullable', 'url', 'max:255'],
+            'send_path' => ['nullable', 'string', 'max:80'],
             'is_active' => ['nullable', 'boolean'],
         ]);
 
@@ -143,7 +147,21 @@ class WaSettingsController extends Controller
             ]);
         }
 
-        $credentials = ['token' => $validated['token'] ?? null];
+        $apiKey = $validated['api_key'] ?? $validated['token'] ?? null;
+        $incomingCredentials = [
+            'api_key' => $apiKey,
+            'token' => $apiKey,
+            'sender' => $validated['sender'] ?? null,
+            'base_url' => $validated['base_url'] ?? null,
+            'send_path' => $validated['send_path'] ?? null,
+        ];
+
+        $existingConfig = WaProviderConfig::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('provider_id', $provider->id)
+            ->first();
+
+        $credentials = $this->mergeCredentials($existingConfig?->credentials_json, $incomingCredentials);
 
         $this->providerRegistry->driverForKey($provider->key)->healthCheck($credentials);
 
@@ -200,5 +218,42 @@ class WaSettingsController extends Controller
         } catch (PlanFeatureDisabledException) {
             abort(403, 'WhatsApp feature is available for Premium/Pro only.');
         }
+    }
+
+    /**
+     * @param array<string, mixed>|null $existing
+     * @param array<string, mixed> $incoming
+     * @return array<string, mixed>
+     */
+    private function mergeCredentials(?array $existing, array $incoming): array
+    {
+        $base = is_array($existing) ? $existing : [];
+        $normalizedIncoming = [];
+
+        foreach ($incoming as $key => $value) {
+            if (! is_string($key) || trim($key) === '') {
+                continue;
+            }
+
+            if (is_string($value)) {
+                $trimmed = trim($value);
+                if ($trimmed === '') {
+                    continue;
+                }
+                $normalizedIncoming[$key] = $trimmed;
+                continue;
+            }
+
+            if (is_bool($value) || is_int($value) || is_float($value)) {
+                $normalizedIncoming[$key] = $value;
+                continue;
+            }
+
+            if (is_array($value) && $value !== []) {
+                $normalizedIncoming[$key] = $value;
+            }
+        }
+
+        return array_merge($base, $normalizedIncoming);
     }
 }

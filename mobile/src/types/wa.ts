@@ -5,6 +5,7 @@ export interface WaProvider {
   configured: boolean;
   is_active: boolean;
   credentials_set: boolean;
+  sender?: string | null;
   updated_at: string | null;
 }
 
