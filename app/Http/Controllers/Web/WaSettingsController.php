@@ -6,6 +6,8 @@ use App\Domain\Audit\AuditEventKeys;
 use App\Domain\Audit\AuditTrailService;
 use App\Domain\Billing\PlanFeatureDisabledException;
 use App\Domain\Billing\PlanFeatureGateService;
+use App\Domain\Messaging\Contracts\WaProviderDriver;
+use App\Domain\Messaging\WaProviderException;
 use App\Domain\Messaging\WaProviderRegistry;
 use App\Domain\Messaging\WaTemplateResolver;
 use App\Http\Controllers\Controller;
@@ -162,13 +164,19 @@ class WaSettingsController extends Controller
             ->first();
 
         $credentials = $this->mergeCredentials($existingConfig?->credentials_json, $incomingCredentials);
+        $requestedActive = (bool) ($validated['is_active'] ?? true);
+        $driver = $this->providerRegistry->driverForKey($provider->key);
+        try {
+            $health = $this->resolveProviderHealthForUpsert($provider->key, $driver, $credentials);
+        } catch (WaProviderException $error) {
+            return back()->withErrors([
+                'provider_key' => $error->getMessage(),
+            ]);
+        }
+        $effectiveActive = $requestedActive && ($health['ok'] ?? false);
 
-        $this->providerRegistry->driverForKey($provider->key)->healthCheck($credentials);
-
-        DB::transaction(function () use ($tenant, $provider, $credentials, $validated): void {
-            $active = (bool) ($validated['is_active'] ?? true);
-
-            if ($active) {
+        DB::transaction(function () use ($tenant, $provider, $credentials, $effectiveActive): void {
+            if ($effectiveActive) {
                 WaProviderConfig::query()
                     ->where('tenant_id', $tenant->id)
                     ->where('provider_id', '!=', $provider->id)
@@ -182,7 +190,7 @@ class WaSettingsController extends Controller
                 ],
                 [
                     'credentials_json' => $credentials,
-                    'is_active' => $active,
+                    'is_active' => $effectiveActive,
                 ],
             );
         });
@@ -201,12 +209,17 @@ class WaSettingsController extends Controller
             metadata: [
                 'provider_key' => $provider->key,
                 'is_active' => (bool) ($config?->is_active ?? false),
+                'health_ok' => (bool) ($health['ok'] ?? false),
             ],
             channel: 'web',
             request: $request,
         );
 
-        return back()->with('status', 'Provider config updated.');
+        $statusMessage = (bool) ($health['ok'] ?? false)
+            ? 'Provider config updated.'
+            : ((string) ($health['message'] ?? 'Provider config saved as inactive.'));
+
+        return back()->with('status', $statusMessage);
     }
 
     private function ensureWaEnabled(Tenant $tenant): void
@@ -255,5 +268,44 @@ class WaSettingsController extends Controller
         }
 
         return array_merge($base, $normalizedIncoming);
+    }
+
+    /**
+     * @param array<string, mixed> $credentials
+     * @return array{ok: bool, message: string}
+     */
+    private function resolveProviderHealthForUpsert(string $providerKey, WaProviderDriver $driver, array $credentials): array
+    {
+        try {
+            return $driver->healthCheck($credentials);
+        } catch (WaProviderException $error) {
+            $isMpwaPartialSetup = strtolower($providerKey) === 'mpwa'
+                && $error->reasonCode === 'CREDENTIALS_INVALID'
+                && $this->hasSenderCredential($credentials);
+
+            if ($isMpwaPartialSetup) {
+                return [
+                    'ok' => false,
+                    'message' => 'Sender tersimpan. Lengkapi api_key dan base_url MPWA untuk mengaktifkan pengiriman.',
+                ];
+            }
+
+            throw $error;
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $credentials
+     */
+    private function hasSenderCredential(array $credentials): bool
+    {
+        foreach (['sender', 'device', 'device_id'] as $key) {
+            $value = $credentials[$key] ?? null;
+            if (is_scalar($value) && trim((string) $value) !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

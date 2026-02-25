@@ -134,6 +134,32 @@ class WaApiTest extends TestCase
             ->assertJsonPath('data.health.ok', true);
     }
 
+    public function test_mpwa_sender_only_can_be_saved_before_full_credentials(): void
+    {
+        $this->setPlan('premium');
+
+        $this->apiAs($this->admin)->postJson('/api/wa/provider-config', [
+            'provider_key' => 'mpwa',
+            'credentials' => [
+                'sender' => '628123450777',
+            ],
+            'is_active' => true,
+        ])->assertOk()
+            ->assertJsonPath('data.provider_key', 'mpwa')
+            ->assertJsonPath('data.is_active', false)
+            ->assertJsonPath('data.health.ok', false);
+
+        $this->apiAs($this->admin)
+            ->getJson('/api/wa/providers')
+            ->assertOk()
+            ->assertJsonFragment([
+                'key' => 'mpwa',
+                'configured' => true,
+                'is_active' => false,
+                'sender' => '628123450777',
+            ]);
+    }
+
     public function test_wa_providers_endpoint_returns_mpwa_sender_per_tenant(): void
     {
         $this->setPlan('premium');

@@ -45,6 +45,7 @@
 ## Update Lanjutan (Sender Per Tenant)
 - API provider list sekarang juga mengembalikan `sender` aktif per provider.
 - API/Web upsert provider config sekarang merge kredensial baru ke kredensial lama, jadi update `sender` tidak menghapus `api_key/base_url` yang sudah tersimpan.
+- Jika tenant baru menyimpan `sender` saja (tanpa `api_key/base_url`), config tetap tersimpan sebagai `nonaktif` dengan pesan health yang jelas, tidak gagal 500.
 - Mobile halaman `Kirim WA`:
   - Tambah panel `Sender Tenant (MPWA)`.
   - Bisa simpan sender per tenant langsung dari aplikasi.

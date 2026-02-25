@@ -87,7 +87,7 @@ export function WhatsAppToolsScreen() {
     setActionMessage(null);
 
     try {
-      await upsertWaProviderConfig({
+      const result = await upsertWaProviderConfig({
         providerKey: "mpwa",
         credentials: {
           sender,
@@ -95,7 +95,11 @@ export function WhatsAppToolsScreen() {
         isActive: true,
       });
 
-      setActionMessage("Sender MPWA tersimpan untuk tenant ini.");
+      if (result.healthOk) {
+        setActionMessage("Sender MPWA tersimpan dan provider siap dipakai.");
+      } else {
+        setActionMessage(result.healthMessage || "Sender MPWA tersimpan. Lengkapi kredensial MPWA agar pengiriman aktif.");
+      }
       await loadData();
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error));

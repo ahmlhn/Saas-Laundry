@@ -6,6 +6,8 @@ use App\Domain\Audit\AuditEventKeys;
 use App\Domain\Audit\AuditTrailService;
 use App\Domain\Billing\PlanFeatureDisabledException;
 use App\Domain\Billing\PlanFeatureGateService;
+use App\Domain\Messaging\Contracts\WaProviderDriver;
+use App\Domain\Messaging\WaProviderException;
 use App\Domain\Messaging\WaProviderRegistry;
 use App\Domain\Messaging\WaTemplateRenderer;
 use App\Domain\Messaging\WaTemplateResolver;
@@ -97,13 +99,14 @@ class WaController extends Controller
             ->first();
 
         $credentials = $this->mergeCredentials($existingConfig?->credentials_json, (array) ($validated['credentials'] ?? []));
-        $isActive = (bool) ($validated['is_active'] ?? true);
+        $requestedActive = (bool) ($validated['is_active'] ?? true);
 
         $driver = $this->providerRegistry->driverForKey($provider->key);
-        $health = $driver->healthCheck($credentials);
+        $health = $this->resolveProviderHealthForUpsert($provider->key, $driver, $credentials);
+        $effectiveActive = $requestedActive && ($health['ok'] ?? false);
 
-        $config = DB::transaction(function () use ($user, $provider, $credentials, $isActive): WaProviderConfig {
-            if ($isActive) {
+        $config = DB::transaction(function () use ($user, $provider, $credentials, $effectiveActive): WaProviderConfig {
+            if ($effectiveActive) {
                 WaProviderConfig::query()
                     ->where('tenant_id', $user->tenant_id)
                     ->where('provider_id', '!=', $provider->id)
@@ -117,7 +120,7 @@ class WaController extends Controller
                 ],
                 [
                     'credentials_json' => $credentials,
-                    'is_active' => $isActive,
+                    'is_active' => $effectiveActive,
                 ]
             );
         });
@@ -131,6 +134,7 @@ class WaController extends Controller
             metadata: [
                 'provider_key' => $provider->key,
                 'is_active' => $config->is_active,
+                'health_ok' => (bool) ($health['ok'] ?? false),
             ],
             channel: 'api',
             request: $request,
@@ -388,5 +392,37 @@ class WaController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * @param array<string, mixed> $credentials
+     * @return array{ok: bool, message: string}
+     */
+    private function resolveProviderHealthForUpsert(string $providerKey, WaProviderDriver $driver, array $credentials): array
+    {
+        try {
+            return $driver->healthCheck($credentials);
+        } catch (WaProviderException $error) {
+            $isMpwaPartialSetup = strtolower($providerKey) === 'mpwa'
+                && $error->reasonCode === 'CREDENTIALS_INVALID'
+                && $this->extractSenderFromCredentials($credentials) !== null;
+
+            if ($isMpwaPartialSetup) {
+                return [
+                    'ok' => false,
+                    'message' => 'Sender tersimpan. Lengkapi api_key dan base_url MPWA untuk mengaktifkan pengiriman.',
+                ];
+            }
+
+            abort(response()->json([
+                'reason_code' => $error->reasonCode,
+                'message' => $error->getMessage(),
+            ], 422));
+        } catch (\Throwable $error) {
+            abort(response()->json([
+                'reason_code' => 'PROVIDER_HEALTHCHECK_FAILED',
+                'message' => $error->getMessage(),
+            ], 422));
+        }
     }
 }
