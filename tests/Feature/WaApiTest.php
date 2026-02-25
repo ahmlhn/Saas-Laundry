@@ -11,6 +11,8 @@ use App\Models\Service;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Models\WaMessage;
+use App\Models\WaProvider;
+use App\Models\WaProviderConfig;
 use Database\Seeders\RolesAndPlansSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
@@ -130,6 +132,70 @@ class WaApiTest extends TestCase
         ])->assertOk()
             ->assertJsonPath('data.provider_key', 'mpwa')
             ->assertJsonPath('data.health.ok', true);
+    }
+
+    public function test_wa_providers_endpoint_returns_mpwa_sender_per_tenant(): void
+    {
+        $this->setPlan('premium');
+
+        $this->apiAs($this->admin)->postJson('/api/wa/provider-config', [
+            'provider_key' => 'mpwa',
+            'credentials' => [
+                'api_key' => 'mpwa-key',
+                'sender' => '628123450002',
+                'base_url' => 'https://mpwa.example.local',
+            ],
+            'is_active' => true,
+        ])->assertOk();
+
+        $response = $this->apiAs($this->admin)
+            ->getJson('/api/wa/providers')
+            ->assertOk();
+
+        $mpwaRow = collect($response->json('data'))
+            ->firstWhere('key', 'mpwa');
+
+        $this->assertNotNull($mpwaRow);
+        $this->assertSame('628123450002', $mpwaRow['sender'] ?? null);
+    }
+
+    public function test_upsert_provider_config_merges_credentials_when_updating_sender_only(): void
+    {
+        $this->setPlan('premium');
+
+        $this->apiAs($this->admin)->postJson('/api/wa/provider-config', [
+            'provider_key' => 'mpwa',
+            'credentials' => [
+                'api_key' => 'mpwa-key',
+                'sender' => '628123450003',
+                'base_url' => 'https://mpwa.example.local',
+                'send_path' => '/send-message',
+            ],
+            'is_active' => true,
+        ])->assertOk();
+
+        $this->apiAs($this->admin)->postJson('/api/wa/provider-config', [
+            'provider_key' => 'mpwa',
+            'credentials' => [
+                'sender' => '628123450004',
+            ],
+            'is_active' => true,
+        ])->assertOk();
+
+        $providerId = WaProvider::query()->where('key', 'mpwa')->value('id');
+        $this->assertNotNull($providerId);
+
+        $config = WaProviderConfig::query()
+            ->where('tenant_id', $this->tenant->id)
+            ->where('provider_id', $providerId)
+            ->first();
+
+        $this->assertNotNull($config);
+        $credentials = (array) ($config?->credentials_json ?? []);
+
+        $this->assertSame('628123450004', $credentials['sender'] ?? null);
+        $this->assertSame('mpwa-key', $credentials['api_key'] ?? null);
+        $this->assertSame('https://mpwa.example.local', $credentials['base_url'] ?? null);
     }
 
     public function test_upsert_template_is_audited(): void

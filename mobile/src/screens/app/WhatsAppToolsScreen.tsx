@@ -203,7 +203,10 @@ export function WhatsAppToolsScreen() {
                   <View key={provider.id} style={styles.listItem}>
                     <View style={styles.listMain}>
                       <Text style={styles.listTitle}>{provider.name}</Text>
-                      <Text style={styles.listSubtitle}>Key: {provider.key}</Text>
+                      <Text style={styles.listSubtitle}>
+                        Key: {provider.key}
+                        {provider.sender ? ` | Sender: ${provider.sender}` : ""}
+                      </Text>
                     </View>
                     <StatusPill label={provider.is_active ? "Aktif" : "Nonaktif"} tone={provider.is_active ? "success" : "neutral"} />
                   </View>

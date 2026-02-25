@@ -136,6 +136,7 @@
                 <th>Provider</th>
                 <th>Terkonfigurasi</th>
                 <th>Aktif</th>
+                <th>Sender</th>
                 <th>Diperbarui</th>
             </tr>
             </thead>
@@ -153,6 +154,7 @@
                     <td>
                         <span class="status-badge {{ $cfg && $cfg->is_active ? 'status-success' : 'status-neutral' }}">{{ $cfg && $cfg->is_active ? 'aktif' : 'nonaktif' }}</span>
                     </td>
+                    <td>{{ $cfg?->credentials_json['sender'] ?? $cfg?->credentials_json['device'] ?? '-' }}</td>
                     <td>{{ $cfg?->updated_at?->format('d M Y H:i') ?: '-' }}</td>
                 </tr>
             @endforeach
