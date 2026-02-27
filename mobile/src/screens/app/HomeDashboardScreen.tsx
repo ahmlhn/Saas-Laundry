@@ -26,7 +26,6 @@ interface ShortcutConfig {
 }
 
 const SHORTCUTS: ShortcutConfig[] = [
-  { key: "validasi", label: "Validasi", subtitle: "Perlu konfirmasi", icon: "shield-checkmark-outline" },
   { key: "antrian", label: "Antrian", subtitle: "Menunggu proses", icon: "time-outline" },
   { key: "proses", label: "Proses", subtitle: "Sedang dikerjakan", icon: "color-wand-outline" },
   { key: "siap_ambil", label: "Siap Ambil", subtitle: "Menunggu diambil", icon: "bag-check-outline" },
@@ -191,7 +190,7 @@ export function HomeDashboardScreen() {
 
   const bucketCounts = useMemo(() => countOrdersByBucket(orders), [orders]);
   const dueCount = useMemo(() => orders.filter((order) => order.due_amount > 0).length, [orders]);
-  const pendingCount = useMemo(() => bucketCounts.validasi + bucketCounts.antrian + bucketCounts.proses, [bucketCounts]);
+  const pendingCount = useMemo(() => bucketCounts.antrian + bucketCounts.proses, [bucketCounts]);
   const dueAmountTotal = useMemo(() => orders.reduce((total, order) => total + Math.max(order.due_amount, 0), 0), [orders]);
   const totalSales = useMemo(() => orders.reduce((total, order) => total + Math.max(order.total_amount, 0), 0), [orders]);
   const quotaLimit = session?.quota.orders_limit ?? null;

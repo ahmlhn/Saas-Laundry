@@ -1,4 +1,5 @@
 import { httpClient } from "../../lib/httpClient";
+import type { PrinterLocalSettings } from "../../types/printerLocalSettings";
 import type { PrinterNoteSettings } from "../../types/printerNote";
 
 export interface UploadedPrinterLogo {
@@ -22,6 +23,17 @@ interface PrinterNoteSettingsResponse {
     share_enota: boolean;
     show_customer_receipt: boolean;
     logo_url: string;
+    paper_width?: "58mm" | "80mm";
+    auto_cut?: boolean;
+    auto_open_cash_drawer?: boolean;
+  };
+}
+
+interface PrinterDeviceSettingsResponse {
+  data: {
+    paper_width: "58mm" | "80mm";
+    auto_cut: boolean;
+    auto_open_cash_drawer: boolean;
   };
 }
 
@@ -43,6 +55,11 @@ export interface UpsertPrinterNoteSettingsPayload {
   settings: PrinterNoteSettings;
 }
 
+export interface UpsertPrinterDeviceSettingsPayload {
+  outletId: string;
+  settings: PrinterLocalSettings;
+}
+
 function mapApiSettingsToMobile(payload: PrinterNoteSettingsResponse["data"]): PrinterNoteSettings {
   return {
     logoUrl: payload.logo_url || "",
@@ -54,6 +71,14 @@ function mapApiSettingsToMobile(payload: PrinterNoteSettingsResponse["data"]): P
     customPrefix: payload.custom_prefix || "",
     shareEnota: payload.share_enota !== false,
     showCustomerReceipt: payload.show_customer_receipt !== false,
+  };
+}
+
+function mapApiPrinterSettingsToMobile(payload: PrinterDeviceSettingsResponse["data"]): PrinterLocalSettings {
+  return {
+    paperWidth: payload.paper_width === "80mm" ? "80mm" : "58mm",
+    autoCut: payload.auto_cut === true,
+    autoOpenCashDrawer: payload.auto_open_cash_drawer === true,
   };
 }
 
@@ -81,6 +106,27 @@ export async function upsertPrinterNoteSettingsToServer(payload: UpsertPrinterNo
   });
 
   return mapApiSettingsToMobile(response.data.data);
+}
+
+export async function getPrinterDeviceSettingsFromServer(outletId: string): Promise<PrinterLocalSettings> {
+  const response = await httpClient.get<PrinterDeviceSettingsResponse>("/printer-note/printer-settings", {
+    params: {
+      outlet_id: outletId,
+    },
+  });
+
+  return mapApiPrinterSettingsToMobile(response.data.data);
+}
+
+export async function upsertPrinterDeviceSettingsToServer(payload: UpsertPrinterDeviceSettingsPayload): Promise<PrinterLocalSettings> {
+  const response = await httpClient.put<PrinterDeviceSettingsResponse>("/printer-note/printer-settings", {
+    outlet_id: payload.outletId,
+    paper_width: payload.settings.paperWidth,
+    auto_cut: payload.settings.autoCut,
+    auto_open_cash_drawer: payload.settings.autoOpenCashDrawer,
+  });
+
+  return mapApiPrinterSettingsToMobile(response.data.data);
 }
 
 export async function uploadPrinterLogo(payload: UploadPrinterLogoPayload): Promise<UploadedPrinterLogo> {

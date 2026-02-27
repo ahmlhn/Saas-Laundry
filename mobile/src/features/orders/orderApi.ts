@@ -111,7 +111,7 @@ interface StatusUpdateParams {
   status: string;
 }
 
-interface CreateOrderPayload {
+export interface SaveOrderPayload {
   outletId: string;
   customer: {
     name: string;
@@ -127,6 +127,8 @@ interface CreateOrderPayload {
   isPickupDelivery?: boolean;
   shippingFeeAmount?: number;
   discountAmount?: number;
+  pickup?: Record<string, unknown>;
+  delivery?: Record<string, unknown>;
 }
 
 interface AddOrderPaymentPayload {
@@ -135,6 +137,28 @@ interface AddOrderPaymentPayload {
   method: string;
   paidAt?: string;
   notes?: string;
+}
+
+function buildOrderRequestBody(payload: SaveOrderPayload): Record<string, unknown> {
+  return {
+    outlet_id: payload.outletId,
+    is_pickup_delivery: payload.isPickupDelivery ?? false,
+    shipping_fee_amount: payload.shippingFeeAmount ?? 0,
+    discount_amount: payload.discountAmount ?? 0,
+    notes: payload.notes?.trim() || undefined,
+    pickup: payload.pickup,
+    delivery: payload.delivery,
+    customer: {
+      name: payload.customer.name,
+      phone: payload.customer.phone,
+      notes: payload.customer.notes?.trim() || undefined,
+    },
+    items: payload.items.map((item) => ({
+      service_id: item.serviceId,
+      qty: item.qty,
+      weight_kg: item.weightKg,
+    })),
+  };
 }
 
 export async function listOrders(params: ListOrdersParams): Promise<OrderSummary[]> {
@@ -176,24 +200,15 @@ export async function getOrderDetail(orderId: string): Promise<OrderDetail> {
   return response.data.data;
 }
 
-export async function createOrder(payload: CreateOrderPayload): Promise<OrderDetail> {
-  const response = await httpClient.post<CreateOrderResponse>("/orders", {
-    outlet_id: payload.outletId,
-    is_pickup_delivery: payload.isPickupDelivery ?? false,
-    shipping_fee_amount: payload.shippingFeeAmount ?? 0,
-    discount_amount: payload.discountAmount ?? 0,
-    notes: payload.notes?.trim() || undefined,
-    customer: {
-      name: payload.customer.name,
-      phone: payload.customer.phone,
-      notes: payload.customer.notes?.trim() || undefined,
-    },
-    items: payload.items.map((item) => ({
-      service_id: item.serviceId,
-      qty: item.qty,
-      weight_kg: item.weightKg,
-    })),
-  });
+export async function createOrder(payload: SaveOrderPayload): Promise<OrderDetail> {
+  const response = await httpClient.post<CreateOrderResponse>("/orders", buildOrderRequestBody(payload));
+
+  invalidateCache("orders:list:");
+  return response.data.data;
+}
+
+export async function updateOrder(orderId: string, payload: SaveOrderPayload): Promise<OrderDetail> {
+  const response = await httpClient.patch<OrderDetailResponse>(`/orders/${orderId}`, buildOrderRequestBody(payload));
 
   invalidateCache("orders:list:");
   return response.data.data;

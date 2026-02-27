@@ -358,6 +358,184 @@ class OrderController extends Controller
         ], 201);
     }
 
+    public function update(Request $request, Order $order): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner', 'admin', 'cashier']);
+        $this->ensureOrderAccess($user, $order);
+        $this->ensureOperationalWriteAccess($user->tenant_id);
+        $sourceChannel = $this->resolveSourceChannel($request, 'web');
+        $actorUserId = $user->id;
+
+        $validated = $request->validate([
+            'outlet_id' => ['required', 'uuid'],
+            'is_pickup_delivery' => ['nullable', 'boolean'],
+            'shipping_fee_amount' => ['nullable', 'integer', 'min:0'],
+            'discount_amount' => ['nullable', 'integer', 'min:0'],
+            'notes' => ['nullable', 'string'],
+            'pickup' => ['nullable', 'array'],
+            'delivery' => ['nullable', 'array'],
+            'customer' => ['required', 'array'],
+            'customer.name' => ['required', 'string', 'max:150'],
+            'customer.phone' => ['required', 'string', 'max:30'],
+            'customer.notes' => ['nullable', 'string'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.service_id' => ['required', 'uuid'],
+            'items.*.qty' => ['nullable', 'numeric', 'min:0.01'],
+            'items.*.weight_kg' => ['nullable', 'numeric', 'min:0.01'],
+        ]);
+
+        if ($validated['outlet_id'] !== $order->outlet_id) {
+            throw ValidationException::withMessages([
+                'outlet_id' => ['Pesanan hanya bisa diedit dari outlet yang sama.'],
+            ]);
+        }
+
+        if ((! $order->is_pickup_delivery && $order->laundry_status === 'completed')
+            || ($order->is_pickup_delivery && $order->courier_status === 'delivered')) {
+            throw ValidationException::withMessages([
+                'order' => ['Pesanan yang sudah selesai tidak bisa diedit lagi.'],
+            ]);
+        }
+
+        $tenantId = $user->tenant_id;
+        $isPickup = (bool) ($validated['is_pickup_delivery'] ?? false);
+        $shippingFee = (int) ($validated['shipping_fee_amount'] ?? 0);
+        $discount = (int) ($validated['discount_amount'] ?? 0);
+
+        $updatedOrder = DB::transaction(function () use ($validated, $tenantId, $order, $isPickup, $shippingFee, $discount, $actorUserId, $sourceChannel): Order {
+            $phone = $this->normalizePhone($validated['customer']['phone']);
+
+            if (! $phone) {
+                throw ValidationException::withMessages([
+                    'customer.phone' => ['Invalid phone number format.'],
+                ]);
+            }
+
+            $customer = Customer::query()->updateOrCreate(
+                ['tenant_id' => $tenantId, 'phone_normalized' => $phone],
+                [
+                    'name' => $validated['customer']['name'],
+                    'notes' => $validated['customer']['notes'] ?? null,
+                ]
+            );
+
+            $subTotal = 0;
+            $lineItems = [];
+
+            foreach ($validated['items'] as $item) {
+                $service = Service::query()
+                    ->where('id', $item['service_id'])
+                    ->where('tenant_id', $tenantId)
+                    ->where('active', true)
+                    ->first();
+
+                if (! $service) {
+                    throw ValidationException::withMessages([
+                        'items' => ["Service {$item['service_id']} is invalid for this tenant."],
+                    ]);
+                }
+
+                $outletService = OutletService::query()
+                    ->where('outlet_id', $order->outlet_id)
+                    ->where('service_id', $service->id)
+                    ->where('active', true)
+                    ->first();
+
+                $unitPrice = (int) ($outletService?->price_override_amount ?? $service->base_price_amount);
+
+                $qty = isset($item['qty']) ? (float) $item['qty'] : null;
+                $weight = isset($item['weight_kg']) ? (float) $item['weight_kg'] : null;
+
+                if ($service->unit_type === 'kg' && ! $weight) {
+                    throw ValidationException::withMessages([
+                        'items' => ['weight_kg is required for unit_type kg.'],
+                    ]);
+                }
+
+                if ($service->unit_type === 'pcs' && ! $qty) {
+                    throw ValidationException::withMessages([
+                        'items' => ['qty is required for unit_type pcs.'],
+                    ]);
+                }
+
+                $metric = $service->unit_type === 'kg' ? (float) $weight : (float) $qty;
+                $lineSubTotal = (int) round($metric * $unitPrice);
+                $subTotal += $lineSubTotal;
+
+                $lineItems[] = [
+                    'service_id' => $service->id,
+                    'service_name_snapshot' => $service->name,
+                    'unit_type_snapshot' => $service->unit_type,
+                    'qty' => $qty,
+                    'weight_kg' => $weight,
+                    'unit_price_amount' => $unitPrice,
+                    'subtotal_amount' => $lineSubTotal,
+                ];
+            }
+
+            $total = max($subTotal + $shippingFee - $discount, 0);
+            $paidAmount = (int) $order->paid_amount;
+
+            if ($total < $paidAmount) {
+                throw ValidationException::withMessages([
+                    'discount_amount' => ['Total pesanan tidak boleh lebih kecil dari pembayaran yang sudah tercatat.'],
+                ]);
+            }
+
+            OrderItem::query()->where('order_id', $order->id)->delete();
+
+            foreach ($lineItems as $lineItem) {
+                OrderItem::query()->create([
+                    'order_id' => $order->id,
+                    ...$lineItem,
+                ]);
+            }
+
+            $resolvedPickup = $isPickup ? ($validated['pickup'] ?? $order->pickup) : null;
+            $resolvedDelivery = $isPickup ? ($validated['delivery'] ?? $order->delivery) : null;
+
+            $order->forceFill([
+                'customer_id' => $customer->id,
+                'is_pickup_delivery' => $isPickup,
+                'courier_status' => $this->resolveEditedCourierStatus($order, $isPickup),
+                'courier_user_id' => $isPickup ? $order->courier_user_id : null,
+                'shipping_fee_amount' => $shippingFee,
+                'discount_amount' => $discount,
+                'total_amount' => $total,
+                'due_amount' => max($total - $paidAmount, 0),
+                'pickup' => $resolvedPickup,
+                'delivery' => $resolvedDelivery,
+                'notes' => $validated['notes'] ?? null,
+                'updated_by' => $actorUserId,
+                'source_channel' => $sourceChannel,
+            ])->save();
+
+            return $order;
+        });
+
+        $this->auditTrail->record(
+            eventKey: AuditEventKeys::ORDER_UPDATED,
+            actor: $user,
+            tenantId: $user->tenant_id,
+            outletId: $updatedOrder->outlet_id,
+            entityType: 'order',
+            entityId: $updatedOrder->id,
+            metadata: [
+                'order_code' => $updatedOrder->order_code,
+                'total_amount' => $updatedOrder->total_amount,
+                'is_pickup_delivery' => $updatedOrder->is_pickup_delivery,
+            ],
+            channel: 'api',
+            request: $request,
+        );
+
+        return response()->json([
+            'data' => $this->serializeOrderDetailPayload($updatedOrder),
+        ]);
+    }
+
     public function addPayment(Request $request, Order $order): JsonResponse
     {
         /** @var User $user */
@@ -935,6 +1113,22 @@ class OrderController extends Controller
     private function generateOrderCode(): string
     {
         return 'ORD-'.strtoupper(Str::random(8));
+    }
+
+    private function resolveEditedCourierStatus(Order $order, bool $isPickup): ?string
+    {
+        if (! $isPickup) {
+            return null;
+        }
+
+        $currentStatus = (string) ($order->courier_status ?? '');
+        if ($currentStatus !== '') {
+            return $currentStatus;
+        }
+
+        return in_array((string) $order->laundry_status, ['ready', 'completed'], true)
+            ? 'delivery_pending'
+            : 'pickup_pending';
     }
 
     /**

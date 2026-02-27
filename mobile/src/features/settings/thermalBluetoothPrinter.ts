@@ -1,6 +1,7 @@
 import { NativeModules, PermissionsAndroid, Platform } from "react-native";
 import type { Permission } from "react-native";
 import type { BluetoothThermalPrinterDevice } from "../../types/printerBluetooth";
+import type { PrinterLocalSettings } from "../../types/printerLocalSettings";
 
 interface ThermalPrinterModule {
   BLEPrinter: {
@@ -170,7 +171,11 @@ export async function connectBluetoothThermalPrinter(address: string): Promise<B
   return mapped[0];
 }
 
-export async function printBluetoothThermalTest(address: string, title?: string): Promise<void> {
+function buildDivider(paperWidth: PrinterLocalSettings["paperWidth"] | undefined): string {
+  return paperWidth === "80mm" ? "------------------------------------------------" : "--------------------------------";
+}
+
+export async function printBluetoothThermalTest(address: string, title?: string, settings?: PrinterLocalSettings): Promise<void> {
   const sanitizedAddress = normalizePrinterAddress(address);
   if (!sanitizedAddress) {
     throw new Error("Printer belum dipilih.");
@@ -184,13 +189,17 @@ export async function printBluetoothThermalTest(address: string, title?: string)
     dateStyle: "medium",
     timeStyle: "short",
   });
+  const divider = buildDivider(settings?.paperWidth);
 
   const lines = [
     "TEST PRINT THERMAL",
-    "------------------------------",
+    divider,
     `Outlet : ${title?.trim() || "-"}`,
     `Waktu  : ${now}`,
     `Device : ${sanitizedAddress}`,
+    `Kertas : ${settings?.paperWidth === "80mm" ? "80 mm" : "58 mm"}`,
+    `Cut    : ${settings?.autoCut ? "Aktif" : "Nonaktif"}`,
+    `Drawer : ${settings?.autoOpenCashDrawer ? "Aktif" : "Nonaktif"}`,
     "",
     "Koneksi printer Bluetooth berhasil.",
     "",
@@ -199,7 +208,7 @@ export async function printBluetoothThermalTest(address: string, title?: string)
 
   module.BLEPrinter.printBill(lines.join("\n"), {
     beep: false,
-    cut: true,
+    cut: settings?.autoCut === true,
     tailingLine: true,
   });
 }

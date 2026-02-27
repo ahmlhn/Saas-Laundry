@@ -115,6 +115,9 @@ class PrinterNoteController extends Controller
             'footer_note' => ['nullable', 'string', 'max:200'],
             'share_enota' => ['required', 'boolean'],
             'show_customer_receipt' => ['required', 'boolean'],
+            'paper_width' => ['nullable', 'string', 'in:58mm,80mm'],
+            'auto_cut' => ['nullable', 'boolean'],
+            'auto_open_cash_drawer' => ['nullable', 'boolean'],
         ]);
 
         $outlet = $this->ensureOutletAccess($user, $validated['outlet_id']);
@@ -145,6 +148,25 @@ class PrinterNoteController extends Controller
             'share_enota' => (bool) $validated['share_enota'],
             'show_customer_receipt' => (bool) $validated['show_customer_receipt'],
         ]);
+
+        if (array_key_exists('paper_width', $validated)) {
+            $settings->paper_width = $validated['paper_width'] ?: '58mm';
+        } elseif (! $settings->exists || blank($settings->paper_width)) {
+            $settings->paper_width = '58mm';
+        }
+
+        if (array_key_exists('auto_cut', $validated)) {
+            $settings->auto_cut = (bool) $validated['auto_cut'];
+        } elseif (! $settings->exists) {
+            $settings->auto_cut = false;
+        }
+
+        if (array_key_exists('auto_open_cash_drawer', $validated)) {
+            $settings->auto_open_cash_drawer = (bool) $validated['auto_open_cash_drawer'];
+        } elseif (! $settings->exists) {
+            $settings->auto_open_cash_drawer = false;
+        }
+
         $settings->save();
 
         $this->auditTrail->record(
@@ -165,6 +187,75 @@ class PrinterNoteController extends Controller
 
         return response()->json([
             'data' => $this->serializeSettings($settings),
+        ]);
+    }
+
+    public function showPrinterSettings(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner', 'admin', 'cashier']);
+
+        $validated = $request->validate([
+            'outlet_id' => ['required', 'uuid'],
+        ]);
+
+        $outlet = $this->ensureOutletAccess($user, $validated['outlet_id']);
+        $settings = PrinterNoteSetting::query()
+            ->where('tenant_id', $user->tenant_id)
+            ->where('outlet_id', $outlet->id)
+            ->first();
+
+        return response()->json([
+            'data' => $this->serializePrinterSettings($settings),
+        ]);
+    }
+
+    public function upsertPrinterSettings(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner', 'admin', 'cashier']);
+
+        $validated = $request->validate([
+            'outlet_id' => ['required', 'uuid'],
+            'paper_width' => ['required', 'string', 'in:58mm,80mm'],
+            'auto_cut' => ['required', 'boolean'],
+            'auto_open_cash_drawer' => ['required', 'boolean'],
+        ]);
+
+        $outlet = $this->ensureOutletAccess($user, $validated['outlet_id']);
+        $sourceChannel = $this->resolveSourceChannel($request, 'mobile');
+
+        $settings = PrinterNoteSetting::query()->firstOrNew([
+            'tenant_id' => $user->tenant_id,
+            'outlet_id' => $outlet->id,
+        ]);
+
+        $settings->paper_width = $validated['paper_width'];
+        $settings->auto_cut = (bool) $validated['auto_cut'];
+        $settings->auto_open_cash_drawer = (bool) $validated['auto_open_cash_drawer'];
+        $settings->save();
+
+        $this->auditTrail->record(
+            eventKey: AuditEventKeys::PRINTER_NOTE_SETTINGS_UPDATED,
+            actor: $user,
+            tenantId: $user->tenant_id,
+            outletId: $outlet->id,
+            entityType: 'printer_settings',
+            entityId: $settings->id,
+            metadata: [
+                'source_channel' => $sourceChannel,
+                'paper_width' => $settings->paper_width,
+                'auto_cut' => (bool) $settings->auto_cut,
+                'auto_open_cash_drawer' => (bool) $settings->auto_open_cash_drawer,
+            ],
+            channel: 'api',
+            request: $request,
+        );
+
+        return response()->json([
+            'data' => $this->serializePrinterSettings($settings),
         ]);
     }
 
@@ -255,6 +346,9 @@ class PrinterNoteController extends Controller
      *     footer_note: string,
      *     share_enota: bool,
      *     show_customer_receipt: bool,
+     *     paper_width: string,
+     *     auto_cut: bool,
+     *     auto_open_cash_drawer: bool,
      *     logo_url: string,
      *     logo_path: string|null
      * }
@@ -271,6 +365,9 @@ class PrinterNoteController extends Controller
                 'footer_note' => '',
                 'share_enota' => true,
                 'show_customer_receipt' => true,
+                'paper_width' => '58mm',
+                'auto_cut' => false,
+                'auto_open_cash_drawer' => false,
                 'logo_url' => '',
                 'logo_path' => null,
             ];
@@ -285,8 +382,35 @@ class PrinterNoteController extends Controller
             'footer_note' => (string) ($settings->footer_note ?? ''),
             'share_enota' => (bool) $settings->share_enota,
             'show_customer_receipt' => (bool) $settings->show_customer_receipt,
+            'paper_width' => $settings->paper_width === '80mm' ? '80mm' : '58mm',
+            'auto_cut' => (bool) $settings->auto_cut,
+            'auto_open_cash_drawer' => (bool) $settings->auto_open_cash_drawer,
             'logo_url' => $settings->logo_path ? Storage::disk('public')->url($settings->logo_path) : '',
             'logo_path' => $settings->logo_path,
+        ];
+    }
+
+    /**
+     * @return array{
+     *     paper_width: string,
+     *     auto_cut: bool,
+     *     auto_open_cash_drawer: bool
+     * }
+     */
+    private function serializePrinterSettings(?PrinterNoteSetting $settings): array
+    {
+        if (! $settings) {
+            return [
+                'paper_width' => '58mm',
+                'auto_cut' => false,
+                'auto_open_cash_drawer' => false,
+            ];
+        }
+
+        return [
+            'paper_width' => $settings->paper_width === '80mm' ? '80mm' : '58mm',
+            'auto_cut' => (bool) $settings->auto_cut,
+            'auto_open_cash_drawer' => (bool) $settings->auto_open_cash_drawer,
         ];
     }
 }

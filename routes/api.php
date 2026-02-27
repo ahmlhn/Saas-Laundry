@@ -48,6 +48,7 @@ Route::middleware(['auth:sanctum', 'outlet.access'])->group(function (): void {
     Route::get('/orders', [OrderController::class, 'index']);
     Route::post('/orders', [OrderController::class, 'store']);
     Route::get('/orders/{order}', [OrderController::class, 'show']);
+    Route::patch('/orders/{order}', [OrderController::class, 'update']);
     Route::post('/orders/{order}/payments', [OrderController::class, 'addPayment']);
     Route::post('/orders/{order}/payments/qris-intent', [OrderController::class, 'createQrisIntent']);
     Route::get('/orders/{order}/payments/qris-status', [OrderController::class, 'qrisPaymentStatus']);
@@ -132,6 +133,8 @@ Route::middleware(['auth:sanctum'])->group(function (): void {
 
     Route::get('/printer-note/settings', [PrinterNoteController::class, 'showSettings']);
     Route::put('/printer-note/settings', [PrinterNoteController::class, 'upsertSettings']);
+    Route::get('/printer-note/printer-settings', [PrinterNoteController::class, 'showPrinterSettings']);
+    Route::put('/printer-note/printer-settings', [PrinterNoteController::class, 'upsertPrinterSettings']);
     Route::post('/printer-note/logo', [PrinterNoteController::class, 'uploadLogo']);
     Route::delete('/printer-note/logo', [PrinterNoteController::class, 'deleteLogo']);
 });

@@ -20,6 +20,8 @@ class AuditEventKeys
 
     public const ORDER_CREATED = 'ORDER_CREATED';
 
+    public const ORDER_UPDATED = 'ORDER_UPDATED';
+
     public const PAYMENT_ADDED = 'PAYMENT_ADDED';
 
     public const ORDER_LAUNDRY_STATUS_UPDATED = 'ORDER_LAUNDRY_STATUS_UPDATED';

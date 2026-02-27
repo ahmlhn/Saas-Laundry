@@ -26,7 +26,7 @@ import { AppPanel } from "../../components/ui/AppPanel";
 import { listCustomers, listCustomersPage } from "../../features/customers/customerApi";
 import { formatCustomerPhoneDisplay } from "../../features/customers/customerPhone";
 import { parseCustomerProfileMeta } from "../../features/customers/customerProfileNote";
-import { createOrder, listOrders } from "../../features/orders/orderApi";
+import { createOrder, getOrderDetail, listOrders, updateOrder } from "../../features/orders/orderApi";
 import { listPromotionSections } from "../../features/promotions/promoApi";
 import { listServices } from "../../features/services/serviceApi";
 import { hasAnyRole } from "../../lib/accessControl";
@@ -36,7 +36,7 @@ import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
 import type { Customer } from "../../types/customer";
-import type { OrderSummary } from "../../types/order";
+import type { OrderDetail, OrderSummary } from "../../types/order";
 import type { Promotion, PromotionSections, PromotionVoucher } from "../../types/promotion";
 import type { ServiceCatalogItem } from "../../types/service";
 
@@ -45,6 +45,7 @@ type Direction = -1 | 1;
 type ReviewPanelKey = "promo" | "discount" | "notes";
 type ReviewFocusableInputKey = "voucher" | "shippingFee" | "discount" | "notes";
 type InputVisibilityMode = "visible" | "comfort";
+type ScheduleField = "pickup" | "delivery";
 
 const STEP_ORDER: Step[] = ["customer", "services", "review"];
 const CUSTOMER_LIMIT = 40;
@@ -53,7 +54,9 @@ const CUSTOMER_PROGRESSIVE_DELAY_MS = 70;
 const SERVICE_RENDER_BATCH = 40;
 const MAX_MONEY_INPUT_DIGITS = 9;
 const MAX_DISCOUNT_PERCENT = 100;
+const QUICK_ACTION_ALERT_AUTO_HIDE_MS = 4000;
 const VOUCHER_PROMO_SELECTION_KEY = "__voucher_option__";
+const SCHEDULE_DAY_OPTION_COUNT = 14;
 const currencyFormatter = new Intl.NumberFormat("id-ID");
 let customerListClientCache: Customer[] = [];
 let customerListAutoLoadedOnce = false;
@@ -276,6 +279,10 @@ interface QuickActionDraftSnapshot {
   customerPhone: string;
   customerNotes: string;
   isPickupDelivery: boolean;
+  pickupScheduleInput: string;
+  deliveryScheduleInput: string;
+  pickupAddressDraft: string;
+  deliveryAddressDraft: string;
   shippingFeeInput: string;
   discountInput: string;
   manualDiscountType?: ManualDiscountType;
@@ -390,6 +397,56 @@ function resolveCustomerPackageSummary(customer: Customer | null): CustomerPacka
   return null;
 }
 
+function readOrderMetaText(source: Record<string, unknown> | null | undefined, keys: string[]): string {
+  if (!source) {
+    return "";
+  }
+
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+function formatScheduleDisplayValue(dateToken: string): string {
+  const [yearRaw, monthRaw, dayRaw] = dateToken.split("-");
+  const year = Number.parseInt(yearRaw ?? "", 10);
+  const month = Number.parseInt(monthRaw ?? "", 10);
+  const day = Number.parseInt(dayRaw ?? "", 10);
+
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return dateToken;
+  }
+
+  const date = new Date(year, month - 1, day);
+  const weekday = new Intl.DateTimeFormat("id-ID", { weekday: "long" }).format(date);
+  const normalizedDay = String(day).padStart(2, "0");
+  const normalizedMonth = String(month).padStart(2, "0");
+
+  return `${weekday}, ${normalizedDay}-${normalizedMonth}-${year}`;
+}
+
+function parseScheduleSelection(raw: string): { dateToken: string } | null {
+  const normalized = raw.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const match = normalized.match(/(\d{2})-(\d{2})-(\d{4})/);
+  if (!match) {
+    return null;
+  }
+
+  const [, day, month, year] = match;
+  return {
+    dateToken: `${year}-${month}-${day}`,
+  };
+}
+
 export function QuickActionScreen() {
   const theme = useAppTheme();
   const { width, height } = useWindowDimensions();
@@ -410,6 +467,8 @@ export function QuickActionScreen() {
 
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [step, setStep] = useState<Step>("customer");
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+  const [editingOrderReference, setEditingOrderReference] = useState<string | null>(null);
 
   const [services, setServices] = useState<ServiceCatalogItem[]>([]);
   const [serviceGroupNamesById, setServiceGroupNamesById] = useState<Record<string, string>>({});
@@ -443,6 +502,12 @@ export function QuickActionScreen() {
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerNotes, setCustomerNotes] = useState("");
   const [isPickupDelivery, setIsPickupDelivery] = useState(false);
+  const [pickupScheduleInput, setPickupScheduleInput] = useState("");
+  const [deliveryScheduleInput, setDeliveryScheduleInput] = useState("");
+  const [pickupAddressDraft, setPickupAddressDraft] = useState("");
+  const [deliveryAddressDraft, setDeliveryAddressDraft] = useState("");
+  const [schedulePickerField, setSchedulePickerField] = useState<ScheduleField | null>(null);
+  const [schedulePickerDateToken, setSchedulePickerDateToken] = useState("");
 
   const [shippingFeeInput, setShippingFeeInput] = useState("");
   const [discountInput, setDiscountInput] = useState("");
@@ -514,12 +579,12 @@ export function QuickActionScreen() {
   }, [route.params?.openCreateStamp, canCreateOrder, showCreateForm, navigation]);
 
   useEffect(() => {
-    if (!isFocused || !canCreateOrder || showCreateForm || actionMessage || (!loadingServices && services.length === 0)) {
+    if (!isFocused || !canCreateOrder || showCreateForm || actionMessage || route.params?.editOrderId || (!loadingServices && services.length === 0)) {
       return;
     }
 
     openCreateFlow();
-  }, [isFocused, canCreateOrder, showCreateForm, actionMessage, loadingServices, services.length]);
+  }, [isFocused, canCreateOrder, showCreateForm, actionMessage, route.params?.editOrderId, loadingServices, services.length]);
 
   useEffect(() => {
     const preselectCustomerId = route.params?.preselectCustomerId;
@@ -537,6 +602,52 @@ export function QuickActionScreen() {
       });
     }
   }, [route.params?.preselectCustomerId, canCreateOrder]);
+
+  useEffect(() => {
+    const editOrderId = route.params?.editOrderId;
+    if (!editOrderId || !canCreateOrder || loadingServices) {
+      return;
+    }
+
+    let active = true;
+
+    void openEditFlow(editOrderId).finally(() => {
+      if (active) {
+        navigation.setParams({
+          editOrderId: undefined,
+        });
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [route.params?.editOrderId, canCreateOrder, loadingServices, navigation, selectedOutlet?.id]);
+
+  useEffect(() => {
+    if (!actionMessage && !errorMessage) {
+      return;
+    }
+
+    if (showCreateForm) {
+      return;
+    }
+
+    contentScrollRef.current?.scrollTo({ y: 0, animated: true });
+  }, [actionMessage, errorMessage, showCreateForm]);
+
+  useEffect(() => {
+    if (!showCreateForm || (!actionMessage && !errorMessage)) {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      setActionMessage(null);
+      setErrorMessage(null);
+    }, QUICK_ACTION_ALERT_AUTO_HIDE_MS);
+
+    return () => clearTimeout(timeoutId);
+  }, [actionMessage, errorMessage, showCreateForm]);
 
   useEffect(() => {
     if (!showCreateForm || !canCreateOrder || !selectedOutlet) {
@@ -747,6 +858,11 @@ export function QuickActionScreen() {
     setCustomerPhone("");
     setCustomerNotes("");
     setIsPickupDelivery(false);
+    setSchedulePickerField(null);
+    setPickupScheduleInput("");
+    setDeliveryScheduleInput("");
+    setPickupAddressDraft("");
+    setDeliveryAddressDraft("");
     setCustomerOrdersPreview([]);
     setLoadingCustomerOrdersPreview(false);
     setLoadingCustomers(false);
@@ -791,6 +907,10 @@ export function QuickActionScreen() {
     setCustomerPhone(draft.customerPhone);
     setCustomerNotes(draft.customerNotes);
     setIsPickupDelivery(draft.isPickupDelivery);
+    setPickupScheduleInput(draft.pickupScheduleInput);
+    setDeliveryScheduleInput(draft.deliveryScheduleInput);
+    setPickupAddressDraft(draft.pickupAddressDraft);
+    setDeliveryAddressDraft(draft.deliveryAddressDraft);
     setCustomerOrdersPreview([]);
     setLoadingCustomerOrdersPreview(false);
     setLoadingCustomers(false);
@@ -820,6 +940,10 @@ export function QuickActionScreen() {
       customerPhone,
       customerNotes,
       isPickupDelivery,
+      pickupScheduleInput,
+      deliveryScheduleInput,
+      pickupAddressDraft,
+      deliveryAddressDraft,
       shippingFeeInput,
       discountInput,
       manualDiscountType,
@@ -841,7 +965,128 @@ export function QuickActionScreen() {
     setHasSavedDraft(false);
   }
 
+  function applyEditOrderSnapshot(order: OrderDetail): void {
+    const fallbackServices: ServiceCatalogItem[] = [];
+    const knownServiceIds = new Set(services.map((item) => item.id));
+    const nextSelectedServiceIds: string[] = [];
+    const nextMetrics: Record<string, string> = {};
+
+    for (const item of order.items ?? []) {
+      if (!item.service_id) {
+        continue;
+      }
+
+      nextSelectedServiceIds.push(item.service_id);
+
+      if (!knownServiceIds.has(item.service_id)) {
+        knownServiceIds.add(item.service_id);
+        fallbackServices.push({
+          id: item.service_id,
+          tenant_id: order.tenant_id,
+          name: item.service_name_snapshot,
+          service_type: "regular",
+          parent_service_id: null,
+          is_group: false,
+          unit_type: item.unit_type_snapshot === "kg" ? "kg" : "pcs",
+          display_unit: item.unit_type_snapshot === "kg" ? "kg" : "pcs",
+          base_price_amount: item.unit_price_amount,
+          duration_days: item.service?.duration_days ?? null,
+          package_quota_value: null,
+          package_quota_unit: null,
+          package_valid_days: null,
+          package_accumulation_mode: null,
+          active: true,
+          sort_order: 9_999,
+          image_icon: null,
+          effective_price_amount: item.unit_price_amount,
+          outlet_override: null,
+          process_tags: [],
+          process_summary: null,
+          children: [],
+        });
+      }
+
+      const rawMetric = item.unit_type_snapshot === "kg" ? item.weight_kg : item.qty;
+      const parsedMetric = typeof rawMetric === "number" ? rawMetric : Number.parseFloat(`${rawMetric ?? ""}`.replace(",", "."));
+      if (Number.isFinite(parsedMetric) && parsedMetric > 0) {
+        nextMetrics[item.service_id] = formatMetricValue(parsedMetric, item.unit_type_snapshot);
+      }
+    }
+
+    if (fallbackServices.length > 0) {
+      setServices((previous) => [...previous, ...fallbackServices.filter((service) => !previous.some((current) => current.id === service.id))]);
+    }
+
+    const customerId = order.customer?.id ?? order.customer_id;
+    const customerNote = order.customer?.notes?.trim() ?? "";
+    if (order.customer) {
+      const editableCustomer: Customer = {
+        id: customerId,
+        tenant_id: order.tenant_id,
+        name: order.customer.name,
+        phone_normalized: order.customer.phone_normalized,
+        notes: customerNote || null,
+        created_at: order.created_at,
+        updated_at: order.updated_at,
+      };
+
+      setCustomers((previous) => {
+        const existingIndex = previous.findIndex((item) => item.id === editableCustomer.id);
+        if (existingIndex === -1) {
+          return [editableCustomer, ...previous];
+        }
+
+        const next = [...previous];
+        next[existingIndex] = {
+          ...next[existingIndex],
+          ...editableCustomer,
+        };
+        return next;
+      });
+      customerListClientCache = customerListClientCache.some((item) => item.id === editableCustomer.id)
+        ? customerListClientCache.map((item) => (item.id === editableCustomer.id ? { ...item, ...editableCustomer } : item))
+        : [editableCustomer, ...customerListClientCache];
+    }
+
+    const fallbackAddress = order.customer ? parseCustomerProfileMeta(order.customer.notes ?? null).address.trim() : "";
+    setPickupAddressDraft(readOrderMetaText(order.pickup ?? null, ["address_short", "address"]) || fallbackAddress);
+    setDeliveryAddressDraft(readOrderMetaText(order.delivery ?? null, ["address_short", "address"]) || fallbackAddress);
+    setPickupScheduleInput(readOrderMetaText(order.pickup ?? null, ["slot", "schedule_slot", "date"]));
+    setDeliveryScheduleInput(readOrderMetaText(order.delivery ?? null, ["slot", "schedule_slot", "date"]));
+    setEditingOrderId(order.id);
+    setEditingOrderReference(order.order_code || order.invoice_no || order.id);
+    setStep("review");
+    setSelectedServiceIds(nextSelectedServiceIds);
+    setMetrics(nextMetrics);
+    setSelectedPromoId(null);
+    setPromoVoucherCodeInput("");
+    setPromoErrorMessage(null);
+    setShowServiceItemValidation(false);
+    setShowReviewPromoPanel(false);
+    setShowReviewDiscountPanel(false);
+    setShowReviewNotesPanel(false);
+    setCustomerKeyword("");
+    setSelectedCustomerId(customerId);
+    setPendingAutoSelectCustomerId(null);
+    setCustomerName(order.customer?.name ?? "");
+    setCustomerPhone(order.customer?.phone_normalized ?? "");
+    setCustomerNotes(customerNote);
+    setIsPickupDelivery(Boolean(order.is_pickup_delivery));
+    setCustomerOrdersPreview([]);
+    setLoadingCustomerOrdersPreview(false);
+    setFocusedMetricServiceId(null);
+    setFocusedReviewInputKey(null);
+    setVisibleServiceLimit(SERVICE_RENDER_BATCH);
+    setShippingFeeInput(order.shipping_fee_amount && order.shipping_fee_amount > 0 ? normalizeMoneyInput(`${order.shipping_fee_amount}`) : "");
+    setDiscountInput(order.discount_amount && order.discount_amount > 0 ? normalizeMoneyInput(`${order.discount_amount}`) : "");
+    setManualDiscountType("amount");
+    setPaymentFlowType("later");
+    setOrderNotes(order.notes?.trim() ?? "");
+  }
+
   function openCreateFlow(): void {
+    setEditingOrderId(null);
+    setEditingOrderReference(null);
     if (quickActionDraftCache) {
       applyDraftSnapshot(quickActionDraftCache);
     } else {
@@ -853,9 +1098,40 @@ export function QuickActionScreen() {
     setActionMessage(null);
   }
 
+  async function openEditFlow(orderId: string): Promise<void> {
+    if (!selectedOutlet) {
+      setErrorMessage("Pilih outlet terlebih dulu sebelum mengedit pesanan.");
+      return;
+    }
+
+    setShowCreateForm(true);
+    setExitDraftModalVisible(false);
+    clearSavedDraftSnapshot();
+    resetDraft();
+    setErrorMessage(null);
+    setActionMessage(null);
+
+    try {
+      const order = await getOrderDetail(orderId);
+
+      if (order.outlet_id !== selectedOutlet.id) {
+        setShowCreateForm(false);
+        setErrorMessage("Pesanan ini berasal dari outlet lain.");
+        return;
+      }
+
+      applyEditOrderSnapshot(order);
+    } catch (error) {
+      setShowCreateForm(false);
+      setErrorMessage(getApiErrorMessage(error));
+    }
+  }
+
   function closeCreateFlow(): void {
     setShowCreateForm(false);
     setExitDraftModalVisible(false);
+    setEditingOrderId(null);
+    setEditingOrderReference(null);
     resetDraft();
     setErrorMessage(null);
   }
@@ -888,6 +1164,8 @@ export function QuickActionScreen() {
     setCustomerName(customer.name);
     setCustomerPhone(customer.phone_normalized ?? "");
     setCustomerNotes(profile.note);
+    setPickupAddressDraft(profile.address);
+    setDeliveryAddressDraft(profile.address);
     setCustomerKeyword("");
     setErrorMessage(null);
   }
@@ -897,10 +1175,52 @@ export function QuickActionScreen() {
     setCustomerName("");
     setCustomerPhone("");
     setCustomerNotes("");
+    setPickupScheduleInput("");
+    setDeliveryScheduleInput("");
+    setPickupAddressDraft("");
+    setDeliveryAddressDraft("");
     setCustomerOrdersPreview([]);
     setLoadingCustomerOrdersPreview(false);
     setCustomerKeyword("");
     setErrorMessage(null);
+  }
+
+  function openSchedulePicker(field: ScheduleField): void {
+    const currentValue = field === "pickup" ? pickupScheduleInput : deliveryScheduleInput;
+    const parsed = parseScheduleSelection(currentValue);
+    const now = new Date();
+    const fallbackDateToken = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+    setSchedulePickerField(field);
+    setSchedulePickerDateToken(parsed?.dateToken ?? fallbackDateToken);
+  }
+
+  function closeSchedulePicker(): void {
+    setSchedulePickerField(null);
+  }
+
+  function clearScheduleValue(field: ScheduleField): void {
+    if (field === "pickup") {
+      setPickupScheduleInput("");
+      return;
+    }
+
+    setDeliveryScheduleInput("");
+  }
+
+  function applySchedulePicker(): void {
+    if (!schedulePickerField || !schedulePickerDateToken) {
+      return;
+    }
+
+    const nextValue = formatScheduleDisplayValue(schedulePickerDateToken);
+    if (schedulePickerField === "pickup") {
+      setPickupScheduleInput(nextValue);
+    } else {
+      setDeliveryScheduleInput(nextValue);
+    }
+
+    setSchedulePickerField(null);
   }
 
   useEffect(() => {
@@ -915,6 +1235,8 @@ export function QuickActionScreen() {
       setCustomerName(matchedCustomer.name);
       setCustomerPhone(matchedCustomer.phone_normalized ?? "");
       setCustomerNotes(profile.note);
+      setPickupAddressDraft(profile.address);
+      setDeliveryAddressDraft(profile.address);
       setCustomerKeyword("");
       setPendingAutoSelectCustomerId(null);
       setErrorMessage(null);
@@ -1037,6 +1359,56 @@ export function QuickActionScreen() {
 
     return parseCustomerProfileMeta(selectedCustomer.notes);
   }, [selectedCustomer]);
+  const resolvedPickupAddress = useMemo(() => {
+    const fromDraft = pickupAddressDraft.trim();
+    if (fromDraft) {
+      return fromDraft;
+    }
+
+    return selectedCustomerProfile?.address?.trim() ?? "";
+  }, [pickupAddressDraft, selectedCustomerProfile?.address]);
+  const resolvedDeliveryAddress = useMemo(() => {
+    const fromDraft = deliveryAddressDraft.trim();
+    if (fromDraft) {
+      return fromDraft;
+    }
+
+    return selectedCustomerProfile?.address?.trim() ?? "";
+  }, [deliveryAddressDraft, selectedCustomerProfile?.address]);
+  const pickupPayload = useMemo(() => {
+    if (!isPickupDelivery) {
+      return undefined;
+    }
+
+    const address = resolvedPickupAddress;
+    const slot = pickupScheduleInput.trim();
+    if (!address && !slot) {
+      return undefined;
+    }
+
+    return {
+      address: address || undefined,
+      address_short: address || undefined,
+      slot: slot || undefined,
+    };
+  }, [isPickupDelivery, pickupScheduleInput, resolvedPickupAddress]);
+  const deliveryPayload = useMemo(() => {
+    if (!isPickupDelivery) {
+      return undefined;
+    }
+
+    const address = resolvedDeliveryAddress;
+    const slot = deliveryScheduleInput.trim();
+    if (!address && !slot) {
+      return undefined;
+    }
+
+    return {
+      address: address || undefined,
+      address_short: address || undefined,
+      slot: slot || undefined,
+    };
+  }, [deliveryScheduleInput, isPickupDelivery, resolvedDeliveryAddress]);
   const customerPackageSummary = useMemo(() => resolveCustomerPackageSummary(selectedCustomer), [selectedCustomer]);
 
   useEffect(() => {
@@ -2040,9 +2412,11 @@ export function QuickActionScreen() {
     setActionMessage(null);
 
     try {
-      const created = await createOrder({
+      const payload = {
         outletId: selectedOutlet.id,
         isPickupDelivery,
+        pickup: pickupPayload,
+        delivery: deliveryPayload,
         customer: {
           name: customerName.trim(),
           phone: customerPhone.trim(),
@@ -2056,22 +2430,35 @@ export function QuickActionScreen() {
         shippingFeeAmount: effectiveShippingFee,
         discountAmount: totalDiscountAmount,
         notes: orderNotesWithPromo,
-      });
+      };
+      const savedOrder = editingOrderId ? await updateOrder(editingOrderId, payload) : await createOrder(payload);
 
-      const createdTotalAmount = Math.max(created.total_amount ?? 0, 0);
+      const savedTotalAmount = Math.max(savedOrder.total_amount ?? 0, 0);
 
       await refreshSession();
-      const rootNavigation = navigation.getParent<NativeStackNavigationProp<AppRootStackParamList>>();
       setActionMessage(null);
       setShowCreateForm(false);
+      setEditingOrderId(null);
+      setEditingOrderReference(null);
       clearSavedDraftSnapshot();
       resetDraft();
 
+      if (editingOrderId) {
+        navigation.navigate("OrdersTab", {
+          screen: "OrderDetail",
+          params: {
+            orderId: savedOrder.id,
+          },
+        });
+        return;
+      }
+
+      const rootNavigation = navigation.getParent<NativeStackNavigationProp<AppRootStackParamList>>();
       rootNavigation?.navigate("OrderPayment", {
-        orderId: created.id,
+        orderId: savedOrder.id,
         source: "create",
         flow: "payment",
-        initialAmount: createdTotalAmount > 0 ? 0 : undefined,
+        initialAmount: savedTotalAmount > 0 ? 0 : undefined,
       });
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error));
@@ -2101,9 +2488,13 @@ export function QuickActionScreen() {
   const secondaryButtonIconName: keyof typeof Ionicons.glyphMap = step === "customer" ? "close-outline" : "arrow-back-outline";
   const primaryButtonTitle =
     step === "review"
-      ? "Simpan & Ke Pembayaran"
+      ? editingOrderId
+        ? "Simpan Perubahan"
+        : "Simpan & Ke Pembayaran"
       : step === "payment"
-        ? "Simpan & Ke Pembayaran"
+        ? editingOrderId
+          ? "Simpan Perubahan"
+          : "Simpan & Ke Pembayaran"
         : "Lanjut";
   const primaryDisabledHint = useMemo(() => {
     if (!primaryDisabled) {
@@ -2142,8 +2533,8 @@ export function QuickActionScreen() {
       return "Total potongan melebihi batas. Cek diskon manual atau promo.";
     }
 
-    return "Simpan pesanan dulu untuk lanjut ke halaman pembayaran.";
-  }, [discountExceedsLimit, primaryDisabled, step, submitting, voucherCodeRejected]);
+    return editingOrderId ? "Simpan perubahan pesanan dulu." : "Simpan pesanan dulu untuk lanjut ke halaman pembayaran.";
+  }, [discountExceedsLimit, editingOrderId, primaryDisabled, step, submitting, voucherCodeRejected]);
   const startCreateTitle = hasSavedDraft ? "Lanjutkan Draft" : "Buat Pesanan Baru";
   const startCreateIconName: keyof typeof Ionicons.glyphMap = hasSavedDraft ? "document-text-outline" : "bag-add-outline";
 
@@ -2153,6 +2544,23 @@ export function QuickActionScreen() {
   const serviceSearchVisible = showServiceSearch || serviceKeyword.trim().length > 0;
   const keyboardVisible = keyboardHeight > 0;
   const scrollKeyboardDismissMode = step === "review" || step === "payment" ? "none" : "on-drag";
+  const isEditingOrder = editingOrderId !== null;
+  const scheduleDateOptions = useMemo(() => {
+    return Array.from({ length: SCHEDULE_DAY_OPTION_COUNT }, (_, index) => {
+      const date = new Date();
+      date.setHours(0, 0, 0, 0);
+      date.setDate(date.getDate() + index);
+      const token = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const dayLabel = new Intl.DateTimeFormat("id-ID", { weekday: "short" }).format(date);
+      const dateLabel = `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`;
+
+      return {
+        token,
+        dayLabel,
+        dateLabel,
+      };
+    });
+  }, []);
 
   function handleViewportLayout(event: LayoutChangeEvent): void {
     const nextHeight = Math.round(event.nativeEvent.layout.height);
@@ -2165,31 +2573,58 @@ export function QuickActionScreen() {
     <View style={styles.bodyHeader}>
       <View style={styles.titleRow}>
         <View style={styles.titleIconWrap}>
-          <Ionicons color={theme.colors.info} name="bag-handle-outline" size={14} />
+          <Ionicons color={theme.colors.info} name={isEditingOrder ? "create-outline" : "bag-handle-outline"} size={14} />
         </View>
         <Text style={styles.title}>
-          Buat Pesanan <Text style={styles.titleEmphasis}>Baru</Text>
+          {isEditingOrder ? (
+            <>
+              Edit Pesanan <Text style={styles.titleEmphasis}>{editingOrderReference ?? ""}</Text>
+            </>
+          ) : (
+            <>
+              Buat Pesanan <Text style={styles.titleEmphasis}>Baru</Text>
+            </>
+          )}
         </Text>
       </View>
     </View>
   );
 
+  const messageBanners = (
+    <>
+      {actionMessage ? (
+        <View style={styles.successWrap}>
+          <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={16} />
+          <Text style={styles.successText}>{actionMessage}</Text>
+        </View>
+      ) : null}
+
+      {errorMessage ? (
+        <View style={styles.errorWrap}>
+          <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
+          <Text style={styles.errorText}>{errorMessage}</Text>
+        </View>
+      ) : null}
+    </>
+  );
+
   return (
     <AppScreen scroll={false}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={0} onLayout={handleViewportLayout} style={styles.root}>
-        <ScrollView
-          contentContainerStyle={[styles.content, showCreateForm ? styles.contentCreateForm : null]}
-          keyboardDismissMode={scrollKeyboardDismissMode}
-          keyboardShouldPersistTaps="always"
-          onScroll={(event) => {
-            scrollYRef.current = event.nativeEvent.contentOffset.y;
-          }}
-          ref={contentScrollRef}
-          scrollEventThrottle={16}
-          showsVerticalScrollIndicator={false}
-          style={styles.scroll}
-        >
-          {!showCreateForm ? (
+        {!showCreateForm ? (
+          <ScrollView
+            contentContainerStyle={styles.content}
+            keyboardDismissMode={scrollKeyboardDismissMode}
+            keyboardShouldPersistTaps="always"
+            onScroll={(event) => {
+              scrollYRef.current = event.nativeEvent.contentOffset.y;
+            }}
+            ref={contentScrollRef}
+            scrollEventThrottle={16}
+            showsVerticalScrollIndicator={false}
+            style={styles.scroll}
+          >
+            {messageBanners}
             <AppPanel style={styles.panel}>
               {bodyHeader}
               <View style={styles.actionList}>
@@ -2215,16 +2650,32 @@ export function QuickActionScreen() {
               {hasSavedDraft ? <Text style={styles.infoText}>Draft tersimpan tersedia. Ketuk Lanjutkan Draft untuk melanjutkan.</Text> : null}
               {loadingServices ? <ActivityIndicator color={theme.colors.info} size="small" /> : null}
             </AppPanel>
-          ) : (
+          </ScrollView>
+        ) : (
+          <View style={[styles.content, styles.contentCreateForm, styles.createFormViewport]}>
             <AppPanel style={[styles.panel, styles.createFormPanel, createFormPanelMinHeight > 0 ? { minHeight: createFormPanelMinHeight } : null]}>
-              {bodyHeader}
-              <View style={[styles.stepProgressTrack, styles.stepProgressTrackCompact]}>
-                <View style={[styles.stepProgressFill, { width: `${stepProgressPercent}%` }]} />
+              <View style={styles.createFormHeaderDock}>
+                {bodyHeader}
+                <View style={[styles.stepProgressTrack, styles.stepProgressTrackCompact]}>
+                  <View style={[styles.stepProgressFill, { width: `${stepProgressPercent}%` }]} />
+                </View>
               </View>
 
-              <View style={styles.panelBody}>
-              {step === "customer" ? (
-                <View style={styles.sectionWrap}>
+              <ScrollView
+                contentContainerStyle={styles.panelBodyScrollContent}
+                keyboardDismissMode={scrollKeyboardDismissMode}
+                keyboardShouldPersistTaps="always"
+                onScroll={(event) => {
+                  scrollYRef.current = event.nativeEvent.contentOffset.y;
+                }}
+                ref={contentScrollRef}
+                scrollEventThrottle={16}
+                showsVerticalScrollIndicator={false}
+                style={styles.panelBodyScroll}
+              >
+                <View style={styles.panelBody}>
+                {step === "customer" ? (
+                  <View style={styles.sectionWrap}>
                   <View style={styles.customerTopBar}>
                     <View style={styles.customerTopTitleWrap}>
                       <Text style={styles.customerStepLeadTitle}>Pilih Konsumen</Text>
@@ -2299,9 +2750,51 @@ export function QuickActionScreen() {
                         </Pressable>
                       </View>
                       {isPickupDelivery ? (
-                        <Text style={styles.deliveryModeHint}>
-                          {selectedCustomerProfile?.address?.trim() ? "Alamat pelanggan siap dipakai untuk pickup/delivery." : "Alamat pelanggan belum diisi. Tambahkan alamat agar antar jemput lebih akurat."}
-                        </Text>
+                        <>
+                          <Text style={styles.deliveryModeHint}>
+                            {resolvedPickupAddress ? "Alamat pelanggan dipakai untuk pickup dan delivery. Anda bisa atur jadwalnya di bawah." : "Alamat pelanggan belum diisi. Jadwal tetap bisa diatur, tetapi alamat sebaiknya dilengkapi di data pelanggan."}
+                          </Text>
+                          <View style={styles.deliveryScheduleGrid}>
+                            <View style={styles.deliveryScheduleCard}>
+                              <Text style={styles.deliveryScheduleLabel}>Jemput</Text>
+                              <Text style={[styles.deliveryScheduleAddress, !resolvedPickupAddress ? styles.deliveryScheduleAddressMuted : null]}>
+                                {resolvedPickupAddress || "Alamat belum tersedia"}
+                              </Text>
+                              <View style={styles.deliveryScheduleActionRow}>
+                                <Pressable onPress={() => openSchedulePicker("pickup")} style={({ pressed }) => [styles.deliverySchedulePickerButton, pressed ? styles.pressed : null]}>
+                                  <Ionicons color={theme.colors.info} name="calendar-outline" size={14} />
+                                  <Text style={[styles.deliverySchedulePickerValue, !pickupScheduleInput.trim() ? styles.deliverySchedulePickerPlaceholder : null]}>
+                                    {pickupScheduleInput.trim() || "Pilih tanggal"}
+                                  </Text>
+                                </Pressable>
+                                {pickupScheduleInput.trim() ? (
+                                  <Pressable hitSlop={6} onPress={() => clearScheduleValue("pickup")} style={({ pressed }) => [styles.deliveryScheduleClearButton, pressed ? styles.pressed : null]}>
+                                    <Ionicons color={theme.colors.textMuted} name="close-circle" size={18} />
+                                  </Pressable>
+                                ) : null}
+                              </View>
+                            </View>
+                            <View style={styles.deliveryScheduleCard}>
+                              <Text style={styles.deliveryScheduleLabel}>Antar</Text>
+                              <Text style={[styles.deliveryScheduleAddress, !resolvedDeliveryAddress ? styles.deliveryScheduleAddressMuted : null]}>
+                                {resolvedDeliveryAddress || "Alamat belum tersedia"}
+                              </Text>
+                              <View style={styles.deliveryScheduleActionRow}>
+                                <Pressable onPress={() => openSchedulePicker("delivery")} style={({ pressed }) => [styles.deliverySchedulePickerButton, pressed ? styles.pressed : null]}>
+                                  <Ionicons color={theme.colors.info} name="calendar-outline" size={14} />
+                                  <Text style={[styles.deliverySchedulePickerValue, !deliveryScheduleInput.trim() ? styles.deliverySchedulePickerPlaceholder : null]}>
+                                    {deliveryScheduleInput.trim() || "Pilih tanggal"}
+                                  </Text>
+                                </Pressable>
+                                {deliveryScheduleInput.trim() ? (
+                                  <Pressable hitSlop={6} onPress={() => clearScheduleValue("delivery")} style={({ pressed }) => [styles.deliveryScheduleClearButton, pressed ? styles.pressed : null]}>
+                                    <Ionicons color={theme.colors.textMuted} name="close-circle" size={18} />
+                                  </Pressable>
+                                ) : null}
+                              </View>
+                            </View>
+                          </View>
+                        </>
                       ) : null}
                     </View>
                   ) : null}
@@ -2653,6 +3146,12 @@ export function QuickActionScreen() {
                       </View>
                       <Text style={styles.reviewCustomerMethod}>{isPickupDelivery ? "Antar Jemput" : "Datang Sendiri"}</Text>
                     </View>
+                    {isPickupDelivery ? (
+                      <View style={styles.reviewScheduleStack}>
+                        <Text style={styles.reviewScheduleText}>Jemput: {pickupScheduleInput.trim() || "Belum diatur"}</Text>
+                        <Text style={styles.reviewScheduleText}>Antar: {deliveryScheduleInput.trim() || "Belum diatur"}</Text>
+                      </View>
+                    ) : null}
                   </AppPanel>
 
                   <AppPanel style={[styles.summaryPanel, styles.summaryTotalPanel]}>
@@ -2981,11 +3480,11 @@ export function QuickActionScreen() {
                     </Pressable>
                   </View>
 
-                </View>
-              ) : null}
+                  </View>
+                ) : null}
 
-              {step === "payment" ? (
-                <View style={styles.sectionWrap}>
+                {step === "payment" ? (
+                  <View style={styles.sectionWrap}>
                   <View style={styles.stepHeader}>
                     <View style={styles.stepHeaderIconWrap}>
                       <Ionicons color={theme.colors.info} name="wallet-outline" size={16} />
@@ -3051,43 +3550,76 @@ export function QuickActionScreen() {
                       <Text style={styles.reviewPromoHint}>Pesanan disimpan sebagai bayar nanti dengan sisa tagihan {formatMoney(total)}.</Text>
                     )}
                   </AppPanel>
+                  </View>
+                ) : null}
                 </View>
-              ) : null}
-              </View>
+              </ScrollView>
 
-              <View style={styles.panelFooterDivider} />
-              {primaryDisabledHint ? <Text style={styles.panelFooterHint}>{primaryDisabledHint}</Text> : null}
-              <View style={[styles.panelFooterActions, step === "review" || step === "payment" ? styles.panelFooterActionsReview : null]}>
-                <View style={styles.panelFooterActionItem}>
-                  <AppButton leftElement={<Ionicons color={theme.colors.textPrimary} name={secondaryButtonIconName} size={18} />} onPress={previousStep} title={secondaryButtonTitle} variant="ghost" />
-                </View>
-                <View style={styles.panelFooterActionItem}>
-                  <AppButton
-                    disabled={primaryDisabled}
-                    leftElement={<Ionicons color={theme.colors.primaryContrast} name={step === "payment" ? "save-outline" : "arrow-forward-outline"} size={18} />}
-                    loading={submitting && step === "payment"}
-                    onPress={handlePrimaryAction}
-                    title={primaryButtonTitle}
-                  />
+              <View style={styles.createFormFooterDock}>
+                <View style={styles.panelFooterDivider} />
+                {primaryDisabledHint ? <Text style={styles.panelFooterHint}>{primaryDisabledHint}</Text> : null}
+                <View style={[styles.panelFooterActions, step === "review" || step === "payment" ? styles.panelFooterActionsReview : null]}>
+                  <View style={styles.panelFooterActionItem}>
+                    <AppButton leftElement={<Ionicons color={theme.colors.textPrimary} name={secondaryButtonIconName} size={18} />} onPress={previousStep} title={secondaryButtonTitle} variant="ghost" />
+                  </View>
+                  <View style={styles.panelFooterActionItem}>
+                    <AppButton
+                      disabled={primaryDisabled}
+                      leftElement={<Ionicons color={theme.colors.primaryContrast} name={step === "payment" ? "save-outline" : "arrow-forward-outline"} size={18} />}
+                      loading={submitting && step === "payment"}
+                      onPress={handlePrimaryAction}
+                      title={primaryButtonTitle}
+                    />
+                  </View>
                 </View>
               </View>
             </AppPanel>
-          )}
+          </View>
+        )}
 
-          {actionMessage ? (
-            <View style={styles.successWrap}>
-              <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={16} />
-              <Text style={styles.successText}>{actionMessage}</Text>
-            </View>
-          ) : null}
+        {showCreateForm && (actionMessage || errorMessage) ? (
+          <View pointerEvents="none" style={styles.createFormFloatingAlertDock}>
+            {messageBanners}
+          </View>
+        ) : null}
 
-          {errorMessage ? (
-            <View style={styles.errorWrap}>
-              <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
-              <Text style={styles.errorText}>{errorMessage}</Text>
-            </View>
-          ) : null}
-        </ScrollView>
+        <Modal animationType="fade" onRequestClose={closeSchedulePicker} transparent visible={schedulePickerField !== null}>
+          <Pressable onPress={closeSchedulePicker} style={[styles.scheduleModalBackdrop, { paddingBottom: insets.bottom + theme.spacing.md }]}>
+            <Pressable onPress={(event) => event.stopPropagation()} style={styles.scheduleModalCard}>
+              <View style={styles.scheduleModalHandle} />
+              <Text style={styles.scheduleModalTitle}>{schedulePickerField === "pickup" ? "Atur Jadwal Jemput" : "Atur Jadwal Antar"}</Text>
+              <Text style={styles.scheduleModalHint}>Pilih tanggal tanpa mengetik manual.</Text>
+
+              <View style={styles.scheduleModalSection}>
+                <Text style={styles.scheduleModalSectionTitle}>Tanggal</Text>
+                <ScrollView contentContainerStyle={styles.scheduleOptionRow} horizontal showsHorizontalScrollIndicator={false}>
+                  {scheduleDateOptions.map((option) => {
+                    const active = option.token === schedulePickerDateToken;
+                    return (
+                      <Pressable
+                        key={option.token}
+                        onPress={() => setSchedulePickerDateToken(option.token)}
+                        style={({ pressed }) => [styles.scheduleOptionChip, active ? styles.scheduleOptionChipActive : null, pressed ? styles.pressed : null]}
+                      >
+                        <Text style={[styles.scheduleOptionChipTitle, active ? styles.scheduleOptionChipTitleActive : null]}>{option.dayLabel}</Text>
+                        <Text style={[styles.scheduleOptionChipMeta, active ? styles.scheduleOptionChipMetaActive : null]}>{option.dateLabel}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+
+              <View style={styles.scheduleModalActionRow}>
+                <Pressable onPress={closeSchedulePicker} style={({ pressed }) => [styles.scheduleModalGhostButton, pressed ? styles.pressed : null]}>
+                  <Text style={styles.scheduleModalGhostButtonText}>Batal</Text>
+                </Pressable>
+                <Pressable onPress={applySchedulePicker} style={({ pressed }) => [styles.scheduleModalPrimaryButton, pressed ? styles.pressed : null]}>
+                  <Text style={styles.scheduleModalPrimaryButtonText}>Pakai Jadwal</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
 
         <Modal animationType="fade" onRequestClose={closeExitDraftModal} transparent visible={exitDraftModalVisible}>
           <Pressable onPress={closeExitDraftModal} style={[styles.exitModalBackdrop, { paddingBottom: insets.bottom + theme.spacing.md }]}>
@@ -3155,6 +3687,17 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     contentCreateForm: {
       paddingBottom: 0,
     },
+    createFormViewport: {
+      flex: 1,
+    },
+    createFormFloatingAlertDock: {
+      position: "absolute",
+      top: contentTop,
+      left: contentHorizontal,
+      right: contentHorizontal,
+      gap: theme.spacing.sm,
+      zIndex: 8,
+    },
     bodyHeader: {
       gap: 0,
     },
@@ -3188,6 +3731,14 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
     createFormPanel: {
       minHeight: 0,
+      flex: 1,
+      gap: 0,
+    },
+    createFormHeaderDock: {
+      gap: theme.spacing.xs,
+      paddingBottom: theme.spacing.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
     },
     actionList: {
       gap: theme.spacing.sm,
@@ -3216,13 +3767,26 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       backgroundColor: theme.colors.info,
     },
     panelBody: {
-      flex: 1,
       gap: theme.spacing.xs,
+    },
+    panelBodyScroll: {
+      flex: 1,
+      marginTop: theme.spacing.sm,
+    },
+    panelBodyScrollContent: {
+      paddingBottom: theme.spacing.sm,
+    },
+    createFormFooterDock: {
+      gap: theme.spacing.xs,
+      paddingTop: theme.spacing.sm,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
     },
     panelFooterDivider: {
       height: 1,
       backgroundColor: theme.colors.border,
-      marginTop: theme.spacing.xs,
+      marginTop: 0,
     },
     panelFooterHint: {
       color: theme.colors.warning,
@@ -3667,6 +4231,68 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontSize: 12,
       lineHeight: 14,
     },
+    deliveryScheduleGrid: {
+      gap: 8,
+    },
+    deliveryScheduleCard: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+      gap: 5,
+    },
+    deliveryScheduleLabel: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12.5,
+      lineHeight: 15,
+    },
+    deliveryScheduleAddress: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 15,
+    },
+    deliveryScheduleAddressMuted: {
+      color: theme.colors.textMuted,
+    },
+    deliveryScheduleActionRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    deliverySchedulePickerButton: {
+      flex: 1,
+      minHeight: 38,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.inputBg,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    deliverySchedulePickerValue: {
+      flex: 1,
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12.5,
+      lineHeight: 16,
+    },
+    deliverySchedulePickerPlaceholder: {
+      color: theme.colors.textMuted,
+    },
+    deliveryScheduleClearButton: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+    },
     customerInsightStack: {
       gap: 8,
     },
@@ -4069,6 +4695,16 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontFamily: theme.fonts.semibold,
       fontSize: 12,
       lineHeight: 14,
+    },
+    reviewScheduleStack: {
+      gap: 3,
+      paddingTop: 4,
+    },
+    reviewScheduleText: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 15,
     },
     summaryItemList: {
       gap: 5,
@@ -4481,6 +5117,127 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
     footerActionPrimaryCompact: {
       flex: 1,
+    },
+    scheduleModalBackdrop: {
+      flex: 1,
+      justifyContent: "flex-end",
+      backgroundColor: theme.mode === "dark" ? "rgba(4, 10, 20, 0.78)" : "rgba(9, 16, 29, 0.4)",
+      paddingHorizontal: contentHorizontal,
+    },
+    scheduleModalCard: {
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.xl,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: isTablet ? 18 : 15,
+      paddingTop: 12,
+      paddingBottom: 14,
+      gap: 10,
+      shadowColor: "#000",
+      shadowOpacity: theme.mode === "dark" ? 0.42 : 0.18,
+      shadowOffset: { width: 0, height: 12 },
+      shadowRadius: 20,
+      elevation: 16,
+    },
+    scheduleModalHandle: {
+      alignSelf: "center",
+      width: 42,
+      height: 4,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.mode === "dark" ? "#35506a" : "#d3e4f4",
+      marginBottom: 2,
+    },
+    scheduleModalTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.heavy,
+      fontSize: 16,
+      lineHeight: 21,
+    },
+    scheduleModalHint: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 13,
+      lineHeight: 17,
+    },
+    scheduleModalSection: {
+      gap: 7,
+    },
+    scheduleModalSectionTitle: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12.5,
+    },
+    scheduleOptionRow: {
+      gap: 8,
+      paddingRight: theme.spacing.md,
+    },
+    scheduleOptionChip: {
+      minWidth: 74,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 2,
+    },
+    scheduleOptionChipActive: {
+      borderColor: theme.colors.info,
+      backgroundColor: theme.colors.primarySoft,
+    },
+    scheduleOptionChipTitle: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+    },
+    scheduleOptionChipTitleActive: {
+      color: theme.colors.info,
+    },
+    scheduleOptionChipMeta: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+    },
+    scheduleOptionChipMetaActive: {
+      color: theme.colors.info,
+    },
+    scheduleModalActionRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingTop: 4,
+    },
+    scheduleModalGhostButton: {
+      flex: 1,
+      minHeight: 42,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surfaceSoft,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 12,
+    },
+    scheduleModalGhostButtonText: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13,
+    },
+    scheduleModalPrimaryButton: {
+      flex: 1,
+      minHeight: 42,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.primaryStrong,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 12,
+    },
+    scheduleModalPrimaryButtonText: {
+      color: theme.colors.primaryContrast,
+      fontFamily: theme.fonts.bold,
+      fontSize: 13,
     },
     exitModalBackdrop: {
       flex: 1,

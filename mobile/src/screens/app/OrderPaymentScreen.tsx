@@ -9,6 +9,7 @@ import { AppButton } from "../../components/ui/AppButton";
 import { extractCustomerPhoneDigits } from "../../features/customers/customerPhone";
 import { addOrderPayment, getOrderDetail } from "../../features/orders/orderApi";
 import { buildOrderReceiptText, buildOrderWhatsAppMessage } from "../../features/orders/orderReceipt";
+import { DEFAULT_PRINTER_LOCAL_SETTINGS, getPrinterLocalSettings } from "../../features/settings/printerLocalSettingsStorage";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AppRootStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
@@ -19,6 +20,8 @@ type Navigation = NativeStackNavigationProp<AppRootStackParamList, "OrderPayment
 type PaymentRoute = RouteProp<AppRootStackParamList, "OrderPayment">;
 type PaymentMethodType = "cash" | "transfer" | "other";
 type Stage = "entry" | "result";
+
+const NOTICE_AUTO_HIDE_MS = 4000;
 
 interface ResultSummary {
   appliedAmount: number;
@@ -143,6 +146,18 @@ export function OrderPaymentScreen() {
     setPaymentMethodType(route.params.initialMethod ?? "cash");
   }, [detail?.id, dueAmount, route.params.initialAmount, route.params.initialMethod, stage]);
 
+  useEffect(() => {
+    if (!noticeMessage) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setNoticeMessage(null);
+    }, NOTICE_AUTO_HIDE_MS);
+
+    return () => clearTimeout(timeout);
+  }, [noticeMessage]);
+
   async function handleSubmit(): Promise<void> {
     if (!detail || submitting) {
       return;
@@ -203,9 +218,15 @@ export function OrderPaymentScreen() {
     setNoticeMessage(null);
 
     try {
+      const printerSettings = await getPrinterLocalSettings(selectedOutlet?.id).catch(() => DEFAULT_PRINTER_LOCAL_SETTINGS);
       await Share.share({
         title: kind === "production" ? "Nota Produksi Laundry" : "Nota Konsumen Laundry",
-        message: buildOrderReceiptText({ kind, order: detail, outletLabel }),
+        message: buildOrderReceiptText({
+          kind,
+          order: detail,
+          outletLabel,
+          paperWidth: printerSettings.paperWidth,
+        }),
       });
       setNoticeMessage(kind === "production" ? "Nota produksi siap dibagikan atau dicetak." : "Nota konsumen siap dibagikan atau dicetak.");
     } catch {
@@ -410,11 +431,12 @@ export function OrderPaymentScreen() {
               </Pressable>
             </View>
 
+          </ScrollView>
+          <View style={styles.resultFooterStack}>
             {errorMessage ? <View style={styles.errorBox}><Text style={styles.errorText}>{errorMessage}</Text></View> : null}
             {noticeMessage ? <View style={styles.noticeBox}><Text style={styles.noticeText}>{noticeMessage}</Text></View> : null}
-          </ScrollView>
-
-          <AppButton leftElement={<Ionicons color={theme.colors.primaryContrast} name="checkmark-outline" size={17} />} onPress={handleDone} title="Selesai" />
+            <AppButton leftElement={<Ionicons color={theme.colors.primaryContrast} name="checkmark-outline" size={17} />} onPress={handleDone} title="Selesai" />
+          </View>
         </>
       )}
     </AppScreen>
@@ -457,6 +479,7 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>, isTablet: boolean, 
     errorText: { color: theme.colors.danger, fontFamily: theme.fonts.medium, fontSize: isTablet ? 12 : 11 },
     noticeText: { color: theme.colors.success, fontFamily: theme.fonts.medium, fontSize: isTablet ? 12 : 11 },
     resultScroll: { gap: 12, paddingBottom: 6 },
+    resultFooterStack: { gap: 10 },
     resultIcon: { width: 64, height: 64, borderRadius: 999, backgroundColor: theme.mode === "dark" ? "rgba(39,174,96,0.14)" : "rgba(39,174,96,0.12)", alignItems: "center", justifyContent: "center", alignSelf: "center" },
     sectionTitle: { color: theme.colors.textPrimary, fontFamily: theme.fonts.bold, fontSize: isTablet ? 14 : 13 },
     actionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, borderWidth: 1, borderColor: theme.colors.border, borderRadius: theme.radii.md, backgroundColor: theme.colors.surfaceSoft, paddingHorizontal: 12, paddingVertical: 12 },

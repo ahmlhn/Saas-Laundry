@@ -12,6 +12,7 @@ import { extractCustomerPhoneDigits } from "../../features/customers/customerPho
 import { getOrderDetail, updateCourierStatus, updateLaundryStatus } from "../../features/orders/orderApi";
 import { buildOrderReceiptText, buildOrderWhatsAppMessage } from "../../features/orders/orderReceipt";
 import { formatStatusLabel, getNextCourierStatus, getNextLaundryStatus, resolveCourierTone, resolveLaundryTone } from "../../features/orders/orderStatus";
+import { DEFAULT_PRINTER_LOCAL_SETTINGS, getPrinterLocalSettings } from "../../features/settings/printerLocalSettingsStorage";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AppRootStackParamList, OrdersStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
@@ -161,6 +162,17 @@ function formatDelayLabel(diffMs: number): string {
   return `${Math.max(minutes, 1)} menit`;
 }
 
+function formatEstimatedDateTime(value: Date): string {
+  const weekday = new Intl.DateTimeFormat("id-ID", { weekday: "long" }).format(value);
+  const day = String(value.getDate()).padStart(2, "0");
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const year = String(value.getFullYear());
+  const hours = String(value.getHours()).padStart(2, "0");
+  const minutes = String(value.getMinutes()).padStart(2, "0");
+
+  return `${weekday}, ${day}-${month}-${year}, ${hours}.${minutes}`;
+}
+
 function hasAnyRole(roles: string[], allowList: string[]): boolean {
   return roles.some((role) => allowList.includes(role));
 }
@@ -194,6 +206,7 @@ export function OrderDetailScreen() {
   const pendingHistoryFocusRef = useRef(false);
 
   const roles = session?.roles ?? [];
+  const canEditOrder = hasAnyRole(roles, ["owner", "admin", "cashier"]);
   const canUpdateLaundry = hasAnyRole(roles, ["owner", "admin", "worker"]);
   const canUpdateCourier = hasAnyRole(roles, ["owner", "admin", "courier"]);
   const canManagePayment = hasAnyRole(roles, ["owner", "admin", "cashier"]);
@@ -284,6 +297,23 @@ export function OrderDetailScreen() {
       const next = !current;
       pendingHistoryFocusRef.current = next;
       return next;
+    });
+  }
+
+  function handleEditOrder(): void {
+    if (!detail || !rootNavigation) {
+      setActionMessage(null);
+      setErrorMessage("Editor pesanan tidak bisa dibuka dari halaman ini.");
+      return;
+    }
+
+    setActionMessage(null);
+    setErrorMessage(null);
+    rootNavigation.navigate("MainTabs", {
+      screen: "QuickActionTab",
+      params: {
+        editOrderId: detail.id,
+      },
     });
   }
 
@@ -425,26 +455,14 @@ export function OrderDetailScreen() {
 
         if (isLate) {
           return {
-            label: estimatedDate.toLocaleString("id-ID", {
-              year: "numeric",
-              month: "2-digit",
-              day: "2-digit",
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
+            label: formatEstimatedDateTime(estimatedDate),
             hint: `Terlambat ${formatDelayLabel(clockNow - estimatedDate.getTime())}`,
             isLate: true,
           };
         }
 
         return {
-          label: estimatedDate.toLocaleString("id-ID", {
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
+          label: formatEstimatedDateTime(estimatedDate),
           hint: durationDays !== null ? `Durasi layanan terlama ${durationDays === 1 ? "1 hari" : `${durationDays} hari`}` : "Estimasi dari data layanan.",
           isLate: false,
         };
@@ -489,13 +507,7 @@ export function OrderDetailScreen() {
     const estimatedDate = new Date(estimatedTimestamp);
     if (!isLaundryFinished && clockNow > estimatedTimestamp) {
       return {
-        label: estimatedDate.toLocaleString("id-ID", {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
+        label: formatEstimatedDateTime(estimatedDate),
         hint: `Terlambat ${formatDelayLabel(clockNow - estimatedTimestamp)}`,
         isLate: true,
       };
@@ -504,13 +516,7 @@ export function OrderDetailScreen() {
     const dayLabel = maxDurationDays === 1 ? "1 hari" : `${maxDurationDays} hari`;
 
     return {
-      label: estimatedDate.toLocaleString("id-ID", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      label: formatEstimatedDateTime(estimatedDate),
       hint: `Durasi layanan terlama ${dayLabel}`,
       isLate: false,
     };
@@ -600,10 +606,12 @@ export function OrderDetailScreen() {
     setActionMessage(null);
 
     try {
+      const printerSettings = await getPrinterLocalSettings(selectedOutlet?.id).catch(() => DEFAULT_PRINTER_LOCAL_SETTINGS);
       const receiptText = buildOrderReceiptText({
         kind,
         order: detail,
         outletLabel,
+        paperWidth: printerSettings.paperWidth,
       });
       await Share.share({
         title: kind === "production" ? "Nota Produksi Laundry" : "Nota Konsumen Laundry",
@@ -679,12 +687,12 @@ export function OrderDetailScreen() {
             style={styles.flex}
           >
             <View style={styles.stack}>
-          <AppPanel style={styles.heroPanel}>
+          <AppPanel style={[styles.heroPanel, estimatedCompletionInfo.isLate ? styles.heroPanelLate : null]}>
             <View style={styles.heroTopRow}>
               <Pressable onPress={handleBackPress} style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}>
                 <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={18} />
               </Pressable>
-              <Text style={styles.screenTitle}>Antrean</Text>
+              <Text style={[styles.screenTitle, estimatedCompletionInfo.isLate ? styles.heroTitleLate : null]}>Antrean</Text>
               <View style={styles.heroActionRow}>
                 <Pressable
                   disabled={sharingCustomerReceipt || sharingProductionReceipt}
@@ -704,8 +712,8 @@ export function OrderDetailScreen() {
             </View>
 
             <View style={styles.orderHeaderRow}>
-              <Text style={styles.invoiceTitle}>{orderReference}</Text>
-              <Text style={styles.orderDateText}>{formatDateTime(detail.created_at)}</Text>
+              <Text style={[styles.invoiceTitle, estimatedCompletionInfo.isLate ? styles.heroTitleLate : null]}>{orderReference}</Text>
+              <Text style={[styles.orderDateText, estimatedCompletionInfo.isLate ? styles.heroMetaLate : null]}>{formatDateTime(detail.created_at)}</Text>
             </View>
 
             <View style={styles.customerCard}>
@@ -716,10 +724,10 @@ export function OrderDetailScreen() {
               </View>
               <View style={styles.customerActionRow}>
                 <Pressable disabled={openingWhatsApp} onPress={() => void handleOpenWhatsApp()} style={({ pressed }) => [styles.iconActionButton, pressed ? styles.heroIconButtonPressed : null]}>
-                  <Ionicons color={theme.colors.textMuted} name="logo-whatsapp" size={20} />
+                  <Ionicons color={theme.colors.success} name="logo-whatsapp" size={20} />
                 </Pressable>
                 <Pressable onPress={() => void handleOpenPhone()} style={({ pressed }) => [styles.iconActionButton, pressed ? styles.heroIconButtonPressed : null]}>
-                  <Ionicons color={theme.colors.textMuted} name="call-outline" size={20} />
+                  <Ionicons color={theme.colors.info} name="call-outline" size={20} />
                 </Pressable>
               </View>
             </View>
@@ -733,22 +741,20 @@ export function OrderDetailScreen() {
             </View>
           </AppPanel>
 
-          <AppPanel style={styles.summaryPanel}>
-            <Pressable onPress={() => setShowDeliveryInfo((current) => !current)} style={({ pressed }) => [styles.sectionHeaderRow, styles.sectionHeaderButton, pressed ? styles.heroIconButtonPressed : null]}>
-              <Text style={styles.sectionTitle}>Informasi Antar / Jemput</Text>
-              <Ionicons color={theme.colors.textSecondary} name={showDeliveryInfo ? "chevron-up" : "chevron-down"} size={18} />
-            </Pressable>
-            {showDeliveryInfo ? (
-              detail.is_pickup_delivery ? (
+          {detail.is_pickup_delivery ? (
+            <AppPanel style={styles.summaryPanel}>
+              <Pressable onPress={() => setShowDeliveryInfo((current) => !current)} style={({ pressed }) => [styles.sectionHeaderRow, styles.sectionHeaderButton, pressed ? styles.heroIconButtonPressed : null]}>
+                <Text style={styles.sectionTitle}>Informasi Antar / Jemput</Text>
+                <Ionicons color={theme.colors.textSecondary} name={showDeliveryInfo ? "chevron-up" : "chevron-down"} size={18} />
+              </Pressable>
+              {showDeliveryInfo ? (
                 <>
                   <Text style={styles.noteHint}>Jemput: {pickupAddress ?? "-"}{pickupSchedule ? ` • ${pickupSchedule}` : ""}</Text>
                   <Text style={styles.noteHint}>Antar: {deliveryAddress ?? "-"}{deliverySchedule ? ` • ${deliverySchedule}` : ""}</Text>
                 </>
-              ) : (
-                <Text style={styles.noteHint}>Order ini tidak memakai layanan antar / jemput.</Text>
-              )
-            ) : null}
-          </AppPanel>
+              ) : null}
+            </AppPanel>
+          ) : null}
 
           <View>
             <AppPanel style={styles.summaryPanel}>
@@ -801,7 +807,11 @@ export function OrderDetailScreen() {
           <AppPanel>
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionTitle}>Detail Pesanan</Text>
-              <Text style={styles.sectionLink}>Edit</Text>
+              {canEditOrder ? (
+                <Pressable hitSlop={6} onPress={handleEditOrder} style={({ pressed }) => [styles.sectionLinkButton, pressed ? styles.heroIconButtonPressed : null]}>
+                  <Text style={styles.sectionLink}>Edit</Text>
+                </Pressable>
+              ) : null}
             </View>
             <Text style={styles.sectionCaption}>
               {itemCount} item · Qty {formatCompactNumber(totalQty)} · {formatCompactNumber(totalWeight)} kg
@@ -828,16 +838,16 @@ export function OrderDetailScreen() {
 
             <View style={styles.quickIconRow}>
               <Pressable disabled={sharingCustomerReceipt || sharingProductionReceipt} onPress={() => void handleShareReceipt("production")} style={({ pressed }) => [styles.iconActionButton, pressed ? styles.heroIconButtonPressed : null]}>
-                <Ionicons color={theme.colors.textMuted} name="print-outline" size={18} />
+                <Ionicons color={theme.colors.info} name="print-outline" size={18} />
               </Pressable>
               <Pressable disabled={sharingCustomerReceipt || sharingProductionReceipt} onPress={() => void handleShareReceipt("customer")} style={({ pressed }) => [styles.iconActionButton, pressed ? styles.heroIconButtonPressed : null]}>
-                <Ionicons color={theme.colors.textMuted} name="receipt-outline" size={18} />
+                <Ionicons color={theme.colors.info} name="receipt-outline" size={18} />
               </Pressable>
               <Pressable disabled={openingWhatsApp} onPress={() => void handleOpenWhatsApp()} style={({ pressed }) => [styles.iconActionButton, pressed ? styles.heroIconButtonPressed : null]}>
-                <Ionicons color={theme.colors.textMuted} name="logo-whatsapp" size={18} />
+                <Ionicons color={theme.colors.success} name="logo-whatsapp" size={18} />
               </Pressable>
               <Pressable onPress={() => void handleOpenPhone()} style={({ pressed }) => [styles.iconActionButton, pressed ? styles.heroIconButtonPressed : null]}>
-                <Ionicons color={theme.colors.textMuted} name="call-outline" size={18} />
+                <Ionicons color={theme.colors.info} name="call-outline" size={18} />
               </Pressable>
               <Pressable onPress={handleToggleHistory} style={({ pressed }) => [styles.ghostPill, showHistory ? styles.ghostPillActive : null, pressed ? styles.heroIconButtonPressed : null]}>
                 <Text style={[styles.ghostPillText, showHistory ? styles.ghostPillTextActive : null]}>{showHistory ? "Tutup Riwayat" : "Riwayat"}</Text>
@@ -1035,6 +1045,10 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       backgroundColor: theme.colors.surface,
       borderColor: theme.colors.borderStrong,
     },
+    heroPanelLate: {
+      backgroundColor: theme.mode === "dark" ? "rgba(255,110,133,0.12)" : "rgba(255,244,244,0.98)",
+      borderColor: theme.colors.danger,
+    },
     heroTopRow: {
       flexDirection: "row",
       justifyContent: "space-between",
@@ -1048,6 +1062,9 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontSize: isTablet ? 20 : 18,
       textAlign: "center",
     },
+    heroTitleLate: {
+      color: theme.colors.danger,
+    },
     heroActionRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -1055,13 +1072,18 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
     heroIconButton: {
       borderWidth: 1,
-      borderColor: theme.colors.border,
+      borderColor: theme.mode === "dark" ? theme.colors.borderStrong : "rgba(19,104,188,0.18)",
       borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surface,
+      backgroundColor: theme.mode === "dark" ? theme.colors.surface : "#ffffff",
       width: 36,
       height: 36,
       alignItems: "center",
       justifyContent: "center",
+      shadowColor: theme.shadows.color,
+      shadowOpacity: theme.mode === "dark" ? 0.14 : 0.06,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 1,
     },
     heroIconButtonPressed: {
       opacity: 0.82,
@@ -1103,6 +1125,9 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontSize: 12,
       textAlign: "right",
     },
+    heroMetaLate: {
+      color: theme.colors.danger,
+    },
     customerCard: {
       flexDirection: "row",
       alignItems: "center",
@@ -1132,11 +1157,16 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       width: 38,
       height: 38,
       borderWidth: 1,
-      borderColor: theme.colors.border,
+      borderColor: theme.mode === "dark" ? theme.colors.borderStrong : "rgba(19,104,188,0.18)",
       borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surfaceSoft,
+      backgroundColor: theme.mode === "dark" ? theme.colors.surface : "#ffffff",
       alignItems: "center",
       justifyContent: "center",
+      shadowColor: theme.shadows.color,
+      shadowOpacity: theme.mode === "dark" ? 0.14 : 0.06,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 1,
     },
     customerText: {
       color: theme.colors.textSecondary,
@@ -1448,6 +1478,13 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     itemList: {
       gap: theme.spacing.xs,
     },
+    sectionLinkButton: {
+      minHeight: 28,
+      paddingHorizontal: 4,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: theme.radii.sm,
+    },
     sectionLink: {
       color: theme.colors.info,
       fontFamily: theme.fonts.semibold,
@@ -1510,9 +1547,9 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       minHeight: 36,
       marginLeft: "auto",
       borderWidth: 1,
-      borderColor: theme.colors.border,
+      borderColor: theme.mode === "dark" ? theme.colors.borderStrong : "rgba(19,104,188,0.18)",
       borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surfaceSoft,
+      backgroundColor: theme.mode === "dark" ? theme.colors.surface : "#ffffff",
       paddingHorizontal: 15,
       alignItems: "center",
       justifyContent: "center",
@@ -1522,7 +1559,7 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       backgroundColor: theme.colors.primarySoft,
     },
     ghostPillText: {
-      color: theme.colors.textMuted,
+      color: theme.colors.textSecondary,
       fontFamily: theme.fonts.semibold,
       fontSize: 12,
     },

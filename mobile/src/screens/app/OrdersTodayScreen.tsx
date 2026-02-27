@@ -10,7 +10,7 @@ import { AppPanel } from "../../components/ui/AppPanel";
 import { AppSkeletonBlock } from "../../components/ui/AppSkeletonBlock";
 import { StatusPill } from "../../components/ui/StatusPill";
 import { listOrders } from "../../features/orders/orderApi";
-import { ORDER_BUCKETS, countOrdersByBucket, type OrderBucket, resolveOrderBucket } from "../../features/orders/orderBuckets";
+import { ORDER_BUCKETS, countOrdersByBucket, normalizeOrderBucket, type OrderBucket, resolveOrderBucket } from "../../features/orders/orderBuckets";
 import { formatStatusLabel, resolveLaundryTone } from "../../features/orders/orderStatus";
 import { toDateToken } from "../../lib/dateTime";
 import { getApiErrorMessage } from "../../lib/httpClient";
@@ -161,7 +161,7 @@ export function OrdersTodayScreen() {
   const [limit, setLimit] = useState(INITIAL_LIMIT);
   const [hasMore, setHasMore] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [activeBucket, setActiveBucket] = useState<OrderBucket>(route.params?.initialBucket ?? "validasi");
+  const [activeBucket, setActiveBucket] = useState<OrderBucket>(normalizeOrderBucket(route.params?.initialBucket));
   const [isFilterRaised, setIsFilterRaised] = useState(false);
   const [completedRangeMode, setCompletedRangeMode] = useState<CompletedRangeMode>("month");
   const [isCompletedFilterOpen, setIsCompletedFilterOpen] = useState(false);
@@ -195,7 +195,7 @@ export function OrdersTodayScreen() {
 
   useEffect(() => {
     if (route.params?.initialBucket) {
-      setActiveBucket(route.params.initialBucket);
+      setActiveBucket(normalizeOrderBucket(route.params.initialBucket));
     }
   }, [route.params?.initialBucket]);
 
@@ -371,8 +371,6 @@ export function OrdersTodayScreen() {
 
   const bucketCounts = useMemo(() => countOrdersByBucket(orders), [orders]);
 
-  const pendingCount = useMemo(() => bucketCounts.validasi + bucketCounts.antrian + bucketCounts.proses, [bucketCounts]);
-  const dueCount = useMemo(() => orders.filter((order) => order.due_amount > 0).length, [orders]);
   const completedRangeLabel = useMemo(() => {
     if (completedRangeMode === "today") {
       return "Hari Ini";
@@ -625,28 +623,14 @@ export function OrdersTodayScreen() {
           <View style={styles.heroHead}>
             <View style={styles.heroTitleWrap}>
               <Text style={styles.headerTitle}>Pesanan</Text>
-              <Text style={styles.headerSubtitle}>{titleLine}</Text>
+              <View style={styles.headerSubtitleRow}>
+                <Ionicons color="rgba(240,249,255,0.9)" name="storefront-outline" size={14} />
+                <Text style={styles.headerSubtitle}>{titleLine}</Text>
+              </View>
             </View>
             <View style={styles.totalBadge}>
               <Ionicons color="#ecf8ff" name="receipt-outline" size={12} />
-              <Text style={styles.totalBadgeText}>{orders.length}</Text>
-            </View>
-          </View>
-
-          <View style={styles.heroMetrics}>
-            <View style={styles.heroMetricItem}>
-              <Text style={styles.heroMetricValue}>{bucketedOrders.length}</Text>
-              <Text style={styles.heroMetricLabel}>Ditampilkan</Text>
-            </View>
-            <View style={styles.heroDivider} />
-            <View style={styles.heroMetricItem}>
-              <Text style={styles.heroMetricValue}>{pendingCount}</Text>
-              <Text style={styles.heroMetricLabel}>Perlu Aksi</Text>
-            </View>
-            <View style={styles.heroDivider} />
-            <View style={styles.heroMetricItem}>
-              <Text style={styles.heroMetricValue}>{dueCount}</Text>
-              <Text style={styles.heroMetricLabel}>Belum Lunas</Text>
+              <Text style={styles.totalBadgeText}>{bucketedOrders.length}</Text>
             </View>
           </View>
         </View>
@@ -847,7 +831,7 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
       overflow: "hidden",
       borderWidth: 1,
       borderColor: theme.mode === "dark" ? "rgba(91,174,255,0.35)" : "rgba(83,166,248,0.32)",
-      minHeight: isTablet ? 164 : isCompactLandscape ? 134 : isLandscape ? 148 : 158,
+      minHeight: isTablet ? 110 : isCompactLandscape ? 88 : isLandscape ? 94 : 102,
       backgroundColor: "#1368bc",
     },
     heroLayerPrimary: {
@@ -874,13 +858,15 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
       borderColor: "rgba(255,255,255,0.12)",
     },
     heroContent: {
+      flex: 1,
       paddingHorizontal: isCompactLandscape ? theme.spacing.md : theme.spacing.lg,
       paddingVertical: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
-      gap: isCompactLandscape ? 8 : theme.spacing.sm,
+      gap: isCompactLandscape ? 6 : 8,
+      justifyContent: "center",
     },
     heroHead: {
       flexDirection: "row",
-      alignItems: "flex-start",
+      alignItems: "center",
       justifyContent: "space-between",
       gap: theme.spacing.sm,
     },
@@ -889,6 +875,12 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
       minWidth: 0,
       gap: 1,
     },
+    headerSubtitleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      minWidth: 0,
+    },
     headerTitle: {
       color: "#ffffff",
       fontFamily: theme.fonts.heavy,
@@ -896,10 +888,11 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
       lineHeight: isTablet ? 37 : isCompactLandscape ? 29 : 33,
     },
     headerSubtitle: {
+      flex: 1,
       color: "rgba(240,249,255,0.9)",
-      fontFamily: theme.fonts.medium,
-      fontSize: isCompactLandscape ? 11 : 12,
-      lineHeight: isCompactLandscape ? 15 : 17,
+      fontFamily: theme.fonts.semibold,
+      fontSize: isTablet ? 14 : isCompactLandscape ? 12 : 13,
+      lineHeight: isTablet ? 19 : isCompactLandscape ? 16 : 18,
     },
     totalBadge: {
       flexDirection: "row",
@@ -917,50 +910,22 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
       fontFamily: theme.fonts.bold,
       fontSize: isCompactLandscape ? 10.5 : 11.5,
     },
-    heroMetrics: {
-      flexDirection: "row",
-      alignItems: "stretch",
-      backgroundColor: "rgba(5,32,61,0.16)",
-      borderRadius: theme.radii.md,
-      borderWidth: 1,
-      borderColor: "rgba(255,255,255,0.2)",
-      overflow: "hidden",
-    },
-    heroMetricItem: {
-      flex: 1,
-      paddingHorizontal: isCompactLandscape ? 8 : 10,
-      paddingVertical: isCompactLandscape ? 6 : 8,
-      alignItems: "center",
-      gap: 1,
-    },
-    heroMetricValue: {
-      color: "#ffffff",
-      fontFamily: theme.fonts.heavy,
-      fontSize: isTablet ? 20 : isCompactLandscape ? 16 : 18,
-      lineHeight: isTablet ? 25 : isCompactLandscape ? 20 : 22,
-    },
-    heroMetricLabel: {
-      color: "rgba(228,244,255,0.9)",
-      fontFamily: theme.fonts.semibold,
-      fontSize: isCompactLandscape ? 10.5 : 11,
-      textTransform: "uppercase",
-      letterSpacing: 0.4,
-    },
-    heroDivider: {
-      width: 1,
-      backgroundColor: "rgba(255,255,255,0.2)",
-    },
     searchWrap: {
       flexDirection: "row",
       alignItems: "center",
       borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
+      borderColor: theme.mode === "dark" ? theme.colors.borderStrong : "rgba(19,104,188,0.18)",
       borderRadius: theme.radii.md,
-      backgroundColor: theme.colors.inputBg,
+      backgroundColor: theme.mode === "dark" ? theme.colors.surface : "#ffffff",
       paddingLeft: 11,
       paddingRight: 8,
       minHeight: isCompactLandscape ? 42 : 46,
       gap: 4,
+      shadowColor: theme.shadows.color,
+      shadowOpacity: theme.mode === "dark" ? 0.18 : 0.08,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: 2,
     },
     searchInput: {
       flex: 1,

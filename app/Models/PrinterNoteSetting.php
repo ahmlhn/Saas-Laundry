@@ -26,6 +26,9 @@ class PrinterNoteSetting extends Model
         'footer_note',
         'share_enota',
         'show_customer_receipt',
+        'paper_width',
+        'auto_cut',
+        'auto_open_cash_drawer',
         'logo_path',
     ];
 
@@ -34,6 +37,8 @@ class PrinterNoteSetting extends Model
         return [
             'share_enota' => 'boolean',
             'show_customer_receipt' => 'boolean',
+            'auto_cut' => 'boolean',
+            'auto_open_cash_drawer' => 'boolean',
         ];
     }
 
