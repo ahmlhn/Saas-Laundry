@@ -8,6 +8,7 @@ import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { createService, updateService } from "../../features/services/serviceApi";
+import { getDefaultDurationDays } from "../../features/services/defaultDuration";
 import { hasAnyRole } from "../../lib/accessControl";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AccountStackParamList } from "../../navigation/types";
@@ -40,10 +41,11 @@ export function ParfumItemFormScreen() {
   const isEdit = mode === "edit";
   const serviceType = route.params.serviceType;
   const item = route.params.item;
+  const defaultDurationDays = getDefaultDurationDays(serviceType);
 
   const [nameInput, setNameInput] = useState(item?.name ?? "");
   const [basePriceInput, setBasePriceInput] = useState(item ? String(item.base_price_amount) : "");
-  const [durationInput, setDurationInput] = useState(item?.duration_days ? String(item.duration_days) : "");
+  const [durationInput, setDurationInput] = useState(item?.duration_days ? String(item.duration_days) : String(defaultDurationDays));
   const [displayUnit, setDisplayUnit] = useState<ServiceDisplayUnit>(
     item?.display_unit === "kg" || item?.display_unit === "pcs" || item?.display_unit === "satuan" ? item.display_unit : "satuan"
   );
@@ -153,11 +155,12 @@ export function ParfumItemFormScreen() {
             editable={!saving && canManage}
             keyboardType="number-pad"
             onChangeText={(text) => setDurationInput(normalizeDigits(text))}
-            placeholder="Opsional"
+            placeholder={`Contoh: ${defaultDurationDays}`}
             placeholderTextColor={theme.colors.textMuted}
             style={styles.input}
             value={durationInput}
           />
+          <Text style={styles.fieldHint}>Default otomatis {defaultDurationDays} hari, tetap bisa diubah oleh admin.</Text>
 
           <Text style={styles.label}>Satuan Tampil</Text>
           <View style={styles.segmentRow}>
@@ -251,6 +254,12 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.semibold,
       fontSize: 13,
+    },
+    fieldHint: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+      lineHeight: 16,
     },
     input: {
       borderWidth: 1,

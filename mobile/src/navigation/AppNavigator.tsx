@@ -6,6 +6,7 @@ import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { Pressable, StyleSheet, View, useWindowDimensions, type GestureResponderEvent } from "react-native";
 import { HomeDashboardScreen } from "../screens/app/HomeDashboardScreen";
 import { OrderDetailScreen } from "../screens/app/OrderDetailScreen";
+import { OrderPaymentScreen } from "../screens/app/OrderPaymentScreen";
 import { OrdersTodayScreen } from "../screens/app/OrdersTodayScreen";
 import { OutletSelectScreen } from "../screens/app/OutletSelectScreen";
 import { useSession } from "../state/SessionContext";
@@ -301,7 +302,17 @@ export function AppNavigator() {
       {isPlatformWorkspace ? (
         <RootStack.Screen name="PlatformHub" component={PlatformSubscriptionHubScreen} />
       ) : selectedOutlet ? (
-        <RootStack.Screen name="MainTabs" component={MainTabsNavigator} />
+        <>
+          <RootStack.Screen name="MainTabs" component={MainTabsNavigator} />
+          <RootStack.Screen
+            name="OrderPayment"
+            component={OrderPaymentScreen}
+            options={{
+              presentation: "fullScreenModal",
+              animation: "slide_from_bottom",
+            }}
+          />
+        </>
       ) : (
         <RootStack.Screen name="OutletSelect" component={OutletSelectScreen} />
       )}

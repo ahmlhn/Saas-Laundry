@@ -8,6 +8,7 @@ import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { createService, updateService } from "../../features/services/serviceApi";
+import { getDefaultDurationDays } from "../../features/services/defaultDuration";
 import { hasAnyRole } from "../../lib/accessControl";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AccountStackParamList } from "../../navigation/types";
@@ -27,6 +28,10 @@ function normalizePriceInput(input: string): string {
   return input.replace(/\D+/g, "");
 }
 
+function normalizeDigitInput(input: string): string {
+  return input.replace(/[^\d]/g, "");
+}
+
 export function ServiceFormScreen() {
   const theme = useAppTheme();
   const { width, height } = useWindowDimensions();
@@ -43,10 +48,13 @@ export function ServiceFormScreen() {
   const canManage = hasAnyRole(roles, ["owner", "admin"]);
   const editingService = route.params.mode === "edit" ? route.params.service ?? null : null;
   const isEditMode = route.params.mode === "edit";
+  const serviceType = typeof editingService?.service_type === "string" ? editingService.service_type : "regular";
+  const defaultDurationDays = getDefaultDurationDays(serviceType);
 
   const [name, setName] = useState(editingService?.name ?? "");
   const [unitType, setUnitType] = useState<"kg" | "pcs">(editingService?.unit_type === "pcs" ? "pcs" : "kg");
   const [basePriceInput, setBasePriceInput] = useState(editingService ? String(editingService.base_price_amount) : "");
+  const [durationInput, setDurationInput] = useState(editingService?.duration_days ? String(editingService.duration_days) : String(defaultDurationDays));
   const [active, setActive] = useState(editingService?.active ?? true);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -70,6 +78,12 @@ export function ServiceFormScreen() {
       return;
     }
 
+    const parsedDuration = durationInput.trim() === "" ? null : Number.parseInt(normalizeDigitInput(durationInput), 10);
+    if (parsedDuration !== null && (!Number.isFinite(parsedDuration) || parsedDuration <= 0)) {
+      setErrorMessage("Durasi layanan tidak valid.");
+      return;
+    }
+
     if (isEditMode && !editingService) {
       setErrorMessage("Data layanan tidak ditemukan untuk mode edit.");
       return;
@@ -84,6 +98,7 @@ export function ServiceFormScreen() {
           name: trimmedName,
           unitType,
           basePriceAmount,
+          durationDays: parsedDuration,
           active,
         });
       } else {
@@ -91,6 +106,7 @@ export function ServiceFormScreen() {
           name: trimmedName,
           unitType,
           basePriceAmount,
+          durationDays: parsedDuration,
           active,
         });
       }
@@ -156,6 +172,19 @@ export function ServiceFormScreen() {
               value={basePriceInput}
             />
             <Text style={styles.pricePreview}>Preview: {formatMoney(basePriceAmount)}</Text>
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Durasi (hari)</Text>
+            <TextInput
+              keyboardType="number-pad"
+              onChangeText={(text) => setDurationInput(normalizeDigitInput(text))}
+              placeholder={`Contoh: ${defaultDurationDays}`}
+              placeholderTextColor={theme.colors.textMuted}
+              style={styles.input}
+              value={durationInput}
+            />
+            <Text style={styles.fieldHint}>Default otomatis {defaultDurationDays} hari, tetap bisa diubah oleh admin.</Text>
           </View>
 
           <View style={styles.fieldGroup}>
@@ -316,6 +345,12 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
+    },
+    fieldHint: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+      lineHeight: 16,
     },
     switchRow: {
       flexDirection: "row",

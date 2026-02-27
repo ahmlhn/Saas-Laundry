@@ -18,6 +18,7 @@ export type OrdersStackParamList = {
     | undefined;
   OrderDetail: {
     orderId: string;
+    returnToOrders?: boolean;
   };
 };
 
@@ -108,6 +109,13 @@ export type AppTabParamList = {
 
 export type AppRootStackParamList = {
   OutletSelect: undefined;
-  MainTabs: undefined;
+  MainTabs: NavigatorScreenParams<AppTabParamList> | undefined;
+  OrderPayment: {
+    orderId: string;
+    source: "create" | "detail";
+    flow?: "payment" | "receipt";
+    initialAmount?: number;
+    initialMethod?: "cash" | "transfer" | "other";
+  };
   PlatformHub: undefined;
 };

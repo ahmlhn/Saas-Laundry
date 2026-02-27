@@ -665,6 +665,13 @@ class SyncController extends Controller
             );
         }
 
+        if ($validated['status'] === 'completed' && (int) $order->due_amount > 0) {
+            throw new SyncRejectException(
+                'PAYMENT_REQUIRED',
+                'Tagihan pesanan belum lunas. Lunasi dulu sebelum menyelesaikan pesanan.',
+            );
+        }
+
         $order->forceFill([
             'laundry_status' => $validated['status'],
             'updated_by' => $user->id,
@@ -757,6 +764,13 @@ class SyncController extends Controller
 
         if ($validated['status'] === 'delivery_pending' && ! in_array($order->laundry_status, ['ready', 'completed'], true)) {
             throw new SyncRejectException('INVALID_TRANSITION', 'laundry_status must be ready before delivery_pending.');
+        }
+
+        if ($validated['status'] === 'delivered' && (int) $order->due_amount > 0) {
+            throw new SyncRejectException(
+                'PAYMENT_REQUIRED',
+                'Tagihan pesanan belum lunas. Lunasi dulu sebelum menyelesaikan pesanan.',
+            );
         }
 
         $order->forceFill([

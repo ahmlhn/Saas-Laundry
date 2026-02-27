@@ -99,7 +99,10 @@ interface ListOrdersParams {
   limit?: number;
   query?: string;
   date?: string;
+  dateFrom?: string;
+  dateTo?: string;
   timezone?: string;
+  statusScope?: "all" | "open" | "completed";
   forceRefresh?: boolean;
 }
 
@@ -138,8 +141,11 @@ export async function listOrders(params: ListOrdersParams): Promise<OrderSummary
   const limit = params.limit ?? 30;
   const query = params.query?.trim() ?? "";
   const date = params.date?.trim() ?? "";
+  const dateFrom = params.dateFrom?.trim() ?? "";
+  const dateTo = params.dateTo?.trim() ?? "";
   const timezone = params.timezone?.trim() ?? "";
-  const cacheKey = `orders:list:${params.outletId}:${limit}:${query}:${date}:${timezone}`;
+  const statusScope = params.statusScope ?? "all";
+  const cacheKey = `orders:list:${params.outletId}:${limit}:${query}:${statusScope}:${date}:${dateFrom}:${dateTo}:${timezone}`;
 
   if (!params.forceRefresh) {
     const cached = getCachedValue<OrderSummary[]>(cacheKey);
@@ -153,7 +159,10 @@ export async function listOrders(params: ListOrdersParams): Promise<OrderSummary
       outlet_id: params.outletId,
       limit,
       q: query || undefined,
+      status_scope: statusScope,
       date: date || undefined,
+      date_from: dateFrom || undefined,
+      date_to: dateTo || undefined,
       timezone: timezone || undefined,
     },
   });

@@ -230,6 +230,7 @@ class ServiceCatalogController extends Controller
 
         $unitType = (string) ($validated['unit_type'] ?? (($validated['display_unit'] ?? '') === 'kg' ? 'kg' : 'pcs'));
         $displayUnit = (string) ($validated['display_unit'] ?? $this->defaultDisplayUnit($unitType));
+        $durationDays = $this->resolveDurationDaysForCreate($serviceType, $validated);
 
         $packageFields = $this->normalizePackageFields($serviceType, $validated, null);
         if ($packageFields === null) {
@@ -248,7 +249,7 @@ class ServiceCatalogController extends Controller
             'unit_type' => $unitType,
             'display_unit' => $displayUnit,
             'base_price_amount' => (int) $validated['base_price_amount'],
-            'duration_days' => $validated['duration_days'] ?? null,
+            'duration_days' => $durationDays,
             'package_quota_value' => $packageFields['package_quota_value'],
             'package_quota_unit' => $packageFields['package_quota_unit'],
             'package_valid_days' => $packageFields['package_valid_days'],
@@ -385,6 +386,7 @@ class ServiceCatalogController extends Controller
 
         $nextUnitType = (string) ($validated['unit_type'] ?? $service->unit_type);
         $nextDisplayUnit = (string) ($validated['display_unit'] ?? $service->display_unit ?? $this->defaultDisplayUnit($nextUnitType));
+        $nextDurationDays = $this->resolveDurationDaysForUpdate($nextServiceType, $validated, $service);
         $packageFields = $this->normalizePackageFields($nextServiceType, $validated, $service);
 
         if ($packageFields === null) {
@@ -404,7 +406,7 @@ class ServiceCatalogController extends Controller
             'base_price_amount' => array_key_exists('base_price_amount', $validated)
                 ? (int) $validated['base_price_amount']
                 : (int) $service->base_price_amount,
-            'duration_days' => array_key_exists('duration_days', $validated) ? $validated['duration_days'] : $service->duration_days,
+            'duration_days' => $nextDurationDays,
             'package_quota_value' => $packageFields['package_quota_value'],
             'package_quota_unit' => $packageFields['package_quota_unit'],
             'package_valid_days' => $packageFields['package_valid_days'],
@@ -572,6 +574,46 @@ class ServiceCatalogController extends Controller
     private function defaultDisplayUnit(string $unitType): string
     {
         return $unitType === 'kg' ? 'kg' : 'pcs';
+    }
+
+    /**
+     * @param array<string, mixed> $validated
+     */
+    private function resolveDurationDaysForCreate(string $serviceType, array $validated): int
+    {
+        if (array_key_exists('duration_days', $validated) && $validated['duration_days'] !== null) {
+            return (int) $validated['duration_days'];
+        }
+
+        return $this->defaultDurationDays($serviceType);
+    }
+
+    /**
+     * @param array<string, mixed> $validated
+     */
+    private function resolveDurationDaysForUpdate(string $serviceType, array $validated, Service $existing): int
+    {
+        if (array_key_exists('duration_days', $validated)) {
+            if ($validated['duration_days'] !== null) {
+                return (int) $validated['duration_days'];
+            }
+
+            return $this->defaultDurationDays($serviceType);
+        }
+
+        if ($existing->duration_days !== null) {
+            return (int) $existing->duration_days;
+        }
+
+        return $this->defaultDurationDays($serviceType);
+    }
+
+    private function defaultDurationDays(string $serviceType): int
+    {
+        return match ($serviceType) {
+            'package', 'perfume' => 1,
+            default => 3,
+        };
     }
 
     /**

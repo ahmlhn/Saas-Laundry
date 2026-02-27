@@ -1139,6 +1139,16 @@ class OrderBoardController extends Controller
             ];
         }
 
+        if ($targetStatus === 'completed' && (int) $order->due_amount > 0) {
+            return [
+                'updated' => false,
+                'reason_code' => 'PAYMENT_REQUIRED',
+                'reason_label' => $this->bulkReasonLabel('PAYMENT_REQUIRED'),
+                'from' => $currentStatus,
+                'to' => $targetStatus,
+            ];
+        }
+
         $order->forceFill([
             'laundry_status' => $targetStatus,
             'updated_by' => $user->id,
@@ -1242,6 +1252,16 @@ class OrderBoardController extends Controller
                 'updated' => false,
                 'reason_code' => 'LAUNDRY_NOT_READY',
                 'reason_label' => $this->bulkReasonLabel('LAUNDRY_NOT_READY'),
+                'from' => $currentStatus,
+                'to' => $targetStatus,
+            ];
+        }
+
+        if ($targetStatus === 'delivered' && (int) $order->due_amount > 0) {
+            return [
+                'updated' => false,
+                'reason_code' => 'PAYMENT_REQUIRED',
+                'reason_label' => $this->bulkReasonLabel('PAYMENT_REQUIRED'),
                 'from' => $currentStatus,
                 'to' => $targetStatus,
             ];
@@ -1399,6 +1419,7 @@ class OrderBoardController extends Controller
             'NOT_PICKUP_DELIVERY' => 'Order bukan tipe pickup-delivery.',
             'COURIER_INVALID' => 'Courier target tidak valid atau tidak aktif.',
             'LAUNDRY_NOT_READY' => 'Laundry belum ready/completed untuk masuk delivery pending.',
+            'PAYMENT_REQUIRED' => 'Tagihan pesanan belum lunas. Lunasi dulu sebelum menyelesaikan pesanan.',
             'OUT_OF_SCOPE' => 'Order di luar scope tenant/outlet Anda.',
             'NOT_FOUND' => 'Order tidak ditemukan pada tenant ini.',
             'UNKNOWN_ACTION' => 'Action tidak dikenali.',

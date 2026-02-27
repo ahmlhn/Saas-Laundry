@@ -21,7 +21,7 @@ class MpwaProvider implements WaProviderDriver
         if ($resolved['api_key'] === '') {
             throw new WaProviderException(
                 reasonCode: 'CREDENTIALS_INVALID',
-                message: 'MPWA api_key/token wajib diisi.',
+                message: 'MPWA_API_KEY di .env wajib diisi.',
                 transient: false,
             );
         }
@@ -37,7 +37,7 @@ class MpwaProvider implements WaProviderDriver
         if ($resolved['base_url'] === '') {
             throw new WaProviderException(
                 reasonCode: 'CREDENTIALS_INVALID',
-                message: 'MPWA base_url wajib diisi.',
+                message: 'MPWA_BASE_URL di .env wajib diisi.',
                 transient: false,
             );
         }
@@ -60,7 +60,7 @@ class MpwaProvider implements WaProviderDriver
         if ($apiKey === '' || $sender === '' || $baseUrl === '') {
             throw new WaProviderException(
                 reasonCode: 'CREDENTIALS_INVALID',
-                message: 'Konfigurasi MPWA belum lengkap (api_key, sender, base_url).',
+                message: 'Konfigurasi MPWA belum lengkap (MPWA_API_KEY, sender, MPWA_BASE_URL).',
                 transient: false,
             );
         }
@@ -158,31 +158,16 @@ class MpwaProvider implements WaProviderDriver
      */
     private function resolveConfig(array $credentials): array
     {
-        $apiKey = $this->stringValue($credentials, ['api_key', 'token', 'apikey']);
         $sender = $this->stringValue($credentials, ['sender', 'device', 'device_id']);
-        $baseUrl = $this->stringValue($credentials, ['base_url', 'url']);
-        $sendPath = $this->stringValue($credentials, ['send_path', 'message_path']);
-        $timeoutFromCredential = $credentials['timeout_seconds'] ?? null;
-
-        if ($apiKey === '') {
-            $apiKey = trim((string) config('services.mpwa.api_key', ''));
-        }
+        $apiKey = trim((string) config('services.mpwa.api_key', ''));
+        $baseUrl = trim((string) config('services.mpwa.base_url', ''));
+        $sendPath = trim((string) config('services.mpwa.send_path', '/send-message'));
 
         if ($sender === '') {
             $sender = trim((string) config('services.mpwa.sender', ''));
         }
 
-        if ($baseUrl === '') {
-            $baseUrl = trim((string) config('services.mpwa.base_url', ''));
-        }
-
-        if ($sendPath === '') {
-            $sendPath = trim((string) config('services.mpwa.send_path', '/send-message'));
-        }
-
-        $timeoutSeconds = is_numeric($timeoutFromCredential)
-            ? max((int) $timeoutFromCredential, 5)
-            : max((int) config('services.mpwa.timeout_seconds', 15), 5);
+        $timeoutSeconds = max((int) config('services.mpwa.timeout_seconds', 15), 5);
 
         return [
             'api_key' => $apiKey,
@@ -296,4 +281,3 @@ class MpwaProvider implements WaProviderDriver
         return $current;
     }
 }
-

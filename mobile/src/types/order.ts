@@ -9,6 +9,11 @@ export interface OrderCourier {
   name: string;
 }
 
+export interface OrderItemServiceDetail {
+  id: string;
+  duration_days: number | null;
+}
+
 export interface OrderItemDetail {
   id: string;
   order_id: string;
@@ -21,6 +26,7 @@ export interface OrderItemDetail {
   subtotal_amount: number;
   created_at: string;
   updated_at: string;
+  service?: OrderItemServiceDetail | null;
 }
 
 export interface OrderPaymentDetail {
@@ -58,6 +64,9 @@ export interface OrderDetail extends OrderSummary {
   shipping_fee_amount?: number;
   discount_amount?: number;
   notes?: string | null;
+  estimated_completion_at?: string | null;
+  estimated_completion_duration_days?: number | null;
+  estimated_completion_is_late?: boolean;
   pickup?: Record<string, unknown> | null;
   delivery?: Record<string, unknown> | null;
   items?: OrderItemDetail[];

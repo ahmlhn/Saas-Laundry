@@ -98,7 +98,12 @@ class WaController extends Controller
             ->where('provider_id', $provider->id)
             ->first();
 
-        $credentials = $this->mergeCredentials($existingConfig?->credentials_json, (array) ($validated['credentials'] ?? []));
+        $incomingCredentials = $this->sanitizeIncomingCredentialsForProvider(
+            $provider->key,
+            (array) ($validated['credentials'] ?? [])
+        );
+        $credentials = $this->mergeCredentials($existingConfig?->credentials_json, $incomingCredentials);
+        $credentials = $this->enforceStoredCredentialPolicy($provider->key, $credentials);
         $requestedActive = (bool) ($validated['is_active'] ?? true);
 
         $driver = $this->providerRegistry->driverForKey($provider->key);
@@ -373,6 +378,79 @@ class WaController extends Controller
     }
 
     /**
+     * @param array<string, mixed> $incoming
+     * @return array<string, mixed>
+     */
+    private function sanitizeIncomingCredentialsForProvider(string $providerKey, array $incoming): array
+    {
+        if (strtolower($providerKey) !== 'mpwa') {
+            return $incoming;
+        }
+
+        return $this->dropCredentialKeys($incoming, [
+            'api_key',
+            'token',
+            'apikey',
+            'base_url',
+            'url',
+            'send_path',
+            'message_path',
+            'timeout_seconds',
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $credentials
+     * @return array<string, mixed>
+     */
+    private function enforceStoredCredentialPolicy(string $providerKey, array $credentials): array
+    {
+        if (strtolower($providerKey) !== 'mpwa') {
+            return $credentials;
+        }
+
+        return $this->dropCredentialKeys($credentials, [
+            'api_key',
+            'token',
+            'apikey',
+            'base_url',
+            'url',
+            'send_path',
+            'message_path',
+            'timeout_seconds',
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $credentials
+     * @param array<int, string> $blockedKeys
+     * @return array<string, mixed>
+     */
+    private function dropCredentialKeys(array $credentials, array $blockedKeys): array
+    {
+        $blocked = [];
+        foreach ($blockedKeys as $key) {
+            $blocked[strtolower($key)] = true;
+        }
+
+        $filtered = [];
+
+        foreach ($credentials as $key => $value) {
+            if (! is_string($key)) {
+                continue;
+            }
+
+            if (isset($blocked[strtolower($key)])) {
+                continue;
+            }
+
+            $filtered[$key] = $value;
+        }
+
+        return $filtered;
+    }
+
+    /**
      * @param array<string, mixed>|null $credentials
      */
     private function extractSenderFromCredentials(?array $credentials): ?string
@@ -410,7 +488,7 @@ class WaController extends Controller
             if ($isMpwaPartialSetup) {
                 return [
                     'ok' => false,
-                    'message' => 'Sender tersimpan. Lengkapi api_key dan base_url MPWA untuk mengaktifkan pengiriman.',
+                    'message' => 'Sender tersimpan. Lengkapi MPWA_API_KEY dan MPWA_BASE_URL di .env untuk mengaktifkan pengiriman.',
                 ];
             }
 

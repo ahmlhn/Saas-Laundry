@@ -47,7 +47,10 @@ class OrderController extends Controller
             'outlet_id' => ['required', 'uuid'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
             'q' => ['nullable', 'string', 'max:100'],
+            'status_scope' => ['nullable', 'string', 'in:all,open,completed'],
             'date' => ['nullable', 'date_format:Y-m-d'],
+            'date_from' => ['nullable', 'date_format:Y-m-d'],
+            'date_to' => ['nullable', 'date_format:Y-m-d'],
             'timezone' => ['nullable', 'timezone'],
         ]);
 
@@ -56,6 +59,32 @@ class OrderController extends Controller
             ->where('tenant_id', $user->tenant_id)
             ->where('outlet_id', $validated['outlet_id'])
             ->latest('created_at');
+
+        $statusScope = $validated['status_scope'] ?? 'all';
+        if ($statusScope === 'open') {
+            $query->where(function ($q): void {
+                $q->where(function ($inner): void {
+                    $inner->where('is_pickup_delivery', false)
+                        ->where('laundry_status', '!=', 'completed');
+                })->orWhere(function ($inner): void {
+                    $inner->where('is_pickup_delivery', true)
+                        ->where(function ($pickup): void {
+                            $pickup->whereNull('courier_status')
+                                ->orWhere('courier_status', '!=', 'delivered');
+                        });
+                });
+            });
+        } elseif ($statusScope === 'completed') {
+            $query->where(function ($q): void {
+                $q->where(function ($inner): void {
+                    $inner->where('is_pickup_delivery', false)
+                        ->where('laundry_status', 'completed');
+                })->orWhere(function ($inner): void {
+                    $inner->where('is_pickup_delivery', true)
+                        ->where('courier_status', 'delivered');
+                });
+            });
+        }
 
         if (! empty($validated['q'])) {
             $search = trim((string) $validated['q']);
@@ -85,13 +114,29 @@ class OrderController extends Controller
             });
         }
 
+        $requestedTimezone = $validated['timezone'] ?? config('app.timezone', 'UTC');
+        $appTimezone = config('app.timezone', 'UTC');
+
         if (! empty($validated['date'])) {
-            $requestedTimezone = $validated['timezone'] ?? config('app.timezone', 'UTC');
-            $appTimezone = config('app.timezone', 'UTC');
             $requestedDate = (string) $validated['date'];
 
             $startOfDay = CarbonImmutable::createFromFormat('Y-m-d', $requestedDate, $requestedTimezone)->startOfDay();
             $endOfDay = $startOfDay->endOfDay();
+
+            $query->whereBetween('created_at', [
+                $startOfDay->setTimezone($appTimezone),
+                $endOfDay->setTimezone($appTimezone),
+            ]);
+        } elseif (! empty($validated['date_from']) || ! empty($validated['date_to'])) {
+            $startToken = (string) ($validated['date_from'] ?? $validated['date_to']);
+            $endToken = (string) ($validated['date_to'] ?? $validated['date_from']);
+
+            $startOfDay = CarbonImmutable::createFromFormat('Y-m-d', $startToken, $requestedTimezone)->startOfDay();
+            $endOfDay = CarbonImmutable::createFromFormat('Y-m-d', $endToken, $requestedTimezone)->endOfDay();
+
+            if ($startOfDay->greaterThan($endOfDay)) {
+                [$startOfDay, $endOfDay] = [$endOfDay->startOfDay(), $startOfDay->endOfDay()];
+            }
 
             $query->whereBetween('created_at', [
                 $startOfDay->setTimezone($appTimezone),
@@ -113,12 +158,7 @@ class OrderController extends Controller
         $this->ensureOrderAccess($user, $order);
 
         return response()->json([
-            'data' => $order->load([
-                'customer:id,name,phone_normalized,notes',
-                'items',
-                'payments',
-                'courier:id,name,phone',
-            ]),
+            'data' => $this->serializeOrderDetailPayload($order),
         ]);
     }
 
@@ -504,6 +544,13 @@ class OrderController extends Controller
             ], 422);
         }
 
+        if ($validated['status'] === 'completed' && (int) $order->due_amount > 0) {
+            return response()->json([
+                'reason_code' => 'PAYMENT_REQUIRED',
+                'message' => 'Tagihan pesanan belum lunas. Lunasi dulu sebelum menyelesaikan pesanan.',
+            ], 422);
+        }
+
         $previousStatus = $order->laundry_status;
         $order->forceFill([
             'laundry_status' => $validated['status'],
@@ -584,6 +631,13 @@ class OrderController extends Controller
             return response()->json([
                 'reason_code' => 'INVALID_TRANSITION',
                 'message' => 'laundry_status must be ready before setting delivery_pending.',
+            ], 422);
+        }
+
+        if ($next === 'delivered' && (int) $order->due_amount > 0) {
+            return response()->json([
+                'reason_code' => 'PAYMENT_REQUIRED',
+                'message' => 'Tagihan pesanan belum lunas. Lunasi dulu sebelum menyelesaikan pesanan.',
             ], 422);
         }
 
@@ -881,6 +935,50 @@ class OrderController extends Controller
     private function generateOrderCode(): string
     {
         return 'ORD-'.strtoupper(Str::random(8));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeOrderDetailPayload(Order $order): array
+    {
+        $loadedOrder = $order->load([
+            'customer:id,name,phone_normalized,notes',
+            'items.service:id,duration_days',
+            'items',
+            'payments',
+            'courier:id,name,phone',
+        ]);
+
+        $payload = $loadedOrder->toArray();
+        $serviceIds = $loadedOrder->items
+            ->pluck('service_id')
+            ->filter(static fn ($value): bool => is_string($value) && $value !== '')
+            ->unique()
+            ->values();
+
+        $maxDurationDays = null;
+        if ($serviceIds->isNotEmpty()) {
+            $maxDurationDays = Service::query()
+                ->withTrashed()
+                ->whereIn('id', $serviceIds->all())
+                ->max('duration_days');
+        }
+
+        $estimatedCompletionAt = null;
+        $isLate = false;
+
+        if ($maxDurationDays !== null && $loadedOrder->created_at) {
+            $estimatedCompletionAt = $loadedOrder->created_at->copy()->addDays((int) $maxDurationDays);
+            $isLate = ! in_array((string) $loadedOrder->laundry_status, ['ready', 'completed'], true)
+                && CarbonImmutable::now(config('app.timezone', 'UTC'))->greaterThan($estimatedCompletionAt);
+        }
+
+        $payload['estimated_completion_at'] = $estimatedCompletionAt?->toIso8601String();
+        $payload['estimated_completion_duration_days'] = $maxDurationDays !== null ? (int) $maxDurationDays : null;
+        $payload['estimated_completion_is_late'] = $isLate;
+
+        return $payload;
     }
 
     private function serializeOrderPaymentIntent(OrderPaymentIntent $intent): array

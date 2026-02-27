@@ -99,23 +99,23 @@
         </div>
 
         <div>
-            <label for="api_key">API Key / Token</label>
-            <input id="api_key" type="text" name="api_key" placeholder="api key mpwa">
-        </div>
-
-        <div>
             <label for="sender">Sender / Device</label>
             <input id="sender" type="text" name="sender" placeholder="62812xxxx (sender mpwa)">
         </div>
 
         <div>
-            <label for="base_url">Base URL (opsional)</label>
-            <input id="base_url" type="url" name="base_url" placeholder="https://domain-mpwa.example">
-        </div>
-
-        <div>
-            <label for="send_path">Send Path (opsional)</label>
-            <input id="send_path" type="text" name="send_path" placeholder="/send-message">
+            <label for="mpwa_env_note">Kredensial MPWA (ENV)</label>
+            <input
+                id="mpwa_env_note"
+                type="text"
+                value="API key dan base URL diambil dari .env server"
+                readonly
+                disabled
+            >
+            <p class="muted-line">
+                API key: {{ config('services.mpwa.api_key') ? 'terisi' : 'belum diisi' }} |
+                Base URL: {{ config('services.mpwa.base_url') ?: 'belum diisi' }}
+            </p>
         </div>
 
         <div>

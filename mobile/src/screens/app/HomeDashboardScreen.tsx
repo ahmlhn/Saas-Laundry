@@ -29,8 +29,9 @@ const SHORTCUTS: ShortcutConfig[] = [
   { key: "validasi", label: "Validasi", subtitle: "Perlu konfirmasi", icon: "shield-checkmark-outline" },
   { key: "antrian", label: "Antrian", subtitle: "Menunggu proses", icon: "time-outline" },
   { key: "proses", label: "Proses", subtitle: "Sedang dikerjakan", icon: "color-wand-outline" },
-  { key: "siap_ambil", label: "Siap Ambil", subtitle: "Sudah selesai", icon: "bag-check-outline" },
-  { key: "siap_antar", label: "Siap Antar", subtitle: "Delivery queue", icon: "bicycle-outline" },
+  { key: "siap_ambil", label: "Siap Ambil", subtitle: "Menunggu diambil", icon: "bag-check-outline" },
+  { key: "siap_antar", label: "Siap Antar", subtitle: "Menunggu / proses antar", icon: "bicycle-outline" },
+  { key: "selesai", label: "Selesai", subtitle: "Sudah diambil / diantar", icon: "checkmark-done-outline" },
   { key: null, label: "Semua", subtitle: "Seluruh pesanan", icon: "layers-outline" },
 ];
 

@@ -7,6 +7,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
+import { getDefaultDurationDays } from "../../features/services/defaultDuration";
 import { createService, listServices, updateService } from "../../features/services/serviceApi";
 import { listServiceProcessTags } from "../../features/services/serviceTagApi";
 import { hasAnyRole } from "../../lib/accessControl";
@@ -46,6 +47,7 @@ export function ServiceVariantFormScreen() {
   const isEdit = mode === "edit";
   const serviceType = route.params.serviceType;
   const variant = route.params.variant;
+  const defaultDurationDays = getDefaultDurationDays(serviceType);
 
   const [groups, setGroups] = useState<ServiceCatalogItem[]>([]);
   const [tags, setTags] = useState<ServiceProcessTag[]>([]);
@@ -58,7 +60,7 @@ export function ServiceVariantFormScreen() {
     variant?.parent_service_id ?? route.params.parentServiceId ?? null
   );
   const [basePriceInput, setBasePriceInput] = useState(variant ? String(variant.base_price_amount) : "");
-  const [durationInput, setDurationInput] = useState(variant?.duration_days ? String(variant.duration_days) : "");
+  const [durationInput, setDurationInput] = useState(variant?.duration_days ? String(variant.duration_days) : String(defaultDurationDays));
   const [displayUnit, setDisplayUnit] = useState<ServiceDisplayUnit>(
     variant?.display_unit === "kg" || variant?.display_unit === "pcs" || variant?.display_unit === "satuan" ? variant.display_unit : "satuan"
   );
@@ -272,11 +274,12 @@ export function ServiceVariantFormScreen() {
             editable={!saving && canManage}
             keyboardType="number-pad"
             onChangeText={(text) => setDurationInput(normalizeDigits(text))}
-            placeholder="Contoh: 3"
+            placeholder={`Contoh: ${defaultDurationDays}`}
             placeholderTextColor={theme.colors.textMuted}
             style={styles.input}
             value={durationInput}
           />
+          <Text style={styles.helperText}>Default otomatis {defaultDurationDays} hari, tetap bisa diubah sebelum disimpan.</Text>
 
           <Text style={styles.label}>Satuan Tampil</Text>
           <View style={styles.chipRowWrap}>

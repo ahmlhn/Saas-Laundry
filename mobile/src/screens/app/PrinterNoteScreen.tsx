@@ -7,16 +7,38 @@ import { ActivityIndicator, Alert, Image, Modal, Pressable, ScrollView, StyleShe
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
+import { clearStoredBluetoothThermalPrinter, getStoredBluetoothThermalPrinter, setStoredBluetoothThermalPrinter } from "../../features/settings/printerBluetoothStorage";
 import { getPrinterNoteSettingsFromServer, removePrinterLogo, upsertPrinterNoteSettingsToServer, uploadPrinterLogo } from "../../features/settings/printerNoteApi";
-import { getPrinterNoteSettings, setPrinterNoteSettings } from "../../features/settings/printerNoteStorage";
+import { DEFAULT_PRINTER_NOTE_SETTINGS, getPrinterNoteSettings, setPrinterNoteSettings } from "../../features/settings/printerNoteStorage";
+import { connectBluetoothThermalPrinter, ensureBluetoothThermalPermissions, isBluetoothThermalPrinterRuntimeAvailable, printBluetoothThermalTest, scanBluetoothThermalPrinters } from "../../features/settings/thermalBluetoothPrinter";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AccountStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
+import type { BluetoothThermalPrinterDevice, StoredBluetoothThermalPrinter } from "../../types/printerBluetooth";
 import type { PrinterNoteSettings } from "../../types/printerNote";
 
 type Navigation = NativeStackNavigationProp<AccountStackParamList, "PrinterNote">;
+const PRINTER_NOTE_BOOTSTRAP_SYNC_TIMEOUT_MS = 8000;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutHandle = setTimeout(() => {
+      reject(new Error("REQUEST_TIMEOUT"));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timeoutHandle);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutHandle);
+        reject(error);
+      });
+  });
+}
 
 export function PrinterNoteScreen() {
   const theme = useAppTheme();
@@ -33,6 +55,12 @@ export function PrinterNoteScreen() {
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [removingLogo, setRemovingLogo] = useState(false);
+  const [scanningBluetoothPrinters, setScanningBluetoothPrinters] = useState(false);
+  const [pairingBluetoothPrinter, setPairingBluetoothPrinter] = useState(false);
+  const [testingBluetoothPrinter, setTestingBluetoothPrinter] = useState(false);
+  const [bluetoothPrinterReady, setBluetoothPrinterReady] = useState<boolean | null>(null);
+  const [discoveredBluetoothPrinters, setDiscoveredBluetoothPrinters] = useState<BluetoothThermalPrinterDevice[]>([]);
+  const [pairedBluetoothPrinter, setPairedBluetoothPrinter] = useState<StoredBluetoothThermalPrinter | null>(null);
   const [form, setForm] = useState<PrinterNoteSettings | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -50,10 +78,14 @@ export function PrinterNoteScreen() {
   const bootstrapRequestSeqRef = useRef(0);
   const contentScrollRef = useRef<ScrollView | null>(null);
 
-  useEffect(() => {
+  function reloadConfiguration(): void {
     const requestSeq = bootstrapRequestSeqRef.current + 1;
     bootstrapRequestSeqRef.current = requestSeq;
     void bootstrap(requestSeq, selectedOutlet?.id ?? null, selectedOutlet?.name ?? "");
+  }
+
+  useEffect(() => {
+    reloadConfiguration();
   }, [selectedOutlet?.id]);
 
   async function bootstrap(requestSeq: number, outletId: string | null, outletName: string): Promise<void> {
@@ -61,36 +93,54 @@ export function PrinterNoteScreen() {
     setErrorMessage(null);
 
     try {
-      const stored = await getPrinterNoteSettings(outletId);
-      let merged = {
+      const [stored, pairedPrinter] = await Promise.all([getPrinterNoteSettings(outletId), getStoredBluetoothThermalPrinter(outletId)]);
+      const localMerged: PrinterNoteSettings = {
         ...stored,
         profileName: stored.profileName || outletName || "",
       };
 
-      if (outletId) {
-        try {
-          const fromServer = await getPrinterNoteSettingsFromServer(outletId);
-          merged = {
-            ...merged,
-            ...fromServer,
-            profileName: fromServer.profileName || merged.profileName || outletName || "",
-          };
-          await setPrinterNoteSettings(merged, outletId);
-        } catch {
-          // Keep local cache when server sync fails.
-        }
-      }
-
       if (requestSeq !== bootstrapRequestSeqRef.current) {
         return;
       }
 
-      setForm(merged);
+      setForm(localMerged);
+      setPairedBluetoothPrinter(pairedPrinter);
+      setDiscoveredBluetoothPrinters([]);
+      setLoading(false);
+
+      if (!outletId) {
+        return;
+      }
+
+      try {
+        const fromServer = await withTimeout(getPrinterNoteSettingsFromServer(outletId), PRINTER_NOTE_BOOTSTRAP_SYNC_TIMEOUT_MS);
+        const mergedFromServer: PrinterNoteSettings = {
+          ...localMerged,
+          ...fromServer,
+          profileName: fromServer.profileName || localMerged.profileName || outletName || "",
+        };
+        await setPrinterNoteSettings(mergedFromServer, outletId);
+
+        if (requestSeq !== bootstrapRequestSeqRef.current) {
+          return;
+        }
+
+        setForm(mergedFromServer);
+      } catch {
+        // Keep local cache when server sync fails or timeout.
+      }
     } catch {
       if (requestSeq !== bootstrapRequestSeqRef.current) {
         return;
       }
-      setErrorMessage("Gagal memuat pengaturan nota.");
+
+      setForm({
+        ...DEFAULT_PRINTER_NOTE_SETTINGS,
+        profileName: outletName || "",
+      });
+      setPairedBluetoothPrinter(null);
+      setDiscoveredBluetoothPrinters([]);
+      setErrorMessage("Gagal memuat pengaturan nota. Menampilkan konfigurasi default perangkat.");
     } finally {
       if (requestSeq === bootstrapRequestSeqRef.current) {
         setLoading(false);
@@ -330,6 +380,134 @@ export function PrinterNoteScreen() {
     return `TRX/${yy}${mm}${dd}/001`;
   }
 
+  async function ensureBluetoothRuntimeAndPermission(): Promise<boolean> {
+    const runtimeReady = bluetoothPrinterReady ?? (await isBluetoothThermalPrinterRuntimeAvailable());
+    setBluetoothPrinterReady(runtimeReady);
+
+    if (!runtimeReady) {
+      setErrorMessage("Fitur printer Bluetooth butuh build native (APK/Dev Client), tidak tersedia di Expo Go.");
+      return false;
+    }
+
+    const granted = await ensureBluetoothThermalPermissions();
+    if (!granted) {
+      setErrorMessage("Izin Bluetooth belum diberikan. Aktifkan izin Bluetooth agar bisa scan printer.");
+      return false;
+    }
+
+    return true;
+  }
+
+  async function handleScanBluetoothPrinters(): Promise<void> {
+    if (scanningBluetoothPrinters || pairingBluetoothPrinter || testingBluetoothPrinter) {
+      return;
+    }
+
+    setScanningBluetoothPrinters(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      const allowed = await ensureBluetoothRuntimeAndPermission();
+      if (!allowed) {
+        return;
+      }
+
+      const devices = await scanBluetoothThermalPrinters();
+      setDiscoveredBluetoothPrinters(devices);
+
+      if (devices.length === 0) {
+        setErrorMessage("Tidak ada perangkat Bluetooth terdeteksi. Pair printer dulu di Pengaturan Bluetooth Android, lalu coba Scan lagi.");
+        return;
+      }
+
+      setSuccessMessage(`Menemukan ${devices.length} printer Bluetooth.`);
+      focusFeedback();
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error));
+      focusFeedback();
+    } finally {
+      setScanningBluetoothPrinters(false);
+    }
+  }
+
+  async function handlePairBluetoothPrinter(device: BluetoothThermalPrinterDevice): Promise<void> {
+    if (pairingBluetoothPrinter || scanningBluetoothPrinters || testingBluetoothPrinter) {
+      return;
+    }
+
+    setPairingBluetoothPrinter(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      const allowed = await ensureBluetoothRuntimeAndPermission();
+      if (!allowed) {
+        return;
+      }
+
+      const connected = await connectBluetoothThermalPrinter(device.address);
+      const nextPaired: StoredBluetoothThermalPrinter = {
+        name: connected.name || device.name,
+        address: connected.address || device.address,
+        updatedAt: new Date().toISOString(),
+      };
+
+      await setStoredBluetoothThermalPrinter(nextPaired, selectedOutlet?.id ?? null);
+      setPairedBluetoothPrinter(nextPaired);
+      setSuccessMessage(`Printer ${nextPaired.name} tersanding dan disimpan.`);
+      focusFeedback();
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error));
+      focusFeedback();
+    } finally {
+      setPairingBluetoothPrinter(false);
+    }
+  }
+
+  async function handleUnpairBluetoothPrinter(): Promise<void> {
+    if (!pairedBluetoothPrinter || pairingBluetoothPrinter || testingBluetoothPrinter) {
+      return;
+    }
+
+    try {
+      await clearStoredBluetoothThermalPrinter(selectedOutlet?.id ?? null);
+      setPairedBluetoothPrinter(null);
+      setSuccessMessage("Pairing printer Bluetooth dihapus.");
+      setErrorMessage(null);
+      focusFeedback();
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error));
+      focusFeedback();
+    }
+  }
+
+  async function handleBluetoothTestPrint(): Promise<void> {
+    if (!pairedBluetoothPrinter || testingBluetoothPrinter || pairingBluetoothPrinter || scanningBluetoothPrinters) {
+      return;
+    }
+
+    setTestingBluetoothPrinter(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      const allowed = await ensureBluetoothRuntimeAndPermission();
+      if (!allowed) {
+        return;
+      }
+
+      await printBluetoothThermalTest(pairedBluetoothPrinter.address, form?.profileName || selectedOutlet?.name || "Outlet");
+      setSuccessMessage("Perintah test print berhasil dikirim ke printer.");
+      focusFeedback();
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error));
+      focusFeedback();
+    } finally {
+      setTestingBluetoothPrinter(false);
+    }
+  }
+
   return (
     <AppScreen contentContainerStyle={styles.content} scroll scrollRef={contentScrollRef}>
       <AppPanel style={styles.heroPanel}>
@@ -347,14 +525,118 @@ export function PrinterNoteScreen() {
         <Text style={styles.subtitle}>Atur profil nota dan format nomor struk sesuai standar outlet.</Text>
       </AppPanel>
 
-      {loading || !form ? (
+      {loading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator color={theme.colors.primaryStrong} />
           <Text style={styles.loadingText}>Memuat konfigurasi nota...</Text>
         </View>
+      ) : !form ? (
+        <AppPanel style={styles.unavailablePanel}>
+          <View style={styles.unavailableRow}>
+            <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={18} />
+            <Text style={styles.unavailableText}>Konfigurasi nota belum tersedia.</Text>
+          </View>
+          <AppButton
+            leftElement={<Ionicons color={theme.colors.info} name="refresh-outline" size={16} />}
+            onPress={() => reloadConfiguration()}
+            title="Muat Ulang"
+            variant="secondary"
+          />
+        </AppPanel>
       ) : (
         <AppPanel style={styles.panel}>
           {!selectedOutlet ? <Text style={styles.outletHint}>Pilih outlet aktif terlebih dulu agar pengaturan tersimpan dan sinkron lintas perangkat.</Text> : null}
+
+          <View style={styles.btSectionWrap}>
+            <View style={styles.rowBetween}>
+              <View style={styles.logoInfo}>
+                <Text style={styles.label}>Printer Thermal Bluetooth</Text>
+                <Text style={styles.helper}>Scan menampilkan perangkat Bluetooth yang sudah dipair di Android, lalu pilih printer.</Text>
+              </View>
+              <AppButton
+                disabled={scanningBluetoothPrinters || pairingBluetoothPrinter || testingBluetoothPrinter}
+                leftElement={<Ionicons color={theme.colors.info} name="bluetooth-outline" size={17} />}
+                loading={scanningBluetoothPrinters}
+                onPress={() => void handleScanBluetoothPrinters()}
+                title="Scan Printer"
+                variant="secondary"
+              />
+            </View>
+
+            {bluetoothPrinterReady === false ? (
+              <Text style={styles.bluetoothWarning}>
+                Fitur Bluetooth printer belum tersedia di build ini. Jalankan aplikasi lewat APK/Dev Client.
+              </Text>
+            ) : null}
+
+            {pairedBluetoothPrinter ? (
+              <View style={styles.pairedPrinterCard}>
+                <View style={styles.pairedPrinterMain}>
+                  <Text style={styles.pairedPrinterTitle}>Printer Tersanding</Text>
+                  <Text style={styles.pairedPrinterName}>{pairedBluetoothPrinter.name}</Text>
+                  <Text style={styles.pairedPrinterMeta}>{pairedBluetoothPrinter.address}</Text>
+                </View>
+                <View style={styles.pairedActionRow}>
+                  <AppButton
+                    disabled={testingBluetoothPrinter || pairingBluetoothPrinter || scanningBluetoothPrinters}
+                    leftElement={<Ionicons color={theme.colors.info} name="print-outline" size={16} />}
+                    loading={testingBluetoothPrinter}
+                    onPress={() => void handleBluetoothTestPrint()}
+                    title="Tes Cetak"
+                    variant="secondary"
+                  />
+                  <Pressable
+                    disabled={testingBluetoothPrinter || pairingBluetoothPrinter || scanningBluetoothPrinters}
+                    onPress={() => void handleUnpairBluetoothPrinter()}
+                    style={({ pressed }) => [
+                      styles.logoDangerAction,
+                      pressed ? styles.heroIconButtonPressed : null,
+                      testingBluetoothPrinter || pairingBluetoothPrinter || scanningBluetoothPrinters ? styles.logoDangerActionDisabled : null,
+                    ]}
+                  >
+                    <Ionicons color={theme.colors.danger} name="unlink-outline" size={15} />
+                    <Text style={styles.logoDangerActionText}>Lepas Pairing</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.unpairedCard}>
+                <Text style={styles.unpairedText}>Belum ada printer tersanding.</Text>
+              </View>
+            )}
+
+            {discoveredBluetoothPrinters.length > 0 ? (
+              <View style={styles.discoveredList}>
+                {discoveredBluetoothPrinters.map((device) => {
+                  const isPaired = pairedBluetoothPrinter?.address === device.address;
+
+                  return (
+                    <Pressable
+                      key={device.address}
+                      disabled={pairingBluetoothPrinter || testingBluetoothPrinter}
+                      onPress={() => void handlePairBluetoothPrinter(device)}
+                      style={({ pressed }) => [styles.discoveredItem, isPaired ? styles.discoveredItemActive : null, pressed ? styles.heroIconButtonPressed : null]}
+                    >
+                      <View style={styles.discoveredMain}>
+                        <Text style={styles.discoveredTitle}>{device.name}</Text>
+                        <Text style={styles.discoveredMeta}>{device.address}</Text>
+                      </View>
+                      <View style={styles.discoveredAction}>
+                        {isPaired ? (
+                          <Text style={styles.discoveredActionTextActive}>Tersanding</Text>
+                        ) : (
+                          <>
+                            <Ionicons color={theme.colors.info} name="link-outline" size={15} />
+                            <Text style={styles.discoveredActionText}>Sandingkan</Text>
+                          </>
+                        )}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
+          </View>
 
           <View style={styles.rowBetween}>
             <View style={styles.logoInfo}>
@@ -600,10 +882,46 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontFamily: theme.fonts.medium,
       fontSize: 12,
     },
+    unavailablePanel: {
+      gap: theme.spacing.sm,
+    },
+    unavailableRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    unavailableText: {
+      flex: 1,
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12.5,
+      lineHeight: 18,
+    },
     panel: {
       gap: theme.spacing.sm,
     },
+    btSectionWrap: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 10,
+      paddingVertical: 10,
+      gap: theme.spacing.sm,
+    },
     outletHint: {
+      color: theme.colors.warning,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+      lineHeight: 16,
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? "#6a5830" : "#f2dca2",
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.mode === "dark" ? "#4b3f26" : "#fff8e8",
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
+    bluetoothWarning: {
       color: theme.colors.warning,
       fontFamily: theme.fonts.medium,
       fontSize: 11.5,
@@ -630,6 +948,110 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontFamily: theme.fonts.medium,
       fontSize: 11.5,
       lineHeight: 16,
+    },
+    pairedPrinterCard: {
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+      gap: theme.spacing.xs,
+    },
+    pairedPrinterMain: {
+      gap: 2,
+    },
+    pairedPrinterTitle: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+    },
+    pairedPrinterName: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13,
+      lineHeight: 17,
+    },
+    pairedPrinterMeta: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+      lineHeight: 15,
+    },
+    pairedActionRow: {
+      flexDirection: isTablet || isCompactLandscape ? "row" : "column",
+      alignItems: isTablet || isCompactLandscape ? "center" : "stretch",
+      gap: 8,
+    },
+    unpairedCard: {
+      borderWidth: 1,
+      borderStyle: "dashed",
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+    },
+    unpairedText: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+    },
+    discoveredList: {
+      gap: 7,
+    },
+    discoveredItem: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
+    },
+    discoveredItemActive: {
+      borderColor: theme.colors.success,
+      backgroundColor: theme.mode === "dark" ? "#173f2d" : "#edf9f1",
+    },
+    discoveredMain: {
+      flex: 1,
+      gap: 1,
+    },
+    discoveredTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12.5,
+    },
+    discoveredMeta: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+    },
+    discoveredAction: {
+      minWidth: 88,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 8,
+      paddingVertical: 5,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 4,
+    },
+    discoveredActionText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
+    },
+    discoveredActionTextActive: {
+      color: theme.colors.success,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
     },
     logoPreview: {
       width: "100%",

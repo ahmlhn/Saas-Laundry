@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import type { NavigationProp, RouteProp } from "@react-navigation/native";
 import { useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -25,12 +26,12 @@ import { AppPanel } from "../../components/ui/AppPanel";
 import { listCustomers, listCustomersPage } from "../../features/customers/customerApi";
 import { formatCustomerPhoneDisplay } from "../../features/customers/customerPhone";
 import { parseCustomerProfileMeta } from "../../features/customers/customerProfileNote";
-import { addOrderPayment, createOrder, listOrders } from "../../features/orders/orderApi";
+import { createOrder, listOrders } from "../../features/orders/orderApi";
 import { listPromotionSections } from "../../features/promotions/promoApi";
 import { listServices } from "../../features/services/serviceApi";
-import { hasAnyRole, isWaPlanEligible } from "../../lib/accessControl";
+import { hasAnyRole } from "../../lib/accessControl";
 import { getApiErrorMessage } from "../../lib/httpClient";
-import type { AppTabParamList } from "../../navigation/types";
+import type { AppRootStackParamList, AppTabParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
@@ -45,7 +46,7 @@ type ReviewPanelKey = "promo" | "discount" | "notes";
 type ReviewFocusableInputKey = "voucher" | "shippingFee" | "discount" | "notes";
 type InputVisibilityMode = "visible" | "comfort";
 
-const STEP_ORDER: Step[] = ["customer", "services", "review", "payment"];
+const STEP_ORDER: Step[] = ["customer", "services", "review"];
 const CUSTOMER_LIMIT = 40;
 const CUSTOMER_SEARCH_DEBOUNCE_MS = 260;
 const CUSTOMER_PROGRESSIVE_DELAY_MS = 70;
@@ -120,19 +121,6 @@ function parseDiscountPercentInput(raw: string): number {
 type PromoSource = "automatic" | "selection" | "voucher";
 type ManualDiscountType = "amount" | "percent";
 type PaymentFlowType = "later" | "now";
-type PaymentMethodType = "cash" | "transfer" | "other";
-
-interface PaymentMethodOption {
-  value: PaymentMethodType;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-}
-
-const PAYMENT_METHOD_OPTIONS: PaymentMethodOption[] = [
-  { value: "cash", label: "Tunai", icon: "cash-outline" },
-  { value: "transfer", label: "Transfer", icon: "card-outline" },
-  { value: "other", label: "Lainnya", icon: "wallet-outline" },
-];
 
 interface PromotionDiscountDraft {
   promo: Promotion;
@@ -292,8 +280,6 @@ interface QuickActionDraftSnapshot {
   discountInput: string;
   manualDiscountType?: ManualDiscountType;
   paymentFlowType?: PaymentFlowType;
-  paymentMethodType?: PaymentMethodType;
-  paidAmountInput?: string;
   orderNotes: string;
   showReviewPromoPanel: boolean;
   showReviewDiscountPanel: boolean;
@@ -421,7 +407,6 @@ export function QuickActionScreen() {
 
   const roles = session?.roles ?? [];
   const canCreateOrder = hasAnyRole(roles, ["owner", "admin", "cashier"]);
-  const waAutoEligible = isWaPlanEligible(session?.plan.key);
 
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [step, setStep] = useState<Step>("customer");
@@ -463,14 +448,11 @@ export function QuickActionScreen() {
   const [discountInput, setDiscountInput] = useState("");
   const [manualDiscountType, setManualDiscountType] = useState<ManualDiscountType>("amount");
   const [paymentFlowType, setPaymentFlowType] = useState<PaymentFlowType>("later");
-  const [paymentMethodType, setPaymentMethodType] = useState<PaymentMethodType>("cash");
-  const [paidAmountInput, setPaidAmountInput] = useState("");
   const [orderNotes, setOrderNotes] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [lastCreatedOrderId, setLastCreatedOrderId] = useState<string | null>(null);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [keyboardTopY, setKeyboardTopY] = useState<number | null>(null);
@@ -487,7 +469,6 @@ export function QuickActionScreen() {
   const contentScrollRef = useRef<ScrollView | null>(null);
   const serviceInputRefs = useRef<Record<string, TextInput | null>>({});
   const serviceSearchInputRef = useRef<TextInput | null>(null);
-  const paymentAmountInputRef = useRef<TextInput | null>(null);
   const reviewInputRefs = useRef<Record<ReviewFocusableInputKey, TextInput | null>>({
     voucher: null,
     shippingFee: null,
@@ -777,8 +758,6 @@ export function QuickActionScreen() {
     setDiscountInput("");
     setManualDiscountType("amount");
     setPaymentFlowType("later");
-    setPaymentMethodType("cash");
-    setPaidAmountInput("");
     setOrderNotes("");
   }
 
@@ -792,7 +771,7 @@ export function QuickActionScreen() {
         : draft.showReviewNotesPanel
           ? "notes"
           : null;
-    setStep(draft.step);
+    setStep(draft.step === "payment" ? "review" : draft.step);
     setServiceKeyword(draft.serviceKeyword);
     setShowServiceSearch(draft.showServiceSearch);
     setActiveServiceGroupKey(draft.activeServiceGroupKey);
@@ -823,10 +802,6 @@ export function QuickActionScreen() {
     setDiscountInput(draft.discountInput);
     setManualDiscountType(draft.manualDiscountType === "percent" ? "percent" : "amount");
     setPaymentFlowType(draft.paymentFlowType === "now" ? "now" : "later");
-    setPaymentMethodType(
-      draft.paymentMethodType === "transfer" || draft.paymentMethodType === "other" ? draft.paymentMethodType : "cash",
-    );
-    setPaidAmountInput(draft.paidAmountInput ?? "");
     setOrderNotes(draft.orderNotes);
   }
 
@@ -849,8 +824,6 @@ export function QuickActionScreen() {
       discountInput,
       manualDiscountType,
       paymentFlowType,
-      paymentMethodType,
-      paidAmountInput,
       orderNotes,
       showReviewPromoPanel,
       showReviewDiscountPanel,
@@ -1007,13 +980,6 @@ export function QuickActionScreen() {
 
   function handlePaymentFlowChange(next: PaymentFlowType): void {
     setPaymentFlowType(next);
-    if (next === "now" && total > 0 && !paidAmountInput.trim()) {
-      setPaidAmountInput(normalizeMoneyInput(`${total}`));
-    }
-  }
-
-  function handlePaidAmountChange(value: string): void {
-    setPaidAmountInput(normalizeMoneyInput(value));
   }
 
   function handlePromoVoucherCodeChange(value: string): void {
@@ -1633,21 +1599,6 @@ export function QuickActionScreen() {
   const effectiveShippingFee = isPickupDelivery ? shippingFee : 0;
   const discountLimitBaseAmount = subtotal + effectiveShippingFee;
   const total = useMemo(() => Math.max(discountLimitBaseAmount - totalDiscountAmount, 0), [discountLimitBaseAmount, totalDiscountAmount]);
-  const paymentTenderedAmount = useMemo(() => parseMoneyInput(paidAmountInput), [paidAmountInput]);
-  const paymentAppliedAmount = useMemo(() => Math.min(paymentTenderedAmount, total), [paymentTenderedAmount, total]);
-  const paymentRemainingAmount = useMemo(() => Math.max(total - paymentAppliedAmount, 0), [total, paymentAppliedAmount]);
-  const paymentChangeAmount = useMemo(
-    () => (paymentMethodType === "cash" ? Math.max(paymentTenderedAmount - total, 0) : 0),
-    [paymentMethodType, paymentTenderedAmount, total],
-  );
-  const paymentInputExceededTotal = paymentTenderedAmount > total;
-  const paymentNowAmountInvalid = paymentFlowType === "now" && total > 0 && paymentTenderedAmount <= 0;
-  const selectedPaymentMethodOption = useMemo(
-    () => PAYMENT_METHOD_OPTIONS.find((option) => option.value === paymentMethodType) ?? PAYMENT_METHOD_OPTIONS[0],
-    [paymentMethodType],
-  );
-  const paymentAppliedLabel = "Pembayaran Tercatat";
-  const paymentRemainingLabel = "Sisa Tagihan";
   const paymentFlowSummaryLabel = paymentFlowType === "now" ? "Bayar Sekarang" : "Bayar Nanti";
   const discountExceedsLimit = totalDiscountAmount > discountLimitBaseAmount;
   const appliedPromoNote = useMemo(() => {
@@ -1702,7 +1653,7 @@ export function QuickActionScreen() {
       return true;
     }
 
-    if (paymentFlowType === "now" || paymentMethodType !== "cash" || paidAmountInput.trim() !== "") {
+    if (paymentFlowType === "now") {
       return true;
     }
 
@@ -1713,8 +1664,6 @@ export function QuickActionScreen() {
     metrics,
     orderNotes,
     paymentFlowType,
-    paymentMethodType,
-    paidAmountInput,
     promoVoucherCodeInput,
     selectedCustomerId,
     selectedPromoId,
@@ -1979,7 +1928,7 @@ export function QuickActionScreen() {
         return;
       }
 
-      goToPaymentStep();
+      void submitOrder();
     }
   }
 
@@ -2086,12 +2035,6 @@ export function QuickActionScreen() {
       return;
     }
 
-    if (paymentFlowType === "now" && total > 0 && paymentTenderedAmount <= 0) {
-      setErrorMessage("Isi nominal dibayar dulu sebelum simpan pesanan.");
-      setStep("payment");
-      return;
-    }
-
     setSubmitting(true);
     setErrorMessage(null);
     setActionMessage(null);
@@ -2116,50 +2059,20 @@ export function QuickActionScreen() {
       });
 
       const createdTotalAmount = Math.max(created.total_amount ?? 0, 0);
-      const tenderedAmount = parseMoneyInput(paidAmountInput);
-      const appliedPaymentAmount = Math.min(tenderedAmount, createdTotalAmount);
-      const remainingPaymentAmount = Math.max(createdTotalAmount - appliedPaymentAmount, 0);
-      const createdPaymentChangeAmount = paymentMethodType === "cash" ? Math.max(tenderedAmount - createdTotalAmount, 0) : 0;
-      const shouldCapturePaymentNow = paymentFlowType === "now" && createdTotalAmount > 0 && appliedPaymentAmount > 0;
-      let paymentCaptureErrorMessage: string | null = null;
-      if (shouldCapturePaymentNow) {
-        try {
-          await addOrderPayment({
-            orderId: created.id,
-            amount: appliedPaymentAmount,
-            method: paymentMethodType,
-          });
-        } catch (error) {
-          paymentCaptureErrorMessage = getApiErrorMessage(error);
-        }
-      }
 
       await refreshSession();
-      setLastCreatedOrderId(created.id);
-      const waNoticeSuffix = waAutoEligible ? " Notifikasi WhatsApp order baru diproses otomatis jika provider aktif." : "";
-      if (paymentCaptureErrorMessage) {
-        setActionMessage(
-          `Order ${created.order_code} berhasil dibuat, tapi pembayaran belum tercatat. Silakan catat dari detail order. (${paymentCaptureErrorMessage})${waNoticeSuffix}`,
-        );
-      } else if (paymentFlowType === "now" && createdTotalAmount > 0) {
-        const paymentMethodLabel = PAYMENT_METHOD_OPTIONS.find((option) => option.value === paymentMethodType)?.label ?? "Tunai";
-        if (remainingPaymentAmount > 0) {
-          setActionMessage(
-            `Order ${created.order_code} berhasil dibuat. Pembayaran ${formatMoney(appliedPaymentAmount)} tercatat (${paymentMethodLabel}), sisa tagihan ${formatMoney(remainingPaymentAmount)}.${waNoticeSuffix}`,
-          );
-        } else if (createdPaymentChangeAmount > 0) {
-          setActionMessage(`Order ${created.order_code} berhasil dibuat dan lunas. Kembalian ${formatMoney(createdPaymentChangeAmount)}.${waNoticeSuffix}`);
-        } else {
-          setActionMessage(`Order ${created.order_code} berhasil dibuat dan dibayar (${paymentMethodLabel}).${waNoticeSuffix}`);
-        }
-      } else if (paymentFlowType === "later") {
-        setActionMessage(`Order ${created.order_code} berhasil dibuat. Pembayaran ditandai bayar nanti.${waNoticeSuffix}`);
-      } else {
-        setActionMessage(`Order ${created.order_code} berhasil dibuat.${waNoticeSuffix}`);
-      }
-      clearSavedDraftSnapshot();
+      const rootNavigation = navigation.getParent<NativeStackNavigationProp<AppRootStackParamList>>();
+      setActionMessage(null);
       setShowCreateForm(false);
+      clearSavedDraftSnapshot();
       resetDraft();
+
+      rootNavigation?.navigate("OrderPayment", {
+        orderId: created.id,
+        source: "create",
+        flow: "payment",
+        initialAmount: createdTotalAmount > 0 ? 0 : undefined,
+      });
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error));
     } finally {
@@ -2168,7 +2081,7 @@ export function QuickActionScreen() {
   }
 
   function handlePrimaryAction(): void {
-    if (step === "payment") {
+    if (step === "review" || step === "payment") {
       void submitOrder();
       return;
     }
@@ -2183,16 +2096,14 @@ export function QuickActionScreen() {
         ? selectedServiceDrafts.length === 0
         : step === "review"
           ? selectedLines.length === 0 || discountExceedsLimit || voucherCodeRejected
-          : submitting || selectedLines.length === 0 || discountExceedsLimit || voucherCodeRejected || paymentNowAmountInvalid;
+          : submitting || selectedLines.length === 0 || discountExceedsLimit || voucherCodeRejected;
   const secondaryButtonTitle = step === "customer" ? "Keluar" : "Kembali";
   const secondaryButtonIconName: keyof typeof Ionicons.glyphMap = step === "customer" ? "close-outline" : "arrow-back-outline";
   const primaryButtonTitle =
     step === "review"
-      ? "Lanjut Pembayaran"
+      ? "Simpan & Ke Pembayaran"
       : step === "payment"
-        ? paymentFlowType === "now" && total > 0
-          ? "Bayar & Simpan"
-          : "Simpan Pesanan"
+        ? "Simpan & Ke Pembayaran"
         : "Lanjut";
   const primaryDisabledHint = useMemo(() => {
     if (!primaryDisabled) {
@@ -2209,22 +2120,18 @@ export function QuickActionScreen() {
 
     if (step === "review") {
       if (voucherCodeRejected) {
-        return "Perbaiki voucher dulu sebelum lanjut ke pembayaran.";
+        return "Perbaiki voucher dulu sebelum menyimpan pesanan.";
       }
 
       if (discountExceedsLimit) {
         return "Total potongan melebihi batas. Cek diskon manual atau promo.";
       }
 
-      return "Lengkapi ringkasan dulu untuk lanjut ke pembayaran.";
+      return "Lengkapi ringkasan dulu sebelum menyimpan pesanan.";
     }
 
     if (submitting) {
       return "Menyimpan pesanan...";
-    }
-
-    if (step === "payment" && paymentNowAmountInvalid) {
-      return "Isi nominal dibayar dulu.";
     }
 
     if (voucherCodeRejected) {
@@ -2235,8 +2142,8 @@ export function QuickActionScreen() {
       return "Total potongan melebihi batas. Cek diskon manual atau promo.";
     }
 
-    return "Lengkapi pembayaran dulu untuk menyimpan pesanan.";
-  }, [discountExceedsLimit, paymentNowAmountInvalid, primaryDisabled, step, submitting, voucherCodeRejected]);
+    return "Simpan pesanan dulu untuk lanjut ke halaman pembayaran.";
+  }, [discountExceedsLimit, primaryDisabled, step, submitting, voucherCodeRejected]);
   const startCreateTitle = hasSavedDraft ? "Lanjutkan Draft" : "Buat Pesanan Baru";
   const startCreateIconName: keyof typeof Ionicons.glyphMap = hasSavedDraft ? "document-text-outline" : "bag-add-outline";
 
@@ -3102,7 +3009,7 @@ export function QuickActionScreen() {
 
                   <AppPanel style={styles.summaryPanel}>
                     <View style={styles.reviewSectionHeader}>
-                      <Text style={styles.summaryTitle}>Metode Pembayaran</Text>
+                      <Text style={styles.summaryTitle}>Arahkan Pembayaran</Text>
                     </View>
 
                     <View style={styles.reviewPaymentModeRow}>
@@ -3132,91 +3039,13 @@ export function QuickActionScreen() {
 
                     {paymentFlowType === "now" ? (
                       <>
-                        <View style={styles.reviewAmountField}>
-                          <Text style={styles.reviewAmountLabel}>Nominal Dibayar</Text>
-                          <TextInput
-                            keyboardType="numeric"
-                            onChangeText={handlePaidAmountChange}
-                            onFocus={() => {
-                              setTimeout(() => ensureTextInputVisible(paymentAmountInputRef.current, "comfort"), 70);
-                            }}
-                            placeholder="0"
-                            placeholderTextColor={theme.colors.textMuted}
-                            ref={paymentAmountInputRef}
-                            style={[styles.input, styles.reviewAmountInput, paymentNowAmountInvalid ? styles.inputInvalid : null]}
-                            value={paidAmountInput}
-                          />
-                          <View style={styles.reviewPaymentQuickRow}>
-                            <Pressable
-                              onPress={() => setPaidAmountInput(normalizeMoneyInput(`${total}`))}
-                              style={({ pressed }) => [styles.reviewPaymentQuickChip, pressed ? styles.pressed : null]}
-                            >
-                              <Text style={styles.reviewPaymentQuickChipText}>Lunas</Text>
-                            </Pressable>
-                            <Pressable
-                              onPress={() => setPaidAmountInput(normalizeMoneyInput(`${Math.ceil(total / 2)}`))}
-                              style={({ pressed }) => [styles.reviewPaymentQuickChip, pressed ? styles.pressed : null]}
-                            >
-                              <Text style={styles.reviewPaymentQuickChipText}>50%</Text>
-                            </Pressable>
-                            <Pressable
-                              onPress={() => setPaidAmountInput("")}
-                              style={({ pressed }) => [styles.reviewPaymentQuickChip, pressed ? styles.pressed : null]}
-                            >
-                              <Text style={styles.reviewPaymentQuickChipText}>Reset</Text>
-                            </Pressable>
-                          </View>
-                        </View>
-
-                        <View style={styles.reviewPaymentMethodRow}>
-                          {PAYMENT_METHOD_OPTIONS.map((option) => {
-                            const methodSelected = paymentMethodType === option.value;
-                            return (
-                              <Pressable
-                                key={option.value}
-                                onPress={() => setPaymentMethodType(option.value)}
-                                style={({ pressed }) => [
-                                  styles.reviewPaymentMethodChip,
-                                  methodSelected ? styles.reviewPaymentMethodChipActive : null,
-                                  pressed ? styles.pressed : null,
-                                ]}
-                              >
-                                <Ionicons color={methodSelected ? theme.colors.info : theme.colors.textMuted} name={option.icon} size={14} />
-                                <Text style={[styles.reviewPaymentMethodChipText, methodSelected ? styles.reviewPaymentMethodChipTextActive : null]}>
-                                  {option.label}
-                                </Text>
-                              </Pressable>
-                            );
-                          })}
-                        </View>
+                        <Text style={styles.reviewPromoHint}>
+                          Setelah pesanan disimpan, aplikasi akan membuka layar pembayaran khusus dengan keypad custom untuk mencatat nominal, cetak nota, dan kirim ke WhatsApp.
+                        </Text>
                         <View style={styles.summaryRow}>
-                          <Text style={styles.summaryText}>{paymentAppliedLabel}</Text>
-                          <Text style={styles.summaryValue}>{formatMoney(paymentAppliedAmount)}</Text>
+                          <Text style={styles.summaryText}>Nominal yang Akan Ditagih</Text>
+                          <Text style={[styles.summaryValue, total > 0 ? styles.summaryDueValue : null]}>{formatMoney(total)}</Text>
                         </View>
-                        <View style={styles.summaryRow}>
-                          <Text style={styles.summaryText}>{paymentRemainingLabel}</Text>
-                          <Text style={[styles.summaryValue, paymentRemainingAmount > 0 ? styles.summaryDueValue : null]}>
-                            {formatMoney(paymentRemainingAmount)}
-                          </Text>
-                        </View>
-                        {paymentMethodType === "cash" && paymentChangeAmount > 0 ? (
-                          <View style={styles.summaryRow}>
-                            <Text style={styles.summaryText}>Kembalian</Text>
-                            <Text style={styles.summaryValue}>{formatMoney(paymentChangeAmount)}</Text>
-                          </View>
-                        ) : null}
-                        {paymentInputExceededTotal && paymentMethodType !== "cash" ? (
-                          <Text style={styles.reviewPromoHint}>
-                            Nominal di atas tagihan. Sistem hanya mencatat sampai total tagihan {formatMoney(total)}.
-                          </Text>
-                        ) : null}
-                        {total > 0 ? (
-                          <Text style={styles.reviewPromoHint}>
-                            {`Pembayaran ${selectedPaymentMethodOption.label.toLowerCase()} disimpan sebesar nominal tercatat.`}
-                          </Text>
-                        ) : (
-                          <Text style={styles.reviewPromoHint}>Total pesanan Rp 0. Order akan tersimpan tanpa pembayaran tambahan.</Text>
-                        )}
                       </>
                     ) : (
                       <Text style={styles.reviewPromoHint}>Pesanan disimpan sebagai bayar nanti dengan sisa tagihan {formatMoney(total)}.</Text>
@@ -3244,22 +3073,6 @@ export function QuickActionScreen() {
               </View>
             </AppPanel>
           )}
-
-          {lastCreatedOrderId && !showCreateForm ? (
-            <AppPanel style={styles.panel}>
-              <AppButton
-                leftElement={<Ionicons color={theme.colors.info} name="receipt-outline" size={18} />}
-                onPress={() =>
-                  navigation.navigate("OrdersTab", {
-                    screen: "OrderDetail",
-                    params: { orderId: lastCreatedOrderId },
-                  })
-                }
-                title="Lihat Detail Order"
-                variant="secondary"
-              />
-            </AppPanel>
-          ) : null}
 
           {actionMessage ? (
             <View style={styles.successWrap}>
@@ -4398,59 +4211,6 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
     reviewPaymentChipTextActive: {
       color: theme.colors.info,
-    },
-    reviewPaymentMethodRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      flexWrap: "wrap",
-      gap: 7,
-    },
-    reviewPaymentMethodChip: {
-      minHeight: 36,
-      borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surface,
-      paddingHorizontal: 10,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 5,
-    },
-    reviewPaymentMethodChipActive: {
-      borderColor: theme.colors.info,
-      backgroundColor: theme.colors.primarySoft,
-    },
-    reviewPaymentMethodChipText: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 12,
-      lineHeight: 15,
-    },
-    reviewPaymentMethodChipTextActive: {
-      color: theme.colors.info,
-    },
-    reviewPaymentQuickRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 7,
-      flexWrap: "wrap",
-    },
-    reviewPaymentQuickChip: {
-      minHeight: 32,
-      borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surface,
-      paddingHorizontal: 10,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    reviewPaymentQuickChipText: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 12,
-      lineHeight: 14,
     },
     reviewPromoBlock: {
       gap: 5,

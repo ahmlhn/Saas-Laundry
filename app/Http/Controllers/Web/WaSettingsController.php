@@ -130,11 +130,7 @@ class WaSettingsController extends Controller
 
         $validated = $request->validate([
             'provider_key' => ['required', 'string', 'max:40'],
-            'api_key' => ['nullable', 'string', 'max:255'],
-            'token' => ['nullable', 'string', 'max:255'],
             'sender' => ['nullable', 'string', 'max:80'],
-            'base_url' => ['nullable', 'url', 'max:255'],
-            'send_path' => ['nullable', 'string', 'max:80'],
             'is_active' => ['nullable', 'boolean'],
         ]);
 
@@ -149,14 +145,9 @@ class WaSettingsController extends Controller
             ]);
         }
 
-        $apiKey = $validated['api_key'] ?? $validated['token'] ?? null;
-        $incomingCredentials = [
-            'api_key' => $apiKey,
-            'token' => $apiKey,
+        $incomingCredentials = $this->sanitizeIncomingCredentialsForProvider($provider->key, [
             'sender' => $validated['sender'] ?? null,
-            'base_url' => $validated['base_url'] ?? null,
-            'send_path' => $validated['send_path'] ?? null,
-        ];
+        ]);
 
         $existingConfig = WaProviderConfig::query()
             ->where('tenant_id', $tenant->id)
@@ -164,6 +155,7 @@ class WaSettingsController extends Controller
             ->first();
 
         $credentials = $this->mergeCredentials($existingConfig?->credentials_json, $incomingCredentials);
+        $credentials = $this->enforceStoredCredentialPolicy($provider->key, $credentials);
         $requestedActive = (bool) ($validated['is_active'] ?? true);
         $driver = $this->providerRegistry->driverForKey($provider->key);
         try {
@@ -271,6 +263,79 @@ class WaSettingsController extends Controller
     }
 
     /**
+     * @param array<string, mixed> $incoming
+     * @return array<string, mixed>
+     */
+    private function sanitizeIncomingCredentialsForProvider(string $providerKey, array $incoming): array
+    {
+        if (strtolower($providerKey) !== 'mpwa') {
+            return $incoming;
+        }
+
+        return $this->dropCredentialKeys($incoming, [
+            'api_key',
+            'token',
+            'apikey',
+            'base_url',
+            'url',
+            'send_path',
+            'message_path',
+            'timeout_seconds',
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $credentials
+     * @return array<string, mixed>
+     */
+    private function enforceStoredCredentialPolicy(string $providerKey, array $credentials): array
+    {
+        if (strtolower($providerKey) !== 'mpwa') {
+            return $credentials;
+        }
+
+        return $this->dropCredentialKeys($credentials, [
+            'api_key',
+            'token',
+            'apikey',
+            'base_url',
+            'url',
+            'send_path',
+            'message_path',
+            'timeout_seconds',
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $credentials
+     * @param array<int, string> $blockedKeys
+     * @return array<string, mixed>
+     */
+    private function dropCredentialKeys(array $credentials, array $blockedKeys): array
+    {
+        $blocked = [];
+        foreach ($blockedKeys as $key) {
+            $blocked[strtolower($key)] = true;
+        }
+
+        $filtered = [];
+
+        foreach ($credentials as $key => $value) {
+            if (! is_string($key)) {
+                continue;
+            }
+
+            if (isset($blocked[strtolower($key)])) {
+                continue;
+            }
+
+            $filtered[$key] = $value;
+        }
+
+        return $filtered;
+    }
+
+    /**
      * @param array<string, mixed> $credentials
      * @return array{ok: bool, message: string}
      */
@@ -286,7 +351,7 @@ class WaSettingsController extends Controller
             if ($isMpwaPartialSetup) {
                 return [
                     'ok' => false,
-                    'message' => 'Sender tersimpan. Lengkapi api_key dan base_url MPWA untuk mengaktifkan pengiriman.',
+                    'message' => 'Sender tersimpan. Lengkapi MPWA_API_KEY dan MPWA_BASE_URL di .env untuk mengaktifkan pengiriman.',
                 ];
             }
 

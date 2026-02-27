@@ -10,7 +10,7 @@ import { AppPanel } from "../../components/ui/AppPanel";
 import { AppSkeletonBlock } from "../../components/ui/AppSkeletonBlock";
 import { StatusPill } from "../../components/ui/StatusPill";
 import { listOrders } from "../../features/orders/orderApi";
-import { ORDER_BUCKETS, type OrderBucket, resolveOrderBucket } from "../../features/orders/orderBuckets";
+import { ORDER_BUCKETS, countOrdersByBucket, type OrderBucket, resolveOrderBucket } from "../../features/orders/orderBuckets";
 import { formatStatusLabel, resolveLaundryTone } from "../../features/orders/orderStatus";
 import { toDateToken } from "../../lib/dateTime";
 import { getApiErrorMessage } from "../../lib/httpClient";
@@ -23,6 +23,7 @@ import type { OrderSummary } from "../../types/order";
 type Navigation = NativeStackNavigationProp<OrdersStackParamList, "OrdersToday">;
 type OrdersRoute = RouteProp<OrdersStackParamList, "OrdersToday">;
 type LoadMode = "initial" | "refresh" | "more";
+type CompletedRangeMode = "today" | "week" | "month" | "custom";
 
 interface LoadOrdersArgs {
   mode: LoadMode;
@@ -36,6 +37,75 @@ const PAGE_SIZE = 20;
 const INITIAL_LIMIT = 30;
 const MAX_LIMIT = 100;
 const SEARCH_DEBOUNCE_MS = 300;
+
+function isValidDateToken(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+}
+
+function resolveMonthRange(dateToken: string): { dateFrom: string; dateTo: string } {
+  const [yearRaw, monthRaw] = dateToken.split("-");
+  const year = Number.parseInt(yearRaw ?? "", 10);
+  const month = Number.parseInt(monthRaw ?? "", 10);
+
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    return { dateFrom: dateToken, dateTo: dateToken };
+  }
+
+  const lastDay = new Date(year, month, 0).getDate();
+  const normalizedMonth = String(month).padStart(2, "0");
+
+  return {
+    dateFrom: `${year}-${normalizedMonth}-01`,
+    dateTo: `${year}-${normalizedMonth}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
+
+function formatDateTokenLocal(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function resolveWeekRange(dateToken: string): { dateFrom: string; dateTo: string } {
+  const [yearRaw, monthRaw, dayRaw] = dateToken.split("-");
+  const year = Number.parseInt(yearRaw ?? "", 10);
+  const month = Number.parseInt(monthRaw ?? "", 10);
+  const day = Number.parseInt(dayRaw ?? "", 10);
+
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return { dateFrom: dateToken, dateTo: dateToken };
+  }
+
+  const baseDate = new Date(year, month - 1, day);
+  const weekday = baseDate.getDay();
+  const offsetFromMonday = (weekday + 6) % 7;
+
+  const startDate = new Date(baseDate);
+  startDate.setDate(baseDate.getDate() - offsetFromMonday);
+
+  const endDate = new Date(startDate);
+  endDate.setDate(startDate.getDate() + 6);
+
+  return {
+    dateFrom: formatDateTokenLocal(startDate),
+    dateTo: formatDateTokenLocal(endDate),
+  };
+}
+
+function mergeOrders(openOrders: OrderSummary[], completedOrders: OrderSummary[]): OrderSummary[] {
+  const byId = new Map<string, OrderSummary>();
+
+  for (const order of [...openOrders, ...completedOrders]) {
+    byId.set(order.id, order);
+  }
+
+  return Array.from(byId.values()).sort((left, right) => {
+    const leftTime = new Date(left.created_at).getTime();
+    const rightTime = new Date(right.created_at).getTime();
+    return rightTime - leftTime;
+  });
+}
 
 function formatMoney(value: number): string {
   return `Rp ${currencyFormatter.format(value)}`;
@@ -93,6 +163,12 @@ export function OrdersTodayScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeBucket, setActiveBucket] = useState<OrderBucket>(route.params?.initialBucket ?? "validasi");
   const [isFilterRaised, setIsFilterRaised] = useState(false);
+  const [completedRangeMode, setCompletedRangeMode] = useState<CompletedRangeMode>("month");
+  const [isCompletedFilterOpen, setIsCompletedFilterOpen] = useState(false);
+  const [customDateFromInput, setCustomDateFromInput] = useState("");
+  const [customDateToInput, setCustomDateToInput] = useState("");
+  const [appliedCustomDateFrom, setAppliedCustomDateFrom] = useState("");
+  const [appliedCustomDateTo, setAppliedCustomDateTo] = useState("");
 
   const requestIdRef = useRef(0);
   const firstFocusHandledRef = useRef(false);
@@ -100,6 +176,14 @@ export function OrdersTodayScreen() {
   const latestQueryRef = useRef(submittedQuery);
   const listTransition = useRef(new Animated.Value(1)).current;
   const hasAnimatedListRef = useRef(false);
+  const todayToken = useMemo(() => toDateToken(new Date(), outletTimezone), [outletTimezone]);
+
+  useEffect(() => {
+    setCustomDateFromInput(todayToken);
+    setCustomDateToInput(todayToken);
+    setAppliedCustomDateFrom(todayToken);
+    setAppliedCustomDateTo(todayToken);
+  }, [todayToken]);
 
   useEffect(() => {
     latestLimitRef.current = limit;
@@ -127,6 +211,42 @@ export function OrdersTodayScreen() {
     return () => clearTimeout(timeout);
   }, [queryInput]);
 
+  const completedDateFilter = useMemo(() => {
+    if (completedRangeMode === "today") {
+      return {
+        label: "Hari ini",
+        dateFrom: todayToken,
+        dateTo: todayToken,
+      };
+    }
+
+    if (completedRangeMode === "week") {
+      const { dateFrom, dateTo } = resolveWeekRange(todayToken);
+      return {
+        label: "Minggu ini",
+        dateFrom,
+        dateTo,
+      };
+    }
+
+    if (completedRangeMode === "custom") {
+      const dateFrom = isValidDateToken(appliedCustomDateFrom) ? appliedCustomDateFrom : todayToken;
+      const dateTo = isValidDateToken(appliedCustomDateTo) ? appliedCustomDateTo : dateFrom;
+      return {
+        label: `Rentang ${dateFrom} s/d ${dateTo}`,
+        dateFrom,
+        dateTo,
+      };
+    }
+
+    const { dateFrom, dateTo } = resolveMonthRange(todayToken);
+    return {
+      label: "Bulan ini",
+      dateFrom,
+      dateTo,
+    };
+  }, [appliedCustomDateFrom, appliedCustomDateTo, completedRangeMode, todayToken]);
+
   const loadOrders = useCallback(
     async ({ mode, targetLimit, query, forceRefresh = false }: LoadOrdersArgs): Promise<void> => {
       const outletId = selectedOutlet?.id;
@@ -153,14 +273,28 @@ export function OrdersTodayScreen() {
       setErrorMessage(null);
 
       try {
-        const data = await listOrders({
-          outletId,
-          limit: targetLimit,
-          query,
-          date: toDateToken(new Date(), outletTimezone),
-          timezone: outletTimezone,
-          forceRefresh,
-        });
+        const [openOrders, completedOrders] = await Promise.all([
+          listOrders({
+            outletId,
+            limit: MAX_LIMIT,
+            query,
+            timezone: outletTimezone,
+            statusScope: "open",
+            forceRefresh,
+          }),
+          listOrders({
+            outletId,
+            limit: targetLimit,
+            query,
+            timezone: outletTimezone,
+            statusScope: "completed",
+            dateFrom: completedDateFilter.dateFrom,
+            dateTo: completedDateFilter.dateTo,
+            forceRefresh,
+          }),
+        ]);
+
+        const data = mergeOrders(openOrders, completedOrders);
 
         if (currentRequestId !== requestIdRef.current) {
           return;
@@ -169,7 +303,7 @@ export function OrdersTodayScreen() {
         setOrders(data);
         setLimit(targetLimit);
         latestLimitRef.current = targetLimit;
-        setHasMore(data.length >= targetLimit && targetLimit < MAX_LIMIT);
+        setHasMore(completedOrders.length >= targetLimit && targetLimit < MAX_LIMIT);
       } catch (error) {
         if (currentRequestId !== requestIdRef.current) {
           return;
@@ -186,7 +320,7 @@ export function OrdersTodayScreen() {
         setIsLoadingMore(false);
       }
     },
-    [selectedOutlet?.id, outletTimezone]
+    [completedDateFilter.dateFrom, completedDateFilter.dateTo, outletTimezone, selectedOutlet?.id]
   );
 
   useEffect(() => {
@@ -235,25 +369,25 @@ export function OrdersTodayScreen() {
     return orders.filter((order) => resolveOrderBucket(order) === activeBucket);
   }, [orders, activeBucket]);
 
-  const bucketCounts = useMemo(() => {
-    const counts: Record<OrderBucket, number> = {
-      validasi: 0,
-      antrian: 0,
-      proses: 0,
-      siap_ambil: 0,
-      siap_antar: 0,
-    };
-
-    for (const order of orders) {
-      counts[resolveOrderBucket(order)] += 1;
-    }
-
-    return counts;
-  }, [orders]);
+  const bucketCounts = useMemo(() => countOrdersByBucket(orders), [orders]);
 
   const pendingCount = useMemo(() => bucketCounts.validasi + bucketCounts.antrian + bucketCounts.proses, [bucketCounts]);
   const dueCount = useMemo(() => orders.filter((order) => order.due_amount > 0).length, [orders]);
-  const activeBucketLabel = useMemo(() => ORDER_BUCKETS.find((item) => item.key === activeBucket)?.label ?? "-", [activeBucket]);
+  const completedRangeLabel = useMemo(() => {
+    if (completedRangeMode === "today") {
+      return "Hari Ini";
+    }
+    if (completedRangeMode === "week") {
+      return "Minggu Ini";
+    }
+    if (completedRangeMode === "custom") {
+      return "Pilih Tanggal";
+    }
+    return "Bulan Ini";
+  }, [completedRangeMode]);
+  const showCompletedDateControls = activeBucket === "selesai";
+  const canApplyCustomDate = isValidDateToken(customDateFromInput) && isValidDateToken(customDateToInput);
+  const canLoadMoreCompleted = activeBucket === "selesai" && hasMore;
 
   const animateListTransition = useCallback(() => {
     listTransition.stopAnimation();
@@ -274,6 +408,7 @@ export function OrdersTodayScreen() {
 
     animateListTransition();
     setIsFilterRaised(false);
+    setIsCompletedFilterOpen(false);
   }, [activeBucket, submittedQuery, animateListTransition]);
 
   const listAnimatedStyle = useMemo(
@@ -301,7 +436,7 @@ export function OrdersTodayScreen() {
   }, [loadOrders]);
 
   const handleLoadMore = useCallback(() => {
-    if (!hasMore || loading || refreshing || isLoadingMore) {
+    if (activeBucket !== "selesai" || !hasMore || loading || refreshing || isLoadingMore) {
       return;
     }
 
@@ -317,7 +452,7 @@ export function OrdersTodayScreen() {
       query: latestQueryRef.current,
       forceRefresh: true,
     });
-  }, [hasMore, isLoadingMore, loading, refreshing, loadOrders]);
+  }, [activeBucket, hasMore, isLoadingMore, loading, refreshing, loadOrders]);
 
   const handleBucketChange = useCallback(
     (bucket: OrderBucket) => {
@@ -329,6 +464,52 @@ export function OrdersTodayScreen() {
     },
     [activeBucket]
   );
+
+  const handleCompletedRangeMode = useCallback(
+    (nextMode: CompletedRangeMode) => {
+      if (nextMode === completedRangeMode) {
+        setIsCompletedFilterOpen(false);
+        return;
+      }
+
+      setCompletedRangeMode(nextMode);
+      setIsCompletedFilterOpen(false);
+
+      if (nextMode === "custom") {
+        const fallbackDateFrom = completedDateFilter.dateFrom ?? todayToken;
+        const fallbackDateTo = completedDateFilter.dateTo ?? fallbackDateFrom;
+
+        setCustomDateFromInput(fallbackDateFrom);
+        setCustomDateToInput(fallbackDateTo);
+        setAppliedCustomDateFrom(fallbackDateFrom);
+        setAppliedCustomDateTo(fallbackDateTo);
+      }
+    },
+    [completedDateFilter.dateFrom, completedDateFilter.dateTo, completedRangeMode, todayToken]
+  );
+
+  const handleApplyCustomDate = useCallback(() => {
+    const normalizedFrom = customDateFromInput.trim();
+    const normalizedTo = customDateToInput.trim();
+
+    if (!isValidDateToken(normalizedFrom) || !isValidDateToken(normalizedTo)) {
+      setErrorMessage("Format tanggal harus YYYY-MM-DD.");
+      return;
+    }
+
+    if (normalizedFrom > normalizedTo) {
+      setErrorMessage("Tanggal awal tidak boleh melebihi tanggal akhir.");
+      return;
+    }
+
+    setErrorMessage(null);
+    setAppliedCustomDateFrom(normalizedFrom);
+    setAppliedCustomDateTo(normalizedTo);
+    if (completedRangeMode !== "custom") {
+      setCompletedRangeMode("custom");
+    }
+    setIsCompletedFilterOpen(false);
+  }, [completedRangeMode, customDateFromInput, customDateToInput]);
 
   const handleListScroll = useCallback((offsetY: number) => {
     const shouldRaise = offsetY > 8;
@@ -500,17 +681,99 @@ export function OrdersTodayScreen() {
           })}
         </ScrollView>
 
-        <View style={styles.listMetaRow}>
-          <Text numberOfLines={1} style={styles.listMetaText}>
-            {bucketedOrders.length} dari {orders.length} pesanan • {activeBucketLabel}
-          </Text>
-          {refreshing ? (
-            <View style={styles.refreshingChip}>
-              <Ionicons color={theme.colors.info} name="sync-outline" size={12} />
-              <Text style={styles.refreshingText}>Memperbarui...</Text>
+        {showCompletedDateControls ? (
+          <View style={styles.dateFilterWrap}>
+            <View style={styles.dateFilterDropdownWrap}>
+              <Pressable
+                onPress={() => setIsCompletedFilterOpen((previous) => !previous)}
+                style={({ pressed }) => [
+                  styles.dateFilterDropdownTrigger,
+                  isCompletedFilterOpen ? styles.dateFilterDropdownTriggerActive : null,
+                  pressed ? styles.dateFilterDropdownTriggerPressed : null,
+                ]}
+              >
+                <View style={styles.dateFilterDropdownLabelWrap}>
+                  <Text style={styles.dateFilterDropdownCaption}>Filter tanggal selesai</Text>
+                  <Text style={styles.dateFilterDropdownValue}>{completedRangeLabel}</Text>
+                </View>
+                <Ionicons color={theme.colors.info} name={isCompletedFilterOpen ? "chevron-up" : "chevron-down"} size={16} />
+              </Pressable>
+
+              {isCompletedFilterOpen ? (
+                <View style={styles.dateFilterDropdownMenu}>
+                  {[
+                    { key: "today" as const, label: "Hari Ini" },
+                    { key: "week" as const, label: "Minggu Ini" },
+                    { key: "month" as const, label: "Bulan Ini" },
+                    { key: "custom" as const, label: "Pilih Tanggal" },
+                  ].map((option) => {
+                    const active = completedRangeMode === option.key;
+                    return (
+                      <Pressable
+                        key={option.key}
+                        onPress={() => handleCompletedRangeMode(option.key)}
+                        style={({ pressed }) => [
+                          styles.dateFilterDropdownOption,
+                          active ? styles.dateFilterDropdownOptionActive : null,
+                          pressed ? styles.dateFilterDropdownOptionPressed : null,
+                        ]}
+                      >
+                        <Text style={[styles.dateFilterDropdownOptionText, active ? styles.dateFilterDropdownOptionTextActive : null]}>{option.label}</Text>
+                        {active ? <Ionicons color={theme.colors.info} name="checkmark" size={15} /> : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
             </View>
-          ) : null}
-        </View>
+
+            {completedRangeMode === "custom" ? (
+              <View style={styles.customDateRow}>
+                <View style={styles.customDateInputWrap}>
+                  <Ionicons color={theme.colors.textMuted} name="calendar-outline" size={15} />
+                  <Text style={styles.customDatePrefix}>Dari</Text>
+                  <TextInput
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    onChangeText={(value) => {
+                      setCustomDateFromInput(value);
+                      setErrorMessage(null);
+                    }}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor={theme.colors.textMuted}
+                    style={styles.customDateInput}
+                    value={customDateFromInput}
+                  />
+                </View>
+                <View style={styles.customDateInputWrap}>
+                  <Ionicons color={theme.colors.textMuted} name="calendar-outline" size={15} />
+                  <Text style={styles.customDatePrefix}>Sampai</Text>
+                  <TextInput
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    onChangeText={(value) => {
+                      setCustomDateToInput(value);
+                      setErrorMessage(null);
+                    }}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor={theme.colors.textMuted}
+                    style={styles.customDateInput}
+                    value={customDateToInput}
+                  />
+                </View>
+                <View style={styles.customDateActionWrap}>
+                  <AppButton
+                    disabled={!canApplyCustomDate}
+                    onPress={handleApplyCustomDate}
+                    title="Terapkan"
+                    variant="secondary"
+                  />
+                </View>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
       </View>
 
       <Animated.View style={[styles.listAnimatedWrap, listAnimatedStyle]}>
@@ -518,7 +781,7 @@ export function OrdersTodayScreen() {
           renderLoadingSkeleton()
         ) : (
           <FlatList
-            key={`${activeBucket}:${submittedQuery}`}
+            key={`${activeBucket}:${submittedQuery}:${completedRangeMode}:${completedDateFilter.dateFrom ?? ""}:${completedDateFilter.dateTo ?? ""}`}
             contentContainerStyle={styles.listContainer}
             data={bucketedOrders}
             keyExtractor={(item) => item.id}
@@ -548,7 +811,7 @@ export function OrdersTodayScreen() {
               ) : null
             }
             ListFooterComponent={
-              hasMore ? (
+              canLoadMoreCompleted ? (
                 <View style={styles.footerWrap}>
                   <AppButton
                     disabled={isLoadingMore}
@@ -738,6 +1001,109 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
       paddingRight: theme.spacing.md,
       paddingBottom: 2,
     },
+    dateFilterWrap: {
+      gap: isCompactLandscape ? 5 : 6,
+    },
+    dateFilterDropdownWrap: {
+      position: "relative",
+      gap: isCompactLandscape ? 5 : 6,
+      zIndex: 3,
+    },
+    dateFilterDropdownTrigger: {
+      minHeight: isCompactLandscape ? 42 : 46,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.inputBg,
+      paddingHorizontal: 12,
+    },
+    dateFilterDropdownTriggerActive: {
+      borderColor: theme.colors.info,
+      backgroundColor: theme.colors.primarySoft,
+    },
+    dateFilterDropdownTriggerPressed: {
+      opacity: 0.92,
+    },
+    dateFilterDropdownLabelWrap: {
+      flex: 1,
+      gap: 1,
+    },
+    dateFilterDropdownCaption: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: isCompactLandscape ? 10 : 10.5,
+    },
+    dateFilterDropdownValue: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: isCompactLandscape ? 11.5 : 12.5,
+    },
+    dateFilterDropdownMenu: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surface,
+      overflow: "hidden",
+    },
+    dateFilterDropdownOption: {
+      minHeight: isCompactLandscape ? 38 : 40,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10,
+      paddingHorizontal: 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
+    },
+    dateFilterDropdownOptionActive: {
+      backgroundColor: theme.colors.primarySoft,
+    },
+    dateFilterDropdownOptionPressed: {
+      opacity: 0.92,
+    },
+    dateFilterDropdownOptionText: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: isCompactLandscape ? 11.5 : 12.5,
+    },
+    dateFilterDropdownOptionTextActive: {
+      color: theme.colors.info,
+    },
+    customDateRow: {
+      flexDirection: "column",
+      alignItems: "stretch",
+      gap: 8,
+    },
+    customDateInputWrap: {
+      minHeight: isCompactLandscape ? 40 : 42,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.inputBg,
+      paddingHorizontal: 10,
+    },
+    customDatePrefix: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.semibold,
+      fontSize: isCompactLandscape ? 10.5 : 11.5,
+    },
+    customDateInput: {
+      flex: 1,
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.medium,
+      fontSize: isCompactLandscape ? 11.5 : 12.5,
+      paddingVertical: isCompactLandscape ? 8 : 9,
+    },
+    customDateActionWrap: {
+      alignSelf: isCompactLandscape ? "stretch" : "flex-end",
+    },
     filterTab: {
       flexDirection: "row",
       alignItems: "center",
@@ -775,37 +1141,6 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
     filterCountActive: {
       color: theme.colors.primaryContrast,
       backgroundColor: theme.colors.info,
-    },
-    listMetaRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: theme.spacing.xs,
-      minHeight: isCompactLandscape ? 18 : 20,
-      flexWrap: isCompactLandscape ? "wrap" : "nowrap",
-    },
-    listMetaText: {
-      flex: 1,
-      color: theme.colors.textMuted,
-      fontFamily: theme.fonts.medium,
-      fontSize: isCompactLandscape ? 10.5 : 11,
-      lineHeight: isCompactLandscape ? 14 : 15,
-    },
-    refreshingChip: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 4,
-      borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
-      backgroundColor: theme.colors.surfaceSoft,
-      borderRadius: theme.radii.pill,
-      paddingHorizontal: isCompactLandscape ? 7 : 8,
-      paddingVertical: isCompactLandscape ? 2 : 3,
-    },
-    refreshingText: {
-      color: theme.colors.info,
-      fontFamily: theme.fonts.semibold,
-      fontSize: isCompactLandscape ? 10.5 : 11,
     },
     skeletonWrap: {
       flex: 1,

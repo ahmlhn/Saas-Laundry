@@ -44,12 +44,13 @@
 
 ## Update Lanjutan (Sender Per Tenant)
 - API provider list sekarang juga mengembalikan `sender` aktif per provider.
-- API/Web upsert provider config sekarang merge kredensial baru ke kredensial lama, jadi update `sender` tidak menghapus `api_key/base_url` yang sudah tersimpan.
-- Jika tenant baru menyimpan `sender` saja (tanpa `api_key/base_url`), config tetap tersimpan sebagai `nonaktif` dengan pesan health yang jelas, tidak gagal 500.
+- API/Web upsert provider config untuk `mpwa` sekarang hanya menyimpan `sender` per tenant.
+- `api_key`, `base_url`, `send_path`, dan `timeout` MPWA wajib dikelola dari `.env` (`MPWA_*`) sebagai konfigurasi global server.
+- Jika tenant baru menyimpan `sender` tapi env MPWA belum lengkap, config tetap tersimpan sebagai `nonaktif` dengan pesan health yang jelas, tidak gagal 500.
 - Mobile halaman `Kirim WA`:
   - Tambah panel `Sender Tenant (MPWA)`.
   - Bisa simpan sender per tenant langsung dari aplikasi.
 
 ## Catatan
 - Driver `mpwa` disiapkan kompatibel dengan payload form-data endpoint default `/send-message`.
-- Jika endpoint MPWA berbeda, bisa override via `base_url` dan `send_path` di konfigurasi provider atau env.
+- Jika endpoint MPWA berbeda, ubah lewat env (`MPWA_BASE_URL`, `MPWA_SEND_PATH`).

@@ -1,0 +1,316 @@
+diff --git a/node_modules/@haroldtran/react-native-thermal-printer/android/src/main/java/com/harold/rn/printer/RNBLEPrinterModule.java b/node_modules/@haroldtran/react-native-thermal-printer/android/src/main/java/com/harold/rn/printer/RNBLEPrinterModule.java
+index 9943198..cc31d06 100644
+--- a/node_modules/@haroldtran/react-native-thermal-printer/android/src/main/java/com/harold/rn/printer/RNBLEPrinterModule.java
++++ b/node_modules/@haroldtran/react-native-thermal-printer/android/src/main/java/com/harold/rn/printer/RNBLEPrinterModule.java
+@@ -49,15 +49,23 @@ public class RNBLEPrinterModule extends ReactContextBaseJavaModule implements RN
+     @ReactMethod
+     @Override
+     public void getDeviceList(Callback successCallback, Callback errorCallback) {
+-        List<PrinterDevice> printerDevices = adapter.getDeviceList(errorCallback);
+-        WritableArray pairedDeviceList = Arguments.createArray();
+-        if (printerDevices.size() > 0) {
+-            for (PrinterDevice printerDevice : printerDevices) {
+-                pairedDeviceList.pushMap(printerDevice.toRNWritableMap());
++        try {
++            if (adapter == null) {
++                adapter = BLEPrinterAdapter.getInstance();
++            }
++            List<PrinterDevice> printerDevices = adapter.getDeviceList(errorCallback);
++            WritableArray pairedDeviceList = Arguments.createArray();
++            if (printerDevices.size() > 0) {
++                for (PrinterDevice printerDevice : printerDevices) {
++                    pairedDeviceList.pushMap(printerDevice.toRNWritableMap());
++                }
++                successCallback.invoke(pairedDeviceList);
++            } else {
++                errorCallback.invoke("No Device Found");
+             }
+-            successCallback.invoke(pairedDeviceList);
+-        } else {
+-            errorCallback.invoke("No Device Found");
++        } catch (Throwable throwable) {
++            Log.e("RNBLEPrinter", "Failed to get bluetooth device list", throwable);
++            errorCallback.invoke("Failed to get bluetooth devices: " + throwable.getMessage());
+         }
+     }
+ 
+@@ -112,7 +120,15 @@ public class RNBLEPrinterModule extends ReactContextBaseJavaModule implements RN
+ 
+     @ReactMethod
+     public void connectPrinter(String innerAddress, Callback successCallback, Callback errorCallback) {
+-        adapter.selectDevice(BLEPrinterDeviceId.valueOf(innerAddress), successCallback, errorCallback);
++        try {
++            if (adapter == null) {
++                adapter = BLEPrinterAdapter.getInstance();
++            }
++            adapter.selectDevice(BLEPrinterDeviceId.valueOf(innerAddress), successCallback, errorCallback);
++        } catch (Throwable throwable) {
++            Log.e("RNBLEPrinter", "Failed to connect bluetooth printer", throwable);
++            errorCallback.invoke("Failed to connect bluetooth printer: " + throwable.getMessage());
++        }
+     }
+ 
+     @Override
+diff --git a/node_modules/@haroldtran/react-native-thermal-printer/android/src/main/java/com/harold/rn/printer/adapter/BLEPrinterAdapter.java b/node_modules/@haroldtran/react-native-thermal-printer/android/src/main/java/com/harold/rn/printer/adapter/BLEPrinterAdapter.java
+index b8782bd..d9d541e 100644
+--- a/node_modules/@haroldtran/react-native-thermal-printer/android/src/main/java/com/harold/rn/printer/adapter/BLEPrinterAdapter.java
++++ b/node_modules/@haroldtran/react-native-thermal-printer/android/src/main/java/com/harold/rn/printer/adapter/BLEPrinterAdapter.java
+@@ -63,17 +63,25 @@ public class BLEPrinterAdapter extends BaseStreamPrinterAdapter {
+ 
+     @Override
+     public void init(ReactApplicationContext reactContext, Callback successCallback, Callback errorCallback) {
+-        this.mContext = reactContext;
+-        BluetoothAdapter bluetoothAdapter = getBTAdapter();
+-        if (bluetoothAdapter == null) {
+-            errorCallback.invoke("No bluetooth adapter available");
+-            return;
+-        }
+-        if (!bluetoothAdapter.isEnabled()) {
+-            errorCallback.invoke("bluetooth adapter is not enabled");
+-            return;
+-        } else {
+-            successCallback.invoke();
++        try {
++            this.mContext = reactContext;
++            BluetoothAdapter bluetoothAdapter = getBTAdapter();
++            if (bluetoothAdapter == null) {
++                errorCallback.invoke("No bluetooth adapter available");
++                return;
++            }
++            if (!bluetoothAdapter.isEnabled()) {
++                errorCallback.invoke("bluetooth adapter is not enabled");
++                return;
++            } else {
++                successCallback.invoke();
++            }
++        } catch (SecurityException securityException) {
++            Log.e(LOG_TAG, "Bluetooth permission missing while init", securityException);
++            errorCallback.invoke("Bluetooth permission denied. Please allow Nearby devices permission.");
++        } catch (Throwable throwable) {
++            Log.e(LOG_TAG, "Failed to init bluetooth adapter", throwable);
++            errorCallback.invoke("Failed to initialize bluetooth adapter: " + throwable.getMessage());
+         }
+ 
+     }
+@@ -84,23 +92,40 @@ public class BLEPrinterAdapter extends BaseStreamPrinterAdapter {
+ 
+     @Override
+     public List<PrinterDevice> getDeviceList(Callback errorCallback) {
+-        BluetoothAdapter bluetoothAdapter = getBTAdapter();
+         List<PrinterDevice> printerDevices = new ArrayList<>();
+-        if (bluetoothAdapter == null) {
+-            errorCallback.invoke("No bluetooth adapter available");
++        try {
++            BluetoothAdapter bluetoothAdapter = getBTAdapter();
++            if (bluetoothAdapter == null) {
++                errorCallback.invoke("No bluetooth adapter available");
++                return printerDevices;
++            }
++            if (!bluetoothAdapter.isEnabled()) {
++                errorCallback.invoke("bluetooth is not enabled");
++                return printerDevices;
++            }
++            Set<BluetoothDevice> pairedDevices = getBTAdapter().getBondedDevices();
++            if (pairedDevices == null || pairedDevices.size() == 0) {
++                return printerDevices;
++            }
++            for (BluetoothDevice device : pairedDevices) {
++                // Keep printer devices first, then show all paired bluetooth devices as
++                // fallback because some thermal models are not reported with printer class.
++                if (isPrinterDevice(device)) {
++                    printerDevices.add(0, new BLEPrinterDevice(device));
++                } else {
++                    printerDevices.add(new BLEPrinterDevice(device));
++                }
++            }
+             return printerDevices;
+-        }
+-        if (!bluetoothAdapter.isEnabled()) {
+-            errorCallback.invoke("bluetooth is not enabled");
++        } catch (SecurityException securityException) {
++            Log.e(LOG_TAG, "Bluetooth permission missing while reading paired devices", securityException);
++            errorCallback.invoke("Bluetooth permission denied. Please allow Nearby devices permission.");
++            return printerDevices;
++        } catch (Throwable throwable) {
++            Log.e(LOG_TAG, "Failed to read paired bluetooth devices", throwable);
++            errorCallback.invoke("Failed to read paired bluetooth devices: " + throwable.getMessage());
+             return printerDevices;
+         }
+-        Set<BluetoothDevice> pairedDevices = getBTAdapter().getBondedDevices();
+-        for (BluetoothDevice device : pairedDevices) {
+-            if (isPrinterDevice(device)) {
+-                printerDevices.add(new BLEPrinterDevice(device));
+-            }
+-        }
+-        return printerDevices;
+     }
+ 
+     /**
+@@ -141,55 +166,80 @@ public class BLEPrinterAdapter extends BaseStreamPrinterAdapter {
+ 
+     @Override
+     public void selectDevice(PrinterDeviceId printerDeviceId, Callback successCallback, Callback errorCallback) {
+-        BluetoothAdapter bluetoothAdapter = getBTAdapter();
+-        if (bluetoothAdapter == null) {
+-            errorCallback.invoke("No bluetooth adapter available");
+-            return;
+-        }
+-        if (!bluetoothAdapter.isEnabled()) {
+-            errorCallback.invoke("bluetooth is not enabled");
+-            return;
+-        }
+-        BLEPrinterDeviceId blePrinterDeviceId = (BLEPrinterDeviceId) printerDeviceId;
+-        if (this.mBluetoothDevice != null) {
+-            if (this.mBluetoothDevice.getAddress().equals(blePrinterDeviceId.getInnerMacAddress())
+-                    && this.mBluetoothSocket != null) {
+-                Log.v(LOG_TAG, "do not need to reconnect");
+-                successCallback.invoke(new BLEPrinterDevice(this.mBluetoothDevice).toRNWritableMap());
++        try {
++            BluetoothAdapter bluetoothAdapter = getBTAdapter();
++            if (bluetoothAdapter == null) {
++                errorCallback.invoke("No bluetooth adapter available");
+                 return;
+-            } else {
+-                closeConnectionIfExists();
+             }
+-        }
+-        Set<BluetoothDevice> pairedDevices = getBTAdapter().getBondedDevices();
+-
+-        for (BluetoothDevice device : pairedDevices) {
+-            if (device.getAddress().equals(blePrinterDeviceId.getInnerMacAddress())) {
+-
+-                try {
+-                    connectBluetoothDevice(device, false);
++            if (!bluetoothAdapter.isEnabled()) {
++                errorCallback.invoke("bluetooth is not enabled");
++                return;
++            }
++            BLEPrinterDeviceId blePrinterDeviceId = (BLEPrinterDeviceId) printerDeviceId;
++            String targetAddress = blePrinterDeviceId.getInnerMacAddress();
++            if (targetAddress == null || targetAddress.trim().isEmpty()) {
++                errorCallback.invoke("Invalid bluetooth address.");
++                return;
++            }
++            if (this.mBluetoothDevice != null) {
++                if (this.mBluetoothDevice.getAddress().equalsIgnoreCase(targetAddress)
++                        && this.mBluetoothSocket != null) {
++                    Log.v(LOG_TAG, "do not need to reconnect");
+                     successCallback.invoke(new BLEPrinterDevice(this.mBluetoothDevice).toRNWritableMap());
+                     return;
+-                } catch (IOException e) {
++                } else {
++                    closeConnectionIfExists();
++                }
++            }
++            Set<BluetoothDevice> pairedDevices = getBTAdapter().getBondedDevices();
++            if (pairedDevices == null || pairedDevices.size() == 0) {
++                errorCallback.invoke("No paired bluetooth device found. Pair the printer in Android bluetooth settings first.");
++                return;
++            }
++
++            for (BluetoothDevice device : pairedDevices) {
++                String currentAddress = device.getAddress();
++                if (currentAddress != null && currentAddress.equalsIgnoreCase(targetAddress)) {
++
+                     try {
+-                        connectBluetoothDevice(device, true);
++                        connectBluetoothDevice(device, false);
+                         successCallback.invoke(new BLEPrinterDevice(this.mBluetoothDevice).toRNWritableMap());
+                         return;
+-                    } catch (IOException er) {
+-                        er.printStackTrace();
+-                        errorCallback.invoke(er.getMessage());
+-                        return;
++                    } catch (IOException e) {
++                        try {
++                            connectBluetoothDevice(device, true);
++                            successCallback.invoke(new BLEPrinterDevice(this.mBluetoothDevice).toRNWritableMap());
++                            return;
++                        } catch (IOException er) {
++                            er.printStackTrace();
++                            errorCallback.invoke(er.getMessage());
++                            return;
++                        }
+                     }
+                 }
+             }
++            String errorText = "Can not find the specified printing device, please perform Bluetooth pairing in the system settings first.";
++            Toast.makeText(this.mContext, errorText, Toast.LENGTH_LONG).show();
++            errorCallback.invoke(errorText);
++            return;
++        } catch (SecurityException securityException) {
++            Log.e(LOG_TAG, "Bluetooth permission missing while connecting device", securityException);
++            errorCallback.invoke("Bluetooth permission denied. Please allow Nearby devices permission.");
++            return;
++        } catch (Throwable throwable) {
++            Log.e(LOG_TAG, "Failed to connect bluetooth printer", throwable);
++            errorCallback.invoke("Failed to connect bluetooth printer: " + throwable.getMessage());
++            return;
+         }
+-        String errorText = "Can not find the specified printing device, please perform Bluetooth pairing in the system settings first.";
+-        Toast.makeText(this.mContext, errorText, Toast.LENGTH_LONG).show();
+-        errorCallback.invoke(errorText);
+-        return;
+     }
+ 
+     private void connectBluetoothDevice(BluetoothDevice device, Boolean retry) throws IOException {
++        BluetoothAdapter bluetoothAdapter = getBTAdapter();
++        if (bluetoothAdapter != null && bluetoothAdapter.isDiscovering()) {
++            bluetoothAdapter.cancelDiscovery();
++        }
++
+         UUID uuid = UUID.fromString("00001101-0000-1000-8000-00805f9b34fb");
+ 
+         if (retry) {
+@@ -200,17 +250,47 @@ public class BLEPrinterAdapter extends BaseStreamPrinterAdapter {
+                     this.mBluetoothSocket.connect();
+                 }
+             } catch (Exception e) {
+-                e.printStackTrace();
+-                throw new IOException("Failed to create or connect socket: " + e.getMessage());
++                closeSocketSilently();
++
++                // Fallback for devices that reject reflection-based socket.
++                this.mBluetoothSocket = device.createRfcommSocketToServiceRecord(uuid);
++                this.mBluetoothSocket.connect();
+             }
+         } else {
+-            this.mBluetoothSocket = device.createInsecureRfcommSocketToServiceRecord(uuid);
+-            this.mBluetoothSocket.connect();
++            IOException insecureError = null;
++            try {
++                this.mBluetoothSocket = device.createInsecureRfcommSocketToServiceRecord(uuid);
++                this.mBluetoothSocket.connect();
++            } catch (IOException insecureConnectError) {
++                insecureError = insecureConnectError;
++                closeSocketSilently();
++
++                try {
++                    this.mBluetoothSocket = device.createRfcommSocketToServiceRecord(uuid);
++                    this.mBluetoothSocket.connect();
++                } catch (IOException secureConnectError) {
++                    closeSocketSilently();
++                    throw new IOException(
++                            "Failed to connect printer. Insecure=" + insecureError.getMessage() + ", Secure="
++                                    + secureConnectError.getMessage());
++                }
++            }
+         }
+ 
+         this.mBluetoothDevice = device;
+     }
+ 
++    private void closeSocketSilently() {
++        try {
++            if (this.mBluetoothSocket != null) {
++                this.mBluetoothSocket.close();
++                this.mBluetoothSocket = null;
++            }
++        } catch (IOException ignored) {
++            // Ignore cleanup error.
++        }
++    }
++
+     @Override
+     public void closeConnectionIfExists() {
+         try {

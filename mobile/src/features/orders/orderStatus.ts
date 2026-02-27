@@ -9,9 +9,40 @@ const COURIER_FLOW = [
   "delivered",
 ] as const;
 
+const STATUS_LABELS: Record<string, string> = {
+  received: "Diterima",
+  washing: "Dicuci",
+  drying: "Dikeringkan",
+  ironing: "Disetrika",
+  ready: "Siap",
+  completed: "Selesai",
+  pickup_pending: "Menunggu Jemput",
+  pickup_on_the_way: "Menuju Penjemputan",
+  picked_up: "Sudah Dijemput",
+  at_outlet: "Sampai Outlet",
+  delivery_pending: "Menunggu Antar",
+  delivery_on_the_way: "Sedang Diantar",
+  delivered: "Sudah Diantar",
+  "pickup on the way": "Menuju Penjemputan",
+  "picked up": "Sudah Dijemput",
+  "at outlet": "Sampai Outlet",
+  "delivery on the way": "Sedang Diantar",
+};
+
 export function formatStatusLabel(value: string | null | undefined): string {
   if (!value) {
     return "-";
+  }
+
+  const normalized = value.trim().toLowerCase();
+  const lookupKey = normalized.replaceAll(" ", "_");
+
+  if (STATUS_LABELS[lookupKey]) {
+    return STATUS_LABELS[lookupKey];
+  }
+
+  if (STATUS_LABELS[normalized]) {
+    return STATUS_LABELS[normalized];
   }
 
   return value

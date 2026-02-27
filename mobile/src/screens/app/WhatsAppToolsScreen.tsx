@@ -98,7 +98,7 @@ export function WhatsAppToolsScreen() {
       if (result.healthOk) {
         setActionMessage("Sender MPWA tersimpan dan provider siap dipakai.");
       } else {
-        setActionMessage(result.healthMessage || "Sender MPWA tersimpan. Lengkapi kredensial MPWA agar pengiriman aktif.");
+        setActionMessage(result.healthMessage || "Sender MPWA tersimpan. Lengkapi MPWA_API_KEY dan MPWA_BASE_URL di env agar pengiriman aktif.");
       }
       await loadData();
     } catch (error) {
@@ -160,7 +160,7 @@ export function WhatsAppToolsScreen() {
               <Text style={styles.sectionTitle}>Sender Tenant (MPWA)</Text>
               {mpwaProvider?.is_active ? <StatusPill label="Aktif" tone="success" /> : <StatusPill label="Belum Aktif" tone="warning" />}
             </View>
-            <Text style={styles.helperText}>Sender ini dipakai untuk notifikasi WA tenant. Contoh: `62812xxxxxxx` atau `device id` MPWA.</Text>
+            <Text style={styles.helperText}>Sender ini dipakai untuk notifikasi WA tenant. API key dan base URL MPWA diambil dari env server. Contoh sender: `62812xxxxxxx` atau `device id`.</Text>
             <TextInput
               autoCapitalize="none"
               autoCorrect={false}

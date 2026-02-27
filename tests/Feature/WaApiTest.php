@@ -34,6 +34,12 @@ class WaApiTest extends TestCase
     {
         parent::setUp();
 
+        config()->set('services.mpwa.api_key', 'mpwa-env-key');
+        config()->set('services.mpwa.base_url', 'https://mpwa.env.local');
+        config()->set('services.mpwa.send_path', '/send-message');
+        config()->set('services.mpwa.timeout_seconds', 15);
+        config()->set('services.mpwa.sender', '');
+
         $this->seed(RolesAndPlansSeeder::class);
 
         $standardPlan = Plan::query()->where('key', 'standard')->firstOrFail();
@@ -123,10 +129,7 @@ class WaApiTest extends TestCase
         $this->apiAs($this->admin)->postJson('/api/wa/provider-config', [
             'provider_key' => 'mpwa',
             'credentials' => [
-                'api_key' => 'mpwa-key',
                 'sender' => '628123450001',
-                'base_url' => 'https://mpwa.example.local',
-                'send_path' => '/send-message',
             ],
             'is_active' => true,
         ])->assertOk()
@@ -137,6 +140,8 @@ class WaApiTest extends TestCase
     public function test_mpwa_sender_only_can_be_saved_before_full_credentials(): void
     {
         $this->setPlan('premium');
+        config()->set('services.mpwa.api_key', '');
+        config()->set('services.mpwa.base_url', '');
 
         $this->apiAs($this->admin)->postJson('/api/wa/provider-config', [
             'provider_key' => 'mpwa',
@@ -167,9 +172,7 @@ class WaApiTest extends TestCase
         $this->apiAs($this->admin)->postJson('/api/wa/provider-config', [
             'provider_key' => 'mpwa',
             'credentials' => [
-                'api_key' => 'mpwa-key',
                 'sender' => '628123450002',
-                'base_url' => 'https://mpwa.example.local',
             ],
             'is_active' => true,
         ])->assertOk();
@@ -192,9 +195,10 @@ class WaApiTest extends TestCase
         $this->apiAs($this->admin)->postJson('/api/wa/provider-config', [
             'provider_key' => 'mpwa',
             'credentials' => [
-                'api_key' => 'mpwa-key',
+                'api_key' => 'legacy-key-should-not-be-stored',
+                'token' => 'legacy-token-should-not-be-stored',
                 'sender' => '628123450003',
-                'base_url' => 'https://mpwa.example.local',
+                'base_url' => 'https://legacy.example.local',
                 'send_path' => '/send-message',
             ],
             'is_active' => true,
@@ -220,8 +224,10 @@ class WaApiTest extends TestCase
         $credentials = (array) ($config?->credentials_json ?? []);
 
         $this->assertSame('628123450004', $credentials['sender'] ?? null);
-        $this->assertSame('mpwa-key', $credentials['api_key'] ?? null);
-        $this->assertSame('https://mpwa.example.local', $credentials['base_url'] ?? null);
+        $this->assertArrayNotHasKey('api_key', $credentials);
+        $this->assertArrayNotHasKey('token', $credentials);
+        $this->assertArrayNotHasKey('base_url', $credentials);
+        $this->assertArrayNotHasKey('send_path', $credentials);
     }
 
     public function test_upsert_template_is_audited(): void

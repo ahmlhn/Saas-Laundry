@@ -877,6 +877,266 @@ html:not(.dark) .panel-plan {
     background: #3b82f6;
 }
 
+.order-detail-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.65fr) minmax(280px, 1fr);
+    gap: 14px;
+}
+
+.order-spotlight {
+    border-color: rgba(14, 165, 168, 0.2);
+    background:
+        radial-gradient(circle at 100% 0%, rgba(37, 99, 235, 0.1), transparent 42%),
+        radial-gradient(circle at 0% 100%, rgba(14, 165, 168, 0.1), transparent 48%),
+        linear-gradient(180deg, #ffffff 0%, #f9fdff 100%);
+}
+
+.order-spotlight-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+
+.order-top-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.order-status-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.order-status-pill {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex: 1 1 220px;
+    min-width: 0;
+    padding: 9px 11px;
+    border-radius: 14px;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    background: rgba(255, 255, 255, 0.82);
+}
+
+.order-status-label,
+.order-detail-label,
+.order-finance-label,
+.order-focus-label {
+    margin: 0;
+    font-size: 0.68rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--gray-500);
+    font-family: var(--font-mono);
+}
+
+.order-finance-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.order-finance-card,
+.order-payment-card {
+    border-radius: 14px;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    background: rgba(255, 255, 255, 0.9);
+    padding: 12px;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+}
+
+.order-finance-value {
+    margin: 7px 0 0;
+    color: var(--gray-900);
+    font-size: 1.18rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+.order-finance-note {
+    margin: 4px 0 0;
+    color: var(--gray-600);
+    font-size: 0.76rem;
+}
+
+.order-meta-grid,
+.order-detail-cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.order-meta-card,
+.order-detail-card {
+    min-width: 0;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    background:
+        radial-gradient(circle at 100% 0%, rgba(37, 99, 235, 0.04), transparent 42%),
+        linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+    padding: 12px;
+}
+
+.order-detail-card--wide {
+    grid-column: span 2;
+}
+
+.order-inline-link {
+    display: inline-flex;
+    margin-top: 8px;
+    color: var(--brand-600);
+    text-decoration: none;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.order-inline-link:hover {
+    color: var(--accent-600);
+}
+
+.order-focus-panel {
+    display: grid;
+    align-content: start;
+    gap: 12px;
+}
+
+.order-focus-list {
+    display: grid;
+    gap: 10px;
+}
+
+.order-focus-card {
+    border-radius: 16px;
+    border: 1px solid var(--line);
+    background:
+        radial-gradient(circle at 100% 0%, rgba(37, 99, 235, 0.04), transparent 42%),
+        linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+    padding: 12px;
+}
+
+.order-focus-card.is-primary {
+    border-color: rgba(14, 165, 168, 0.22);
+    background: linear-gradient(180deg, rgba(236, 254, 255, 0.95) 0%, rgba(245, 252, 255, 0.98) 100%);
+}
+
+.order-focus-card.is-info {
+    border-color: rgba(37, 99, 235, 0.18);
+    background: linear-gradient(180deg, rgba(240, 249, 255, 0.96) 0%, rgba(247, 251, 255, 0.98) 100%);
+}
+
+.order-focus-card.is-success {
+    border-color: rgba(18, 183, 106, 0.18);
+    background: linear-gradient(180deg, rgba(236, 253, 243, 0.98) 0%, rgba(247, 255, 250, 1) 100%);
+}
+
+.order-focus-card.is-warning {
+    border-color: rgba(245, 158, 11, 0.22);
+    background: linear-gradient(180deg, rgba(255, 250, 235, 0.98) 0%, rgba(255, 253, 244, 1) 100%);
+}
+
+.order-focus-card.is-neutral {
+    background: linear-gradient(180deg, #fbfdff 0%, #f8fafc 100%);
+}
+
+.order-focus-value {
+    margin: 8px 0 0;
+    color: var(--gray-900);
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.order-anchor-list {
+    display: grid;
+    gap: 8px;
+}
+
+.order-anchor-list .btn {
+    width: 100%;
+    justify-content: flex-start;
+}
+
+.order-note-card {
+    margin-top: 10px;
+    border-radius: 14px;
+    border: 1px solid rgba(14, 165, 168, 0.16);
+    background: linear-gradient(180deg, rgba(236, 254, 255, 0.76) 0%, rgba(255, 255, 255, 0.94) 100%);
+    padding: 12px;
+}
+
+.dark .order-spotlight {
+    border-color: rgba(45, 212, 191, 0.2);
+    background:
+        radial-gradient(circle at 100% 0%, rgba(37, 99, 235, 0.16), transparent 42%),
+        radial-gradient(circle at 0% 100%, rgba(14, 165, 168, 0.16), transparent 48%),
+        #111827;
+}
+
+.dark .order-status-pill,
+.dark .order-finance-card,
+.dark .order-payment-card,
+.dark .order-meta-card,
+.dark .order-detail-card,
+.dark .order-focus-card {
+    border-color: #334155;
+    background:
+        radial-gradient(circle at 100% 0%, rgba(37, 99, 235, 0.08), transparent 42%),
+        #0f172a;
+}
+
+.dark .order-focus-card.is-primary {
+    border-color: rgba(45, 212, 191, 0.2);
+    background: rgba(15, 118, 110, 0.18);
+}
+
+.dark .order-focus-card.is-info {
+    border-color: rgba(96, 165, 250, 0.2);
+    background: rgba(30, 64, 175, 0.18);
+}
+
+.dark .order-focus-card.is-success {
+    border-color: rgba(34, 197, 94, 0.18);
+    background: rgba(5, 122, 72, 0.16);
+}
+
+.dark .order-focus-card.is-warning {
+    border-color: rgba(251, 191, 36, 0.2);
+    background: rgba(146, 64, 14, 0.18);
+}
+
+.dark .order-finance-value,
+.dark .order-focus-value {
+    color: #f8fafc;
+}
+
+.dark .order-finance-note,
+.dark .order-status-label,
+.dark .order-detail-label,
+.dark .order-finance-label,
+.dark .order-focus-label {
+    color: #94a3b8;
+}
+
+.dark .order-inline-link {
+    color: #7dd3fc;
+}
+
+.dark .order-inline-link:hover {
+    color: #bfdbfe;
+}
+
+.dark .order-note-card {
+    border-color: rgba(45, 212, 191, 0.18);
+    background: rgba(15, 118, 110, 0.14);
+}
+
 .detail-pairs {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -928,6 +1188,157 @@ html:not(.dark) .panel-plan {
 
 .dark .timeline-item.is-current .row-title {
     color: #bfdbfe;
+}
+
+.order-progress-card {
+    display: grid;
+    gap: 12px;
+}
+
+.order-progress-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.order-progress-meta {
+    display: grid;
+    gap: 6px;
+    justify-items: end;
+    text-align: right;
+}
+
+.order-progress-meta strong {
+    font-size: 1.4rem;
+    letter-spacing: -0.02em;
+    color: var(--gray-900);
+}
+
+.order-stage-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.order-stage-card {
+    min-width: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    background: #ffffff;
+    padding: 10px;
+}
+
+.order-stage-index {
+    width: 28px;
+    height: 28px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--gray-600);
+    background: var(--gray-100);
+    border: 1px solid var(--line);
+}
+
+.order-stage-card.is-done {
+    border-color: rgba(18, 183, 106, 0.2);
+    background: linear-gradient(180deg, rgba(236, 253, 243, 0.98) 0%, #ffffff 100%);
+}
+
+.order-stage-card.is-done .order-stage-index {
+    border-color: transparent;
+    background: #12b76a;
+    color: #ffffff;
+}
+
+.order-stage-card.is-current {
+    border-color: rgba(14, 165, 168, 0.24);
+    background: linear-gradient(180deg, rgba(236, 254, 255, 0.95) 0%, #ffffff 100%);
+    box-shadow: 0 8px 18px rgba(14, 165, 168, 0.08);
+}
+
+.order-stage-card.is-current .order-stage-index {
+    border-color: transparent;
+    background: linear-gradient(135deg, var(--brand-500) 0%, var(--accent-500) 100%);
+    color: #ffffff;
+}
+
+.order-empty-state,
+.order-form-note {
+    border-radius: 14px;
+    border: 1px dashed var(--line-strong);
+    background: linear-gradient(180deg, #fbfdff 0%, #f8fbff 100%);
+    padding: 12px;
+}
+
+.order-form-actions {
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
+}
+
+.order-form-stack {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+}
+
+.order-payment-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.order-payment-form {
+    margin-top: 12px;
+}
+
+.order-payment-form .btn {
+    flex: 1 1 160px;
+}
+
+.dark .order-progress-meta strong {
+    color: #ffffff;
+}
+
+.dark .order-stage-card {
+    border-color: #334155;
+    background: #0f172a;
+}
+
+.dark .order-stage-index {
+    border-color: #334155;
+    background: #111827;
+    color: #cbd5e1;
+}
+
+.dark .order-stage-card.is-done {
+    border-color: rgba(34, 197, 94, 0.2);
+    background: rgba(5, 122, 72, 0.16);
+}
+
+.dark .order-stage-card.is-current {
+    border-color: rgba(45, 212, 191, 0.22);
+    background: rgba(15, 118, 110, 0.16);
+    box-shadow: none;
+}
+
+.dark .order-empty-state,
+.dark .order-form-note {
+    border-color: rgba(148, 163, 184, 0.28);
+    background: #111827;
+}
+
+.dark .order-form-stack {
+    border-top-color: #223047;
 }
 
 .panel-section {
@@ -2174,12 +2585,22 @@ textarea:focus-visible {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
+    .order-detail-grid,
     .dashboard-grid-2 {
         grid-template-columns: 1fr;
     }
 
     .filters-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .order-progress-meta {
+        justify-items: start;
+        text-align: left;
+    }
+
+    .order-stage-grid {
+        grid-template-columns: 1fr;
     }
 
     .auth-shell {
@@ -2221,6 +2642,7 @@ textarea:focus-visible {
     }
 
     .metric-grid,
+    .order-detail-grid,
     .dashboard-grid-2,
     .filters-grid {
         grid-template-columns: 1fr;
@@ -2257,10 +2679,26 @@ textarea:focus-visible {
     .bulk-shell,
     .bulk-shell-left,
     .bulk-shell-right,
+    .order-meta-grid,
+    .order-detail-cards,
+    .order-payment-summary,
     .detail-pairs {
         grid-template-columns: 1fr;
         flex-direction: column;
         align-items: stretch;
+    }
+
+    .order-detail-card--wide {
+        grid-column: auto;
+    }
+
+    .order-status-pill,
+    .order-anchor-list .btn {
+        width: 100%;
+    }
+
+    .order-progress-meta {
+        width: 100%;
     }
 
     .bulk-shell-right select {
