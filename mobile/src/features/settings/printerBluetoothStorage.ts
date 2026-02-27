@@ -8,7 +8,8 @@ function resolveBtPrinterKey(outletId?: string | null): string {
     return BT_PRINTER_KEY_BASE;
   }
 
-  return `${BT_PRINTER_KEY_BASE}:${outletId.trim()}`;
+  const normalizedOutletId = outletId.trim().replace(/[^A-Za-z0-9._-]/g, "_");
+  return `${BT_PRINTER_KEY_BASE}_${normalizedOutletId}`;
 }
 
 function parseStoredBtPrinter(raw: string): StoredBluetoothThermalPrinter | null {
@@ -33,12 +34,16 @@ function parseStoredBtPrinter(raw: string): StoredBluetoothThermalPrinter | null
 }
 
 export async function getStoredBluetoothThermalPrinter(outletId?: string | null): Promise<StoredBluetoothThermalPrinter | null> {
-  const raw = await SecureStore.getItemAsync(resolveBtPrinterKey(outletId));
-  if (!raw) {
+  try {
+    const raw = await SecureStore.getItemAsync(resolveBtPrinterKey(outletId));
+    if (!raw) {
+      return null;
+    }
+
+    return parseStoredBtPrinter(raw);
+  } catch {
     return null;
   }
-
-  return parseStoredBtPrinter(raw);
 }
 
 export async function setStoredBluetoothThermalPrinter(printer: StoredBluetoothThermalPrinter, outletId?: string | null): Promise<void> {

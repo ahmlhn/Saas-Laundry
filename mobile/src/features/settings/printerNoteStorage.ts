@@ -21,7 +21,8 @@ function resolvePrinterNoteSettingsKey(outletId?: string | null): string {
     return PRINTER_NOTE_SETTINGS_KEY;
   }
 
-  return `${PRINTER_NOTE_SETTINGS_KEY}:${outletId.trim()}`;
+  const normalizedOutletId = outletId.trim().replace(/[^A-Za-z0-9._-]/g, "_");
+  return `${PRINTER_NOTE_SETTINGS_KEY}_${normalizedOutletId}`;
 }
 
 function parsePrinterNoteSettings(raw: string): PrinterNoteSettings {

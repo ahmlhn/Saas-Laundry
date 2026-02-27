@@ -1,4 +1,4 @@
-import { httpClient } from "../../lib/httpClient";
+import { getActiveApiBaseUrl, httpClient } from "../../lib/httpClient";
 import type { PrinterLocalSettings } from "../../types/printerLocalSettings";
 import type { PrinterNoteSettings } from "../../types/printerNote";
 
@@ -58,6 +58,30 @@ export interface UpsertPrinterNoteSettingsPayload {
 export interface UpsertPrinterDeviceSettingsPayload {
   outletId: string;
   settings: PrinterLocalSettings;
+}
+
+function buildApiUrl(path: string): string {
+  const baseUrl = httpClient.defaults.baseURL;
+  if (typeof baseUrl === "string" && baseUrl.trim().length > 0) {
+    return `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+  }
+
+  const activeBase = getActiveApiBaseUrl().replace(/\/+$/, "");
+  const resolvedBase = /\/api$/i.test(activeBase) ? activeBase : `${activeBase}/api`;
+  return `${resolvedBase}/${path.replace(/^\/+/, "")}`;
+}
+
+async function parseJsonResponse<T>(response: Response): Promise<T | null> {
+  const raw = await response.text();
+  if (!raw.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
 }
 
 function mapApiSettingsToMobile(payload: PrinterNoteSettingsResponse["data"]): PrinterNoteSettings {
@@ -166,11 +190,31 @@ export async function uploadPrinterLogo(payload: UploadPrinterLogoPayload): Prom
       type: resolvedType,
     } as any
   );
+  const authHeader = httpClient.defaults.headers.common.Authorization;
+  const response = await fetch(buildApiUrl("/printer-note/logo"), {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "X-Source-Channel": "mobile",
+      ...(typeof authHeader === "string" && authHeader.trim().length > 0 ? { Authorization: authHeader } : {}),
+    },
+    body: formData,
+  });
 
-  // Let Axios/React Native set multipart boundary automatically.
-  const response = await httpClient.post<UploadPrinterLogoResponse>("/printer-note/logo", formData);
+  const payloadJson = await parseJsonResponse<UploadPrinterLogoResponse & { message?: string }>(response);
+  if (!response.ok) {
+    if (payloadJson?.message && payloadJson.message.trim().length > 0) {
+      throw new Error(payloadJson.message);
+    }
 
-  return response.data.data;
+    throw new Error(`Upload logo gagal (${response.status}).`);
+  }
+
+  if (!payloadJson?.data) {
+    throw new Error("Respons upload logo tidak valid.");
+  }
+
+  return payloadJson.data;
 }
 
 export async function removePrinterLogo(outletId: string): Promise<string> {

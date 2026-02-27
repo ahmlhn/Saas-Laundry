@@ -77,6 +77,7 @@ function buildReceiptPreviewLine(label: string, value: string, labelWidth: numbe
 }
 
 function buildPrinterNotePreviewText(params: {
+  kind: "customer" | "production";
   profileName: string;
   description: string;
   phone: string;
@@ -85,24 +86,39 @@ function buildPrinterNotePreviewText(params: {
   noteNumber: string;
   showCustomerReceipt: boolean;
 }): string {
-  const { profileName, description, phone, footer, paperWidth, noteNumber, showCustomerReceipt } = params;
+  const { kind, profileName, description, phone, footer, paperWidth, noteNumber, showCustomerReceipt } = params;
   const { divider, labelWidth } = resolveReceiptPreviewLayout(paperWidth);
   const lines: string[] = [];
 
-  lines.push(profileName);
-  lines.push(description);
-  lines.push(`Telp. ${phone}`);
-  lines.push(divider);
-  lines.push(buildReceiptPreviewLine("Nomor Nota", noteNumber, labelWidth));
-  lines.push(buildReceiptPreviewLine("Pelanggan", "Nama Pelanggan", labelWidth));
+  if (kind !== "production") {
+    lines.push(profileName);
+    lines.push(description);
+    lines.push(`Telp. ${phone}`);
+    lines.push(divider);
+    lines.push(buildReceiptPreviewLine("Nomor Nota", noteNumber, labelWidth));
+    lines.push(buildReceiptPreviewLine("Pelanggan", "Nama Pelanggan", labelWidth));
+  }
   lines.push(buildReceiptPreviewLine("Tgl Pesan", "28-02-2026 10:30", labelWidth));
   lines.push(buildReceiptPreviewLine("Est Selesai", "03-03-2026 10:30", labelWidth));
   lines.push(divider);
-  lines.push("Kiloan Reguler | 2.0 kg | Rp 14.000");
-  lines.push("Bedcover      | 1 pcs | Rp 25.000");
+
+  if (kind === "production") {
+    lines.push("1. Kiloan Reguler (2.0 kg)");
+    lines.push("2. Bedcover (1 pcs)");
+    lines.push(buildReceiptPreviewLine("Parfum", "Fresh Laundry", labelWidth));
+  } else {
+    lines.push("Kiloan Reguler | 2.0 kg | Rp 14.000");
+    lines.push("Bedcover      | 1 pcs | Rp 25.000");
+    lines.push(buildReceiptPreviewLine("Parfum", "Fresh Laundry", labelWidth));
+  }
+
   lines.push(divider);
 
-  if (showCustomerReceipt) {
+  if (kind === "production") {
+    lines.push(buildReceiptPreviewLine("Status", "Diproses", labelWidth));
+    lines.push("Internal produksi. Tanpa harga.");
+    lines.push(divider);
+  } else if (showCustomerReceipt) {
     lines.push(buildReceiptPreviewLine("Total", "Rp 39.000", labelWidth));
     lines.push(buildReceiptPreviewLine("Dibayar", "Rp 20.000", labelWidth));
     lines.push(buildReceiptPreviewLine("Sisa", "Rp 19.000", labelWidth));
@@ -697,6 +713,7 @@ export function PrinterNoteScreen() {
   const previewReceiptText = useMemo(
     () =>
       buildPrinterNotePreviewText({
+        kind: "customer",
         profileName: previewProfileName,
         description: previewDescription,
         phone: previewPhone,
@@ -706,6 +723,20 @@ export function PrinterNoteScreen() {
         showCustomerReceipt: form?.showCustomerReceipt ?? true,
       }),
     [activePaperWidth, form?.showCustomerReceipt, previewDescription, previewFooter, previewNoteNumber, previewPhone, previewProfileName],
+  );
+  const previewProductionReceiptText = useMemo(
+    () =>
+      buildPrinterNotePreviewText({
+        kind: "production",
+        profileName: previewProfileName,
+        description: previewDescription,
+        phone: previewPhone,
+        footer: previewFooter,
+        paperWidth: activePaperWidth,
+        noteNumber: previewNoteNumber,
+        showCustomerReceipt: true,
+      }),
+    [activePaperWidth, previewDescription, previewFooter, previewNoteNumber, previewPhone, previewProfileName],
   );
 
   return (
@@ -1024,8 +1055,39 @@ export function PrinterNoteScreen() {
                       <Text style={styles.paperWidthBadgeText}>{activePaperWidth === "80mm" ? "80 mm" : "58 mm"}</Text>
                     </View>
                   </View>
-                  <View style={[styles.receiptPreviewCard, { width: previewReceiptWidth }]}>
-                    <Text style={styles.receiptPreviewMono}>{previewReceiptText}</Text>
+                  <View style={styles.receiptPreviewSection}>
+                    <Text style={styles.receiptPreviewSectionTitle}>Nota Konsumen</Text>
+                    <View style={[styles.receiptPreviewCard, { width: previewReceiptWidth }]}>
+                      {form.logoUrl ? (
+                        <View style={styles.receiptPreviewLogoWrap}>
+                          <Image source={{ uri: form.logoUrl }} style={styles.receiptPreviewLogo} />
+                        </View>
+                      ) : null}
+                      <Text style={styles.receiptPreviewMono}>{previewReceiptText}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.receiptPreviewSection}>
+                    <View style={styles.rowBetween}>
+                      <Text style={styles.receiptPreviewSectionTitle}>Nota Produksi</Text>
+                      <Text style={styles.receiptPreviewSectionHint}>Tanpa harga</Text>
+                    </View>
+                    <View style={[styles.receiptPreviewCard, { width: previewReceiptWidth }]}>
+                      {form.logoUrl ? (
+                        <View style={styles.receiptPreviewLogoWrap}>
+                          <Image source={{ uri: form.logoUrl }} style={styles.receiptPreviewLogo} />
+                        </View>
+                      ) : null}
+                      <View style={styles.productionHeaderStack}>
+                        <Text style={styles.receiptPreviewCaption}>(Nota Produksi)</Text>
+                        <Text style={styles.receiptPreviewBrand}>{previewProfileName}</Text>
+                        <Text style={styles.receiptPreviewMetaStrong}>{previewNoteNumber}</Text>
+                        <Text style={styles.productionCustomerName}>Nama Pelanggan</Text>
+                        <Text style={styles.receiptPreviewMeta}>Sisa Pembayaran</Text>
+                        <Text style={styles.productionDueAmount}>Rp 80.000,-</Text>
+                      </View>
+                      <Text style={styles.receiptPreviewMono}>{previewLayout.divider}</Text>
+                      <Text style={styles.receiptPreviewMono}>{previewProductionReceiptText}</Text>
+                    </View>
                   </View>
                   <Text style={styles.receiptPreviewFootnote}>Lebar preview mengikuti ukuran kertas printer yang sedang aktif.</Text>
                 </View>
@@ -1631,6 +1693,48 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       justifyContent: "space-between",
       gap: theme.spacing.sm,
     },
+    receiptPreviewSection: {
+      gap: theme.spacing.xs,
+    },
+    receiptPreviewSectionTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11.5,
+    },
+    receiptPreviewSectionHint: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 10.5,
+    },
+    productionCustomerName: {
+      color: theme.colors.textPrimary,
+      fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: theme.fonts.bold }),
+      fontSize: 20,
+      lineHeight: 21,
+      textAlign: "center",
+    },
+    productionDueAmount: {
+      color: theme.colors.textPrimary,
+      fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: theme.fonts.bold }),
+      fontSize: 22,
+      lineHeight: 23,
+      textAlign: "center",
+    },
+    productionHeaderStack: {
+      alignItems: "center",
+      gap: 0,
+      paddingBottom: 1,
+    },
+    receiptPreviewLogoWrap: {
+      alignItems: "center",
+      justifyContent: "center",
+      paddingBottom: 2,
+    },
+    receiptPreviewLogo: {
+      width: 84,
+      height: 84,
+      resizeMode: "contain",
+    },
     paperWidthBadge: {
       minWidth: 58,
       borderWidth: 1,
@@ -1662,14 +1766,29 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
     receiptPreviewBrand: {
       color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.bold,
+      fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: theme.fonts.bold }),
       fontSize: 14,
+      lineHeight: 16,
+      textAlign: "center",
+    },
+    receiptPreviewCaption: {
+      color: theme.colors.textSecondary,
+      fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: theme.fonts.semibold }),
+      fontSize: 12,
+      lineHeight: 13,
       textAlign: "center",
     },
     receiptPreviewMeta: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
       fontSize: 11.5,
+      textAlign: "center",
+    },
+    receiptPreviewMetaStrong: {
+      color: theme.colors.textSecondary,
+      fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: theme.fonts.semibold }),
+      fontSize: 12.5,
+      lineHeight: 14,
       textAlign: "center",
     },
     receiptPreviewDivider: {

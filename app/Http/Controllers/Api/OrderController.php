@@ -1138,7 +1138,7 @@ class OrderController extends Controller
     {
         $loadedOrder = $order->load([
             'customer:id,name,phone_normalized,notes',
-            'items.service:id,duration_days',
+            'items.service:id,duration_days,service_type',
             'items',
             'payments',
             'courier:id,name,phone',

@@ -12,6 +12,7 @@ export interface OrderCourier {
 export interface OrderItemServiceDetail {
   id: string;
   duration_days: number | null;
+  service_type?: string | null;
 }
 
 export interface OrderItemDetail {

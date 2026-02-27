@@ -42,7 +42,7 @@ import type { ServiceCatalogItem } from "../../types/service";
 
 type Step = "customer" | "services" | "review" | "payment";
 type Direction = -1 | 1;
-type ReviewPanelKey = "promo" | "discount" | "notes";
+type ReviewPanelKey = "perfume" | "promo" | "discount" | "notes";
 type ReviewFocusableInputKey = "voucher" | "shippingFee" | "discount" | "notes";
 type InputVisibilityMode = "visible" | "comfort";
 type ScheduleField = "pickup" | "delivery";
@@ -74,6 +74,29 @@ function resolveServiceIcon(
   }
 
   return fallback;
+}
+
+function isPerfumeServiceType(serviceType: string | null | undefined): boolean {
+  return String(serviceType ?? "").trim().toLowerCase() === "perfume";
+}
+
+function findMatchingPerfumeServiceId(
+  perfumeServices: ServiceCatalogItem[],
+  perfumeServiceId: string | null | undefined,
+  perfumeServiceName: string | null | undefined,
+): string | null {
+  const normalizedId = typeof perfumeServiceId === "string" && perfumeServiceId.trim() !== "" ? perfumeServiceId.trim() : null;
+  if (normalizedId && perfumeServices.some((service) => service.id === normalizedId)) {
+    return normalizedId;
+  }
+
+  const normalizedName = typeof perfumeServiceName === "string" ? perfumeServiceName.trim().toLowerCase() : "";
+  if (!normalizedName) {
+    return null;
+  }
+
+  const matchedByName = perfumeServices.find((service) => service.name.trim().toLowerCase() === normalizedName);
+  return matchedByName?.id ?? null;
 }
 
 function normalizeMoneyInput(raw: string): string {
@@ -271,6 +294,7 @@ interface QuickActionDraftSnapshot {
   showServiceSearch: boolean;
   activeServiceGroupKey: string | null;
   selectedServiceIds: string[];
+  selectedPerfumeServiceId: string | null;
   metrics: Record<string, string>;
   selectedPromoId: string | null;
   promoVoucherCodeInput: string;
@@ -289,6 +313,7 @@ interface QuickActionDraftSnapshot {
   paymentFlowType?: PaymentFlowType;
   orderNotes: string;
   showReviewPromoPanel: boolean;
+  showReviewPerfumePanel: boolean;
   showReviewDiscountPanel: boolean;
   showReviewNotesPanel: boolean;
 }
@@ -471,6 +496,7 @@ export function QuickActionScreen() {
   const [editingOrderReference, setEditingOrderReference] = useState<string | null>(null);
 
   const [services, setServices] = useState<ServiceCatalogItem[]>([]);
+  const [perfumeServices, setPerfumeServices] = useState<ServiceCatalogItem[]>([]);
   const [serviceGroupNamesById, setServiceGroupNamesById] = useState<Record<string, string>>({});
   const [serviceGroupIconsById, setServiceGroupIconsById] = useState<Record<string, string | null>>({});
   const [loadingServices, setLoadingServices] = useState(true);
@@ -478,6 +504,7 @@ export function QuickActionScreen() {
   const [showServiceSearch, setShowServiceSearch] = useState(false);
   const [activeServiceGroupKey, setActiveServiceGroupKey] = useState<string | null>(null);
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
+  const [selectedPerfumeServiceId, setSelectedPerfumeServiceId] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<Record<string, string>>({});
   const [promotionSections, setPromotionSections] = useState<PromotionSections>({
     selection: [],
@@ -525,6 +552,7 @@ export function QuickActionScreen() {
   const [focusedReviewInputKey, setFocusedReviewInputKey] = useState<ReviewFocusableInputKey | null>(null);
   const [visibleServiceLimit, setVisibleServiceLimit] = useState(SERVICE_RENDER_BATCH);
   const [showServiceItemValidation, setShowServiceItemValidation] = useState(false);
+  const [showReviewPerfumePanel, setShowReviewPerfumePanel] = useState(false);
   const [showReviewPromoPanel, setShowReviewPromoPanel] = useState(false);
   const [showReviewDiscountPanel, setShowReviewDiscountPanel] = useState(false);
   const [showReviewNotesPanel, setShowReviewNotesPanel] = useState(false);
@@ -540,8 +568,10 @@ export function QuickActionScreen() {
     discount: null,
     notes: null,
   });
+  const selectedPerfumeServiceIdRef = useRef<string | null>(null);
   const scrollYRef = useRef(0);
   const reviewPanelOffsetsRef = useRef<Record<ReviewPanelKey, number | null>>({
+    perfume: null,
     promo: null,
     discount: null,
     notes: null,
@@ -549,8 +579,13 @@ export function QuickActionScreen() {
   const pendingReviewFocusPanelRef = useRef<ReviewPanelKey | null>(null);
 
   useEffect(() => {
+    selectedPerfumeServiceIdRef.current = selectedPerfumeServiceId;
+  }, [selectedPerfumeServiceId]);
+
+  useEffect(() => {
     if (!selectedOutlet || !canCreateOrder) {
       setServices([]);
+      setPerfumeServices([]);
       setServiceGroupNamesById({});
       setServiceGroupIconsById({});
       setLoadingServices(false);
@@ -684,7 +719,7 @@ export function QuickActionScreen() {
 
     setLoadingServices(true);
     try {
-      const [serviceItems, serviceGroups] = await Promise.all([
+      const [serviceItems, serviceGroups, perfumeItems] = await Promise.all([
         listServices({
           outletId: selectedOutlet.id,
           active: true,
@@ -699,6 +734,13 @@ export function QuickActionScreen() {
           isGroup: true,
           forceRefresh,
         }),
+        listServices({
+          outletId: selectedOutlet.id,
+          active: true,
+          serviceType: ["perfume"],
+          isGroup: false,
+          forceRefresh,
+        }),
       ]);
 
       const groupNameMap = serviceGroups.reduce<Record<string, string>>((result, item) => {
@@ -711,6 +753,7 @@ export function QuickActionScreen() {
       }, {});
 
       setServices(serviceItems);
+      setPerfumeServices(perfumeItems);
       setServiceGroupNamesById(groupNameMap);
       setServiceGroupIconsById(groupIconMap);
     } catch (error) {
@@ -834,6 +877,7 @@ export function QuickActionScreen() {
     customerRequestSeqRef.current += 1;
     pendingReviewFocusPanelRef.current = null;
     reviewPanelOffsetsRef.current = {
+      perfume: null,
       promo: null,
       discount: null,
       notes: null,
@@ -843,10 +887,12 @@ export function QuickActionScreen() {
     setShowServiceSearch(false);
     setActiveServiceGroupKey(null);
     setSelectedServiceIds([]);
+    setSelectedPerfumeServiceId(null);
     setSelectedPromoId(null);
     setPromoVoucherCodeInput("");
     setPromoErrorMessage(null);
     setShowServiceItemValidation(false);
+    setShowReviewPerfumePanel(false);
     setShowReviewPromoPanel(false);
     setShowReviewDiscountPanel(false);
     setShowReviewNotesPanel(false);
@@ -880,22 +926,26 @@ export function QuickActionScreen() {
   function applyDraftSnapshot(draft: QuickActionDraftSnapshot): void {
     customerRequestSeqRef.current += 1;
     pendingReviewFocusPanelRef.current = null;
-    const draftActiveReviewPanel: ReviewPanelKey | null = draft.showReviewPromoPanel
-      ? "promo"
-      : draft.showReviewDiscountPanel
-        ? "discount"
-        : draft.showReviewNotesPanel
-          ? "notes"
-          : null;
+    const draftActiveReviewPanel: ReviewPanelKey | null = draft.showReviewPerfumePanel
+      ? "perfume"
+      : draft.showReviewPromoPanel
+        ? "promo"
+        : draft.showReviewDiscountPanel
+          ? "discount"
+          : draft.showReviewNotesPanel
+            ? "notes"
+            : null;
     setStep(draft.step === "payment" ? "review" : draft.step);
     setServiceKeyword(draft.serviceKeyword);
     setShowServiceSearch(draft.showServiceSearch);
     setActiveServiceGroupKey(draft.activeServiceGroupKey);
     setSelectedServiceIds([...draft.selectedServiceIds]);
+    setSelectedPerfumeServiceId(draft.selectedPerfumeServiceId);
     setSelectedPromoId(draft.selectedPromoId);
     setPromoVoucherCodeInput(draft.promoVoucherCodeInput);
     setPromoErrorMessage(null);
     setShowServiceItemValidation(false);
+    setShowReviewPerfumePanel(draftActiveReviewPanel === "perfume");
     setShowReviewPromoPanel(draftActiveReviewPanel === "promo");
     setShowReviewDiscountPanel(draftActiveReviewPanel === "discount");
     setShowReviewNotesPanel(draftActiveReviewPanel === "notes");
@@ -932,6 +982,7 @@ export function QuickActionScreen() {
       showServiceSearch,
       activeServiceGroupKey,
       selectedServiceIds: [...selectedServiceIds],
+      selectedPerfumeServiceId,
       metrics: { ...metrics },
       selectedPromoId,
       promoVoucherCodeInput,
@@ -949,6 +1000,7 @@ export function QuickActionScreen() {
       manualDiscountType,
       paymentFlowType,
       orderNotes,
+      showReviewPerfumePanel,
       showReviewPromoPanel,
       showReviewDiscountPanel,
       showReviewNotesPanel,
@@ -967,12 +1019,52 @@ export function QuickActionScreen() {
 
   function applyEditOrderSnapshot(order: OrderDetail): void {
     const fallbackServices: ServiceCatalogItem[] = [];
+    const fallbackPerfumeServices: ServiceCatalogItem[] = [];
     const knownServiceIds = new Set(services.map((item) => item.id));
+    const knownPerfumeServiceIds = new Set(perfumeServices.map((item) => item.id));
     const nextSelectedServiceIds: string[] = [];
+    let nextSelectedPerfumeServiceId: string | null = null;
     const nextMetrics: Record<string, string> = {};
 
     for (const item of order.items ?? []) {
       if (!item.service_id) {
+        continue;
+      }
+
+      const resolvedServiceType = item.service?.service_type ?? null;
+      const isPerfumeItem = isPerfumeServiceType(typeof resolvedServiceType === "string" ? resolvedServiceType : null);
+
+      if (isPerfumeItem) {
+        nextSelectedPerfumeServiceId = item.service_id;
+
+        if (!knownPerfumeServiceIds.has(item.service_id)) {
+          knownPerfumeServiceIds.add(item.service_id);
+          fallbackPerfumeServices.push({
+            id: item.service_id,
+            tenant_id: order.tenant_id,
+            name: item.service_name_snapshot,
+            service_type: "perfume",
+            parent_service_id: null,
+            is_group: false,
+            unit_type: "pcs",
+            display_unit: "pcs",
+            base_price_amount: item.unit_price_amount,
+            duration_days: item.service?.duration_days ?? null,
+            package_quota_value: null,
+            package_quota_unit: null,
+            package_valid_days: null,
+            package_accumulation_mode: null,
+            active: true,
+            sort_order: 9_999,
+            image_icon: null,
+            effective_price_amount: item.unit_price_amount,
+            outlet_override: null,
+            process_tags: [],
+            process_summary: null,
+            children: [],
+          });
+        }
+
         continue;
       }
 
@@ -1016,6 +1108,9 @@ export function QuickActionScreen() {
     if (fallbackServices.length > 0) {
       setServices((previous) => [...previous, ...fallbackServices.filter((service) => !previous.some((current) => current.id === service.id))]);
     }
+    if (fallbackPerfumeServices.length > 0) {
+      setPerfumeServices((previous) => [...previous, ...fallbackPerfumeServices.filter((service) => !previous.some((current) => current.id === service.id))]);
+    }
 
     const customerId = order.customer?.id ?? order.customer_id;
     const customerNote = order.customer?.notes?.trim() ?? "";
@@ -1057,11 +1152,13 @@ export function QuickActionScreen() {
     setEditingOrderReference(order.order_code || order.invoice_no || order.id);
     setStep("review");
     setSelectedServiceIds(nextSelectedServiceIds);
+    setSelectedPerfumeServiceId(nextSelectedPerfumeServiceId);
     setMetrics(nextMetrics);
     setSelectedPromoId(null);
     setPromoVoucherCodeInput("");
     setPromoErrorMessage(null);
     setShowServiceItemValidation(false);
+    setShowReviewPerfumePanel(false);
     setShowReviewPromoPanel(false);
     setShowReviewDiscountPanel(false);
     setShowReviewNotesPanel(false);
@@ -1166,6 +1263,8 @@ export function QuickActionScreen() {
     setCustomerNotes(profile.note);
     setPickupAddressDraft(profile.address);
     setDeliveryAddressDraft(profile.address);
+    setSelectedPerfumeServiceId(null);
+    setShowReviewPerfumePanel(false);
     setCustomerKeyword("");
     setErrorMessage(null);
   }
@@ -1175,6 +1274,8 @@ export function QuickActionScreen() {
     setCustomerName("");
     setCustomerPhone("");
     setCustomerNotes("");
+    setSelectedPerfumeServiceId(null);
+    setShowReviewPerfumePanel(false);
     setPickupScheduleInput("");
     setDeliveryScheduleInput("");
     setPickupAddressDraft("");
@@ -1412,7 +1513,7 @@ export function QuickActionScreen() {
   const customerPackageSummary = useMemo(() => resolveCustomerPackageSummary(selectedCustomer), [selectedCustomer]);
 
   useEffect(() => {
-    if (!selectedOutlet || !showCreateForm || step !== "customer" || !selectedCustomer) {
+    if (!selectedOutlet || !showCreateForm || !selectedCustomer) {
       setCustomerOrdersPreview([]);
       setLoadingCustomerOrdersPreview(false);
       return;
@@ -1461,6 +1562,22 @@ export function QuickActionScreen() {
         });
 
         setCustomerOrdersPreview(filtered);
+
+        if (!editingOrderId && selectedPerfumeServiceId === null && filtered.length > 0) {
+          try {
+            const latestOrderDetail = await getOrderDetail(filtered[0].id);
+            if (!active) {
+              return;
+            }
+
+            const latestPerfumeItem = (latestOrderDetail.items ?? []).find((item) => isPerfumeServiceType(item.service?.service_type ?? null) && Boolean(item.service_id));
+            if (latestPerfumeItem?.service_id && selectedPerfumeServiceIdRef.current === null) {
+              setSelectedPerfumeServiceId(latestPerfumeItem.service_id);
+            }
+          } catch {
+            // Ignore perfume history resolution failures to keep customer flow fast.
+          }
+        }
       } catch (error) {
         if (active) {
           setErrorMessage(getApiErrorMessage(error));
@@ -1477,7 +1594,7 @@ export function QuickActionScreen() {
     return () => {
       active = false;
     };
-  }, [selectedCustomer, selectedOutlet, showCreateForm, step]);
+  }, [editingOrderId, selectedCustomer, selectedOutlet, showCreateForm]);
 
   const customerTransactionSummary = useMemo(() => {
     const totalTransactions = customerOrdersPreview.length;
@@ -1502,6 +1619,13 @@ export function QuickActionScreen() {
     }
     return map;
   }, [services]);
+  const perfumeServiceById = useMemo(() => {
+    const map = new Map<string, ServiceCatalogItem>();
+    for (const item of perfumeServices) {
+      map.set(item.id, item);
+    }
+    return map;
+  }, [perfumeServices]);
 
   const selectedServiceIdSet = useMemo(() => new Set(selectedServiceIds), [selectedServiceIds]);
 
@@ -1701,8 +1825,20 @@ export function QuickActionScreen() {
   }, [insets.bottom]);
 
   const selectedLines = useMemo(() => selectedServiceDrafts.filter((line) => line.hasValidMetric), [selectedServiceDrafts]);
+  const selectedPerfumeService = useMemo(
+    () => (selectedPerfumeServiceId ? perfumeServiceById.get(selectedPerfumeServiceId) ?? null : null),
+    [perfumeServiceById, selectedPerfumeServiceId],
+  );
+  const selectedPerfumeAmount = useMemo(
+    () => Math.max(selectedPerfumeService?.effective_price_amount ?? 0, 0),
+    [selectedPerfumeService],
+  );
+  const selectedReviewItemCount = useMemo(
+    () => selectedLines.length + (selectedPerfumeService ? 1 : 0),
+    [selectedLines.length, selectedPerfumeService],
+  );
 
-  const subtotal = useMemo(() => selectedLines.reduce((sum, line) => sum + line.subtotal, 0), [selectedLines]);
+  const subtotal = useMemo(() => selectedLines.reduce((sum, line) => sum + line.subtotal, selectedPerfumeAmount), [selectedLines, selectedPerfumeAmount]);
   const promoVoucherCodeNormalized = promoVoucherCodeInput.trim().toUpperCase();
 
   const shippingFee = useMemo(() => {
@@ -2009,7 +2145,7 @@ export function QuickActionScreen() {
   const canCustomerNext = selectedCustomerId !== null;
   const canServicesNext = selectedLines.length > 0;
   const hasDraftChanges = useMemo(() => {
-    if (selectedCustomerId !== null || selectedServiceIds.length > 0 || isPickupDelivery || selectedPromoId !== null) {
+    if (selectedCustomerId !== null || selectedServiceIds.length > 0 || selectedPerfumeServiceId !== null || isPickupDelivery || selectedPromoId !== null) {
       return true;
     }
 
@@ -2038,6 +2174,7 @@ export function QuickActionScreen() {
     paymentFlowType,
     promoVoucherCodeInput,
     selectedCustomerId,
+    selectedPerfumeServiceId,
     selectedPromoId,
     selectedServiceIds,
     shippingFeeInput,
@@ -2172,12 +2309,13 @@ export function QuickActionScreen() {
   }
 
   function setActiveReviewPanel(panel: ReviewPanelKey | null, options?: { focus?: boolean }): void {
-    const activePanel: ReviewPanelKey | null = showReviewPromoPanel ? "promo" : showReviewDiscountPanel ? "discount" : showReviewNotesPanel ? "notes" : null;
+    const activePanel: ReviewPanelKey | null = showReviewPerfumePanel ? "perfume" : showReviewPromoPanel ? "promo" : showReviewDiscountPanel ? "discount" : showReviewNotesPanel ? "notes" : null;
     if (panel === activePanel) {
       return;
     }
 
     setFocusedReviewInputKey(null);
+    setShowReviewPerfumePanel(panel === "perfume");
     setShowReviewPromoPanel(panel === "promo");
     setShowReviewDiscountPanel(panel === "discount");
     setShowReviewNotesPanel(panel === "notes");
@@ -2189,7 +2327,7 @@ export function QuickActionScreen() {
   }
 
   function toggleReviewPanel(panel: ReviewPanelKey): void {
-    const isOpen = panel === "promo" ? showReviewPromoPanel : panel === "discount" ? showReviewDiscountPanel : showReviewNotesPanel;
+    const isOpen = panel === "perfume" ? showReviewPerfumePanel : panel === "promo" ? showReviewPromoPanel : panel === "discount" ? showReviewDiscountPanel : showReviewNotesPanel;
     if (isOpen) {
       setActiveReviewPanel(null);
       return;
@@ -2422,11 +2560,22 @@ export function QuickActionScreen() {
           phone: customerPhone.trim(),
           notes: customerNotes,
         },
-        items: selectedLines.map((line) => ({
-          serviceId: line.service.id,
-          qty: isKgUnit(line.service.unit_type) ? undefined : line.metricValue,
-          weightKg: isKgUnit(line.service.unit_type) ? line.metricValue : undefined,
-        })),
+        items: [
+          ...selectedLines.map((line) => ({
+            serviceId: line.service.id,
+            qty: isKgUnit(line.service.unit_type) ? undefined : line.metricValue,
+            weightKg: isKgUnit(line.service.unit_type) ? line.metricValue : undefined,
+          })),
+          ...(selectedPerfumeService
+            ? [
+                {
+                  serviceId: selectedPerfumeService.id,
+                  qty: 1,
+                  weightKg: undefined,
+                },
+              ]
+            : []),
+        ],
         shippingFeeAmount: effectiveShippingFee,
         discountAmount: totalDiscountAmount,
         notes: orderNotesWithPromo,
@@ -3157,7 +3306,7 @@ export function QuickActionScreen() {
                   <AppPanel style={[styles.summaryPanel, styles.summaryTotalPanel]}>
                     <View style={styles.summarySectionHeader}>
                       <Text style={styles.summaryTitle}>Item Layanan</Text>
-                      <Text style={styles.summarySectionMeta}>{selectedLines.length} item</Text>
+                      <Text style={styles.summarySectionMeta}>{selectedReviewItemCount} item</Text>
                     </View>
                     <View style={styles.summaryItemList}>
                       {selectedLines.map((line) => (
@@ -3173,6 +3322,17 @@ export function QuickActionScreen() {
                           </Text>
                         </View>
                       ))}
+                      {selectedPerfumeService ? (
+                        <View key={selectedPerfumeService.id} style={styles.summaryItemCard}>
+                          <View style={styles.summaryItemTopRow}>
+                            <Text numberOfLines={1} style={styles.summaryItemName}>
+                              {selectedPerfumeService.name}
+                            </Text>
+                            <Text style={styles.summaryItemSubtotal}>{formatMoney(selectedPerfumeAmount)}</Text>
+                          </View>
+                          <Text style={styles.summaryItemMeta}>Parfum pilihan x 1 PCS</Text>
+                        </View>
+                      ) : null}
                     </View>
                     <View style={styles.summaryDivider} />
                     <View style={styles.summaryRow}>
@@ -3203,6 +3363,68 @@ export function QuickActionScreen() {
                       <Text style={styles.summaryTotalValue}>{formatMoney(total)}</Text>
                     </View>
                   </AppPanel>
+
+                  {showReviewPerfumePanel ? (
+                    <View onLayout={(event) => handleReviewPanelLayout("perfume", event)}>
+                      <AppPanel style={styles.summaryPanel}>
+                        <View style={styles.reviewSectionHeader}>
+                          <Text style={styles.summaryTitle}>Parfum</Text>
+                          {selectedPerfumeService ? <Text style={styles.reviewSectionValue}>+ {formatMoney(selectedPerfumeAmount)}</Text> : null}
+                        </View>
+                        {perfumeServices.length > 0 ? (
+                          <View style={styles.reviewPromoBlock}>
+                            <Pressable
+                              onPress={() => setSelectedPerfumeServiceId(null)}
+                              style={({ pressed }) => [
+                                styles.reviewPromoRow,
+                                styles.reviewPromoSelectableRow,
+                                selectedPerfumeServiceId === null ? styles.reviewPromoRowActive : null,
+                                pressed ? styles.pressed : null,
+                              ]}
+                            >
+                              <View style={styles.reviewPromoRowMain}>
+                                <Text numberOfLines={1} style={styles.reviewPromoName}>
+                                  Tanpa Parfum
+                                </Text>
+                                <Text style={styles.reviewPromoMeta}>Lanjutkan pesanan tanpa layanan parfum tambahan.</Text>
+                              </View>
+                              <View style={styles.reviewPromoSelectionRight}>
+                                <Text style={[styles.reviewPromoValue, styles.reviewPromoValueMuted]}>{formatMoney(0)}</Text>
+                                <Text style={[styles.reviewPromoEligibilityText, selectedPerfumeServiceId === null ? styles.reviewPromoStateTextActive : styles.reviewPromoStateTextMuted]}>
+                                  {selectedPerfumeServiceId === null ? "Dipilih" : "Pilih"}
+                                </Text>
+                              </View>
+                            </Pressable>
+                            {perfumeServices.map((service) => {
+                              const active = selectedPerfumeServiceId === service.id;
+                              return (
+                                <Pressable
+                                  key={service.id}
+                                  onPress={() => setSelectedPerfumeServiceId(active ? null : service.id)}
+                                  style={({ pressed }) => [styles.reviewPromoRow, styles.reviewPromoSelectableRow, active ? styles.reviewPromoRowActive : null, pressed ? styles.pressed : null]}
+                                >
+                                  <View style={styles.reviewPromoRowMain}>
+                                    <Text numberOfLines={1} style={styles.reviewPromoName}>
+                                      {service.name}
+                                    </Text>
+                                    <Text style={styles.reviewPromoMeta}>Tambahan parfum untuk pesanan ini.</Text>
+                                  </View>
+                                  <View style={styles.reviewPromoSelectionRight}>
+                                    <Text style={styles.reviewPromoValue}>+ {formatMoney(Math.max(service.effective_price_amount ?? 0, 0))}</Text>
+                                    <Text style={[styles.reviewPromoEligibilityText, active ? styles.reviewPromoStateTextActive : styles.reviewPromoStateTextMuted]}>
+                                      {active ? "Dipilih" : "Pilih"}
+                                    </Text>
+                                  </View>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+                        ) : (
+                          <Text style={styles.infoText}>Belum ada layanan parfum aktif di outlet ini.</Text>
+                        )}
+                      </AppPanel>
+                    </View>
+                  ) : null}
 
                   {showReviewPromoPanel ? (
                     <View onLayout={(event) => handleReviewPanelLayout("promo", event)}>
@@ -3437,6 +3659,25 @@ export function QuickActionScreen() {
                   ) : null}
 
                   <View style={styles.reviewActionButtonsRow}>
+                    <Pressable
+                      onPress={() => toggleReviewPanel("perfume")}
+                      style={({ pressed }) => [styles.reviewActionButton, showReviewPerfumePanel ? styles.reviewActionButtonActive : null, pressed ? styles.reviewActionButtonPressed : null]}
+                    >
+                      <View style={styles.reviewActionButtonTop}>
+                        <View style={styles.reviewActionButtonLeft}>
+                          <View style={[styles.reviewActionButtonIconBadge, showReviewPerfumePanel ? styles.reviewActionButtonIconBadgeActive : null]}>
+                            <Ionicons color={showReviewPerfumePanel ? theme.colors.info : theme.colors.textMuted} name="flask-outline" size={14} />
+                          </View>
+                          <Text style={[styles.reviewActionButtonLabel, showReviewPerfumePanel ? styles.reviewActionButtonLabelActive : null]}>Parfum</Text>
+                        </View>
+                      </View>
+                      <Text
+                        numberOfLines={1}
+                        style={[styles.reviewActionButtonMeta, showReviewPerfumePanel ? styles.reviewActionButtonMetaActive : null]}
+                      >
+                        {selectedPerfumeService?.name ?? "Tanpa parfum"}
+                      </Text>
+                    </Pressable>
                     <Pressable
                       onPress={() => toggleReviewPanel("promo")}
                       style={({ pressed }) => [styles.reviewActionButton, showReviewPromoPanel ? styles.reviewActionButtonActive : null, pressed ? styles.reviewActionButtonPressed : null]}
@@ -4780,6 +5021,17 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       alignItems: "center",
       justifyContent: "center",
       gap: 8,
+    },
+    reviewActionButtonMeta: {
+      marginTop: 3,
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 10.5,
+      lineHeight: 13,
+      textAlign: "center",
+    },
+    reviewActionButtonMetaActive: {
+      color: theme.colors.info,
     },
     reviewActionButtonLeft: {
       flexDirection: "row",

@@ -14,7 +14,8 @@ function resolvePrinterLocalSettingsKey(outletId?: string | null): string {
     return PRINTER_LOCAL_SETTINGS_KEY;
   }
 
-  return `${PRINTER_LOCAL_SETTINGS_KEY}:${outletId.trim()}`;
+  const normalizedOutletId = outletId.trim().replace(/[^A-Za-z0-9._-]/g, "_");
+  return `${PRINTER_LOCAL_SETTINGS_KEY}_${normalizedOutletId}`;
 }
 
 function parsePrinterLocalSettings(raw: string): PrinterLocalSettings {
@@ -31,12 +32,16 @@ function parsePrinterLocalSettings(raw: string): PrinterLocalSettings {
 }
 
 export async function getPrinterLocalSettings(outletId?: string | null): Promise<PrinterLocalSettings> {
-  const raw = await SecureStore.getItemAsync(resolvePrinterLocalSettingsKey(outletId));
-  if (!raw) {
+  try {
+    const raw = await SecureStore.getItemAsync(resolvePrinterLocalSettingsKey(outletId));
+    if (!raw) {
+      return DEFAULT_PRINTER_LOCAL_SETTINGS;
+    }
+
+    return parsePrinterLocalSettings(raw);
+  } catch {
     return DEFAULT_PRINTER_LOCAL_SETTINGS;
   }
-
-  return parsePrinterLocalSettings(raw);
 }
 
 export async function setPrinterLocalSettings(settings: PrinterLocalSettings, outletId?: string | null): Promise<void> {

@@ -22,6 +22,10 @@ function formatMoney(value: number | null | undefined): string {
   return `Rp ${moneyFormatter.format(normalized)}`;
 }
 
+function formatReceiptMoney(value: number | null | undefined): string {
+  return `${formatMoney(value)},-`;
+}
+
 function formatDateTime(value: string | null | undefined): string {
   if (!value) {
     return "-";
@@ -73,6 +77,18 @@ function buildKeyValueLine(label: string, value: string, labelWidth: number): st
   return `${normalizedLabel.padEnd(labelWidth, " ")} : ${value}`;
 }
 
+function centerReceiptLine(value: string, lineWidth: number): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (trimmed.length >= lineWidth) {
+    return trimmed;
+  }
+  const paddingStart = Math.max(Math.floor((lineWidth - trimmed.length) / 2), 0);
+  return `${" ".repeat(paddingStart)}${trimmed}`;
+}
+
 function resolveReceiptLayout(paperWidth?: PrinterPaperWidth): { divider: string; labelWidth: number } {
   if (paperWidth === "80mm") {
     return {
@@ -105,32 +121,45 @@ function buildCustomerLines(order: OrderDetail): string[] {
   return items.map((item, index) => `${index + 1}. ${item.service_name_snapshot} | ${formatItemMetric(item)} | ${formatMoney(item.subtotal_amount)}`);
 }
 
+function resolveSelectedPerfumeLabel(order: OrderDetail): string | null {
+  const perfumeNames = (order.items ?? [])
+    .filter((item) => (item.service?.service_type ?? "").toLowerCase() === "perfume")
+    .map((item) => item.service_name_snapshot.trim())
+    .filter((value, index, source) => value !== "" && source.indexOf(value) === index);
+
+  if (perfumeNames.length === 0) {
+    return null;
+  }
+
+  return perfumeNames.join(", ");
+}
+
 export function buildOrderReceiptText(params: BuildOrderReceiptParams): string {
   const { kind, order, outletLabel, paperWidth } = params;
   const reference = resolveOrderRef(order);
   const customerName = order.customer?.name ?? "-";
   const customerPhone = order.customer?.phone_normalized ?? "-";
   const itemSubTotal = resolveItemSubTotal(order);
+  const selectedPerfume = resolveSelectedPerfumeLabel(order);
   const { divider, labelWidth } = resolveReceiptLayout(paperWidth);
   const lines: string[] = [];
 
-  lines.push(kind === "production" ? "NOTA PRODUKSI LAUNDRY" : "NOTA KONSUMEN LAUNDRY");
-  lines.push(divider);
-  lines.push(buildKeyValueLine("Ref", reference, labelWidth));
-  lines.push(buildKeyValueLine("Order Code", order.order_code, labelWidth));
-  lines.push(buildKeyValueLine("Tanggal", formatDateTime(order.created_at), labelWidth));
-  lines.push(buildKeyValueLine("Pelanggan", customerName, labelWidth));
-  lines.push(buildKeyValueLine("Telepon", customerPhone, labelWidth));
-  if (outletLabel) {
-    lines.push(buildKeyValueLine("Outlet", outletLabel, labelWidth));
-  }
-  lines.push("");
-  lines.push(kind === "production" ? "ITEM PRODUKSI" : "ITEM LAYANAN");
-  lines.push(divider);
-  lines.push(...(kind === "production" ? buildProductionLines(order) : buildCustomerLines(order)));
-  lines.push("");
-
   if (kind === "production") {
+    lines.push(centerReceiptLine("(Nota Produksi)", divider.length));
+    lines.push(centerReceiptLine(outletLabel || "Laundry", divider.length));
+    lines.push(centerReceiptLine(reference, divider.length));
+    lines.push(centerReceiptLine(customerName, divider.length));
+    lines.push(centerReceiptLine("Sisa Pembayaran", divider.length));
+    lines.push(centerReceiptLine(formatReceiptMoney(order.due_amount), divider.length));
+    lines.push(divider);
+    lines.push(buildKeyValueLine("Tgl Pesan", formatDateTime(order.created_at), labelWidth));
+    lines.push(buildKeyValueLine("Est Selesai", formatDateTime(order.estimated_completion_at ?? null), labelWidth));
+    lines.push(divider);
+    lines.push(...buildProductionLines(order));
+    if (selectedPerfume) {
+      lines.push(buildKeyValueLine("Parfum", selectedPerfume, labelWidth));
+    }
+    lines.push(divider);
     lines.push(buildKeyValueLine("Status Laundry", formatStatusLabel(order.laundry_status), labelWidth));
     if (order.is_pickup_delivery) {
       lines.push(buildKeyValueLine("Status Kurir", formatStatusLabel(order.courier_status), labelWidth));
@@ -143,14 +172,33 @@ export function buildOrderReceiptText(params: BuildOrderReceiptParams): string {
     return lines.join("\n");
   }
 
+  lines.push("NOTA KONSUMEN LAUNDRY");
+  lines.push(divider);
+  lines.push(buildKeyValueLine("Ref", reference, labelWidth));
+  lines.push(buildKeyValueLine("Order Code", order.order_code, labelWidth));
+  lines.push(buildKeyValueLine("Tanggal", formatDateTime(order.created_at), labelWidth));
+  lines.push(buildKeyValueLine("Pelanggan", customerName, labelWidth));
+  lines.push(buildKeyValueLine("Telepon", customerPhone, labelWidth));
+  if (outletLabel) {
+    lines.push(buildKeyValueLine("Outlet", outletLabel, labelWidth));
+  }
+  lines.push("");
+  lines.push("ITEM LAYANAN");
+  lines.push(divider);
+  lines.push(...buildCustomerLines(order));
+  if (selectedPerfume) {
+    lines.push(buildKeyValueLine("Parfum", selectedPerfume, labelWidth));
+  }
+  lines.push("");
+
   lines.push("RINGKASAN TAGIHAN");
   lines.push(divider);
-  lines.push(buildKeyValueLine("Subtotal Item", formatMoney(itemSubTotal), labelWidth));
-  lines.push(buildKeyValueLine("Biaya Antar", formatMoney(order.shipping_fee_amount ?? 0), labelWidth));
-  lines.push(buildKeyValueLine("Diskon", formatMoney(order.discount_amount ?? 0), labelWidth));
-  lines.push(buildKeyValueLine("Total", formatMoney(order.total_amount), labelWidth));
-  lines.push(buildKeyValueLine("Dibayar", formatMoney(order.paid_amount), labelWidth));
-  lines.push(buildKeyValueLine("Sisa", formatMoney(order.due_amount), labelWidth));
+  lines.push(buildKeyValueLine("Subtotal Item", formatReceiptMoney(itemSubTotal), labelWidth));
+  lines.push(buildKeyValueLine("Biaya Antar", formatReceiptMoney(order.shipping_fee_amount ?? 0), labelWidth));
+  lines.push(buildKeyValueLine("Diskon", formatReceiptMoney(order.discount_amount ?? 0), labelWidth));
+  lines.push(buildKeyValueLine("Total", formatReceiptMoney(order.total_amount), labelWidth));
+  lines.push(buildKeyValueLine("Dibayar", formatReceiptMoney(order.paid_amount), labelWidth));
+  lines.push(buildKeyValueLine("Sisa", formatReceiptMoney(order.due_amount), labelWidth));
   if (order.notes?.trim()) {
     lines.push(buildKeyValueLine("Catatan", order.notes.trim(), labelWidth));
   }
