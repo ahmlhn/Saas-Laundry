@@ -752,8 +752,8 @@ export function QuickActionScreen() {
         return result;
       }, {});
 
-      setServices(serviceItems);
-      setPerfumeServices(perfumeItems);
+      setServices(serviceItems.filter((item) => item.show_in_cashier !== false));
+      setPerfumeServices(perfumeItems.filter((item) => item.show_in_cashier !== false));
       setServiceGroupNamesById(groupNameMap);
       setServiceGroupIconsById(groupIconMap);
     } catch (error) {
@@ -1056,6 +1056,8 @@ export function QuickActionScreen() {
             package_valid_days: null,
             package_accumulation_mode: null,
             active: true,
+            show_in_cashier: true,
+            show_to_customer: true,
             sort_order: 9_999,
             image_icon: null,
             effective_price_amount: item.unit_price_amount,
@@ -1090,6 +1092,8 @@ export function QuickActionScreen() {
           package_valid_days: null,
           package_accumulation_mode: null,
           active: true,
+          show_in_cashier: true,
+          show_to_customer: true,
           sort_order: 9_999,
           image_icon: null,
           effective_price_amount: item.unit_price_amount,

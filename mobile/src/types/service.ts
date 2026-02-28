@@ -40,6 +40,8 @@ export interface ServiceCatalogItem {
   package_valid_days: number | null;
   package_accumulation_mode: PackageAccumulationMode | null;
   active: boolean;
+  show_in_cashier: boolean;
+  show_to_customer: boolean;
   sort_order: number;
   image_icon: string | null;
   deleted_at?: string | null;
@@ -65,6 +67,8 @@ export interface ServiceCreatePayload {
   packageValidDays?: number | null;
   packageAccumulationMode?: PackageAccumulationMode | null;
   active?: boolean;
+  showInCashier?: boolean;
+  showToCustomer?: boolean;
   sortOrder?: number;
   imageIcon?: string | null;
   processTagIds?: string[];
@@ -85,6 +89,8 @@ export interface ServiceUpdatePayload {
   packageValidDays?: number | null;
   packageAccumulationMode?: PackageAccumulationMode | null;
   active?: boolean;
+  showInCashier?: boolean;
+  showToCustomer?: boolean;
   sortOrder?: number;
   imageIcon?: string | null;
   processTagIds?: string[];

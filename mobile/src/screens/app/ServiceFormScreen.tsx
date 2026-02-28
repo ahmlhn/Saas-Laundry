@@ -37,6 +37,20 @@ function normalizePriceInput(input: string): string {
   return input.replace(/\D+/g, "");
 }
 
+function formatPriceInput(input: string): string {
+  const digits = normalizePriceInput(input);
+  if (!digits) {
+    return "";
+  }
+
+  const parsed = Number.parseInt(digits, 10);
+  if (!Number.isFinite(parsed)) {
+    return "";
+  }
+
+  return `Rp ${currencyFormatter.format(parsed)}`;
+}
+
 function normalizeDigitInput(input: string): string {
   return input.replace(/[^\d]/g, "");
 }
@@ -204,10 +218,10 @@ export function ServiceFormScreen() {
             <TextInput
               keyboardType="number-pad"
               onChangeText={(text) => setBasePriceInput(normalizePriceInput(text))}
-              placeholder="Contoh: 12000"
+              placeholder="Contoh: Rp 12.000"
               placeholderTextColor={theme.colors.textMuted}
               style={styles.input}
-              value={basePriceInput}
+              value={formatPriceInput(basePriceInput)}
             />
           </View>
 
@@ -444,14 +458,19 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
     input: {
       borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
+      borderColor: theme.mode === "dark" ? "#3f90c4" : "#79d2f0",
       borderRadius: theme.radii.lg,
-      backgroundColor: theme.colors.inputBg,
+      backgroundColor: theme.mode === "dark" ? "rgba(31, 67, 99, 0.95)" : "#f1fbff",
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.medium,
       fontSize: 14,
       paddingHorizontal: 12,
       paddingVertical: 12,
+      shadowColor: theme.mode === "dark" ? "#000000" : "#66c7ec",
+      shadowOpacity: theme.mode === "dark" ? 0.14 : 0.12,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: 2,
     },
     durationRow: {
       flexDirection: "row",

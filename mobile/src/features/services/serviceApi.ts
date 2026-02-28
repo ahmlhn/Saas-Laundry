@@ -118,6 +118,8 @@ export async function createService(payload: ServiceCreatePayload): Promise<Serv
     package_valid_days: payload.packageValidDays,
     package_accumulation_mode: payload.packageAccumulationMode,
     active: payload.active ?? true,
+    show_in_cashier: payload.showInCashier ?? true,
+    show_to_customer: payload.showToCustomer ?? true,
     sort_order: payload.sortOrder,
     image_icon: payload.imageIcon,
     process_tag_ids: payload.processTagIds,
@@ -184,6 +186,14 @@ export async function updateService(serviceId: string, payload: ServiceUpdatePay
 
   if (typeof payload.active === "boolean") {
     body.active = payload.active;
+  }
+
+  if (typeof payload.showInCashier === "boolean") {
+    body.show_in_cashier = payload.showInCashier;
+  }
+
+  if (typeof payload.showToCustomer === "boolean") {
+    body.show_to_customer = payload.showToCustomer;
   }
 
   if (typeof payload.sortOrder === "number") {

@@ -3,20 +3,19 @@ import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/nativ
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useCallback, useMemo, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { ServiceModuleHeader } from "../../components/services/ServiceModuleHeader";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import {
   formatServiceDuration,
-  getDefaultDurationDays,
   getDefaultDurationUnit,
   resolveDurationPartsFromValue,
   resolveDurationValueAndUnit,
   type ServiceDurationUnit,
 } from "../../features/services/defaultDuration";
-import { createService, listServices, updateService } from "../../features/services/serviceApi";
+import { archiveService, createService, listServices, updateService } from "../../features/services/serviceApi";
 import { listServiceProcessTags } from "../../features/services/serviceTagApi";
 import { hasAnyRole } from "../../lib/accessControl";
 import { getApiErrorMessage } from "../../lib/httpClient";
@@ -27,16 +26,92 @@ import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
 
 type ServiceVariantFormRoute = RouteProp<AccountStackParamList, "ServiceVariantForm">;
+type VariantIconOption = { label: string; value: keyof typeof Ionicons.glyphMap; emoji: string };
+type VariantIconCategory = { label: string; tone: string; options: VariantIconOption[] };
 
 const PACKAGE_MODES: Array<{ label: string; value: PackageAccumulationMode }> = [
   { label: "Akumulasi", value: "accumulative" },
   { label: "Jendela Tetap", value: "fixed_window" },
 ];
 
+const VARIANT_ICON_CATEGORIES: VariantIconCategory[] = [
+  {
+    label: "Pakaian",
+    tone: "#1f8ef1",
+    options: [
+      { label: "Baju", value: "shirt", emoji: "👕" },
+      { label: "Gaun", value: "woman", emoji: "👗" },
+      { label: "Formal", value: "briefcase", emoji: "👔" },
+      { label: "Setrika", value: "cut", emoji: "🔥" },
+    ],
+  },
+  {
+    label: "Rumah Tangga",
+    tone: "#0ea5a4",
+    options: [
+      { label: "Bedcover", value: "bed", emoji: "🛏" },
+      { label: "Keranjang", value: "basket", emoji: "🧺" },
+      { label: "Lemari", value: "archive", emoji: "🗂" },
+      { label: "Umum", value: "cube", emoji: "📦" },
+    ],
+  },
+  {
+    label: "Aksesori",
+    tone: "#f97316",
+    options: [
+      { label: "Tas", value: "bag-handle", emoji: "👜" },
+      { label: "Sepatu", value: "footsteps", emoji: "👟" },
+      { label: "Boneka", value: "happy", emoji: "🧸" },
+      { label: "Premium", value: "diamond", emoji: "💎" },
+    ],
+  },
+  {
+    label: "Spesial",
+    tone: "#a855f7",
+    options: [
+      { label: "Kilat", value: "flash", emoji: "⚡" },
+      { label: "Basah", value: "water", emoji: "💦" },
+      { label: "Parfum", value: "flower", emoji: "🌸" },
+      { label: "Paket", value: "apps", emoji: "🎁" },
+    ],
+  },
+];
+
+const VARIANT_ICON_OPTIONS = VARIANT_ICON_CATEGORIES.flatMap((category) => category.options);
+
+const LEGACY_ICON_MAP: Partial<Record<string, keyof typeof Ionicons.glyphMap>> = {
+  "shirt-outline": "shirt",
+  "bed-outline": "bed",
+  "basket-outline": "basket",
+  "bag-handle-outline": "bag-handle",
+  "cube-outline": "cube",
+  "ribbon-outline": "diamond",
+  "sparkles-outline": "flash",
+  "water-outline": "water",
+  "cut-outline": "cut",
+  "flower-outline": "flower",
+  "apps-outline": "apps",
+  "archive-outline": "archive",
+};
+
 const currencyFormatter = new Intl.NumberFormat("id-ID");
 
 function normalizeDigits(value: string): string {
   return value.replace(/[^\d]/g, "");
+}
+
+function formatPriceInput(value: string): string {
+  const digits = normalizeDigits(value);
+  if (!digits) {
+    return "";
+  }
+
+  const parsed = Number.parseInt(digits, 10);
+  if (!Number.isFinite(parsed)) {
+    return "";
+  }
+
+  return `Rp ${currencyFormatter.format(parsed)}`;
 }
 
 function formatServiceTypeLabel(serviceType: string): string {
@@ -66,6 +141,18 @@ function resolveUnitTypeFromDisplayUnit(displayUnit: ServiceDisplayUnit): "kg" |
   return "pcs";
 }
 
+function normalizeVariantIcon(iconName: string | null | undefined): keyof typeof Ionicons.glyphMap {
+  if (iconName && VARIANT_ICON_OPTIONS.some((option) => option.value === iconName)) {
+    return iconName as keyof typeof Ionicons.glyphMap;
+  }
+
+  if (iconName && LEGACY_ICON_MAP[iconName]) {
+    return LEGACY_ICON_MAP[iconName] as keyof typeof Ionicons.glyphMap;
+  }
+
+  return "shirt";
+}
+
 export function ServiceVariantFormScreen() {
   const theme = useAppTheme();
   const { width, height } = useWindowDimensions();
@@ -84,13 +171,13 @@ export function ServiceVariantFormScreen() {
   const isEdit = mode === "edit";
   const serviceType = route.params.serviceType;
   const variant = route.params.variant;
-  const defaultDurationDays = getDefaultDurationDays(serviceType);
   const defaultDuration = resolveDurationValueAndUnit(variant?.duration_days, variant?.duration_hours, serviceType);
 
   const [groups, setGroups] = useState<ServiceCatalogItem[]>([]);
   const [tags, setTags] = useState<ServiceProcessTag[]>([]);
   const [loadingReferences, setLoadingReferences] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [nameInput, setNameInput] = useState(variant?.name ?? "");
@@ -109,9 +196,12 @@ export function ServiceVariantFormScreen() {
           ? "meter"
         : "pcs"
   );
-  const [imageIcon, setImageIcon] = useState(variant?.image_icon ?? "");
+  const [imageIcon, setImageIcon] = useState<keyof typeof Ionicons.glyphMap>(normalizeVariantIcon(variant?.image_icon));
   const [active, setActive] = useState(variant?.active ?? true);
+  const [showInCashier, setShowInCashier] = useState(variant?.show_in_cashier ?? true);
+  const [showToCustomer, setShowToCustomer] = useState(variant?.show_to_customer ?? true);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>(variant?.process_tags?.map((tag) => tag.id) ?? []);
+  const [iconPickerVisible, setIconPickerVisible] = useState(false);
 
   const [packageQuotaInput, setPackageQuotaInput] = useState(variant?.package_quota_value ? String(variant.package_quota_value) : "");
   const [packageQuotaUnit, setPackageQuotaUnit] = useState<PackageQuotaUnit>(variant?.package_quota_unit === "kg" ? "kg" : "pcs");
@@ -178,7 +268,7 @@ export function ServiceVariantFormScreen() {
   }
 
   async function handleSave(): Promise<void> {
-    if (!canManage || saving) {
+    if (!canManage || saving || deleting) {
       return;
     }
 
@@ -188,7 +278,7 @@ export function ServiceVariantFormScreen() {
       return;
     }
 
-    const parsedBasePrice = Number.parseInt(basePriceInput, 10);
+    const parsedBasePrice = Number.parseInt(normalizeDigits(basePriceInput), 10);
     if (!Number.isFinite(parsedBasePrice) || parsedBasePrice < 0) {
       setErrorMessage("Harga dasar tidak valid.");
       return;
@@ -248,8 +338,10 @@ export function ServiceVariantFormScreen() {
           packageQuotaUnit: isPackage ? packageQuotaUnit : null,
           packageValidDays,
           packageAccumulationMode: isPackage ? packageMode : null,
-          imageIcon: imageIcon.trim() || null,
+          imageIcon,
           active,
+          showInCashier,
+          showToCustomer,
           processTagIds: selectedTagIds,
         });
       } else {
@@ -267,8 +359,10 @@ export function ServiceVariantFormScreen() {
           packageQuotaUnit: isPackage ? packageQuotaUnit : null,
           packageValidDays,
           packageAccumulationMode: isPackage ? packageMode : null,
-          imageIcon: imageIcon.trim() || null,
+          imageIcon,
           active,
+          showInCashier,
+          showToCustomer,
           processTagIds: selectedTagIds,
         });
       }
@@ -279,6 +373,45 @@ export function ServiceVariantFormScreen() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleDelete(): Promise<void> {
+    if (!variant || !canManage || saving || deleting) {
+      return;
+    }
+
+    setDeleting(true);
+    setErrorMessage(null);
+
+    try {
+      await archiveService(variant.id);
+      navigation.goBack();
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  function confirmDelete(): void {
+    if (!variant) {
+      return;
+    }
+
+    Alert.alert(
+      "Hapus Varian",
+      `Varian "${variant.name}" akan diarsipkan. Lanjutkan?`,
+      [
+        { text: "Batal", style: "cancel" },
+        {
+          text: "Hapus",
+          style: "destructive",
+          onPress: () => {
+            void handleDelete();
+          },
+        },
+      ],
+    );
   }
 
   return (
@@ -325,10 +458,10 @@ export function ServiceVariantFormScreen() {
                 editable={!saving && canManage}
                 keyboardType="number-pad"
                 onChangeText={(text) => setBasePriceInput(normalizeDigits(text))}
-                placeholder="Contoh: 15000"
+                placeholder="Contoh: Rp 15.000"
                 placeholderTextColor={theme.colors.textMuted}
                 style={styles.input}
-                value={basePriceInput}
+                value={formatPriceInput(basePriceInput)}
               />
 
               <Text style={styles.label}>Durasi Layanan</Text>
@@ -428,15 +561,21 @@ export function ServiceVariantFormScreen() {
                 </>
               ) : null}
 
-              <Text style={styles.label}>Icon Nama (opsional)</Text>
-              <TextInput
-                editable={!saving && canManage}
-                onChangeText={setImageIcon}
-                placeholder="Contoh: bed-outline"
-                placeholderTextColor={theme.colors.textMuted}
-                style={styles.input}
-                value={imageIcon}
-              />
+              <Text style={styles.label}>Ikon Varian</Text>
+              <Pressable onPress={() => setIconPickerVisible(true)} style={({ pressed }) => [styles.iconPickerPreview, pressed ? styles.iconPickerPreviewPressed : null]}>
+                <View style={styles.iconPreviewBadge}>
+                  <Text style={styles.iconPreviewEmoji}>
+                    {VARIANT_ICON_OPTIONS.find((option) => option.value === imageIcon)?.emoji ?? "👕"}
+                  </Text>
+                </View>
+                <View style={styles.iconPreviewCopy}>
+                  <Text style={styles.iconPreviewTitle}>
+                    {VARIANT_ICON_OPTIONS.find((option) => option.value === imageIcon)?.label ?? "Ikon terpilih"}
+                  </Text>
+                  <Text style={styles.helperText}>Ketuk untuk memilih ikon varian per kategori.</Text>
+                </View>
+                <Ionicons color={theme.colors.textMuted} name="chevron-down-outline" size={20} />
+              </Pressable>
 
               <Text style={styles.label}>Tag Proses</Text>
               <View style={styles.tagWrap}>
@@ -457,6 +596,45 @@ export function ServiceVariantFormScreen() {
                   <Text style={[styles.statusChipText, active ? styles.statusChipTextActive : null]}>{active ? "Aktif" : "Nonaktif"}</Text>
                 </Pressable>
               </View>
+
+              <Text style={styles.label}>Opsi Layanan</Text>
+              <View style={styles.optionList}>
+                <Pressable onPress={() => setShowInCashier((value) => !value)} style={styles.optionRow}>
+                  <View style={styles.optionCopy}>
+                    <Text style={styles.optionTitle}>Ditampilkan di Kasir</Text>
+                    <Text style={styles.optionCaption}>Muncul di daftar layanan saat buat pesanan.</Text>
+                  </View>
+                  <View style={[styles.optionToggle, showInCashier ? styles.optionToggleActive : null]}>
+                    <Text style={[styles.optionToggleText, showInCashier ? styles.optionToggleTextActive : null]}>
+                      {showInCashier ? "Aktif" : "Nonaktif"}
+                    </Text>
+                  </View>
+                </Pressable>
+
+                <Pressable onPress={() => setShowToCustomer((value) => !value)} style={styles.optionRow}>
+                  <View style={styles.optionCopy}>
+                    <Text style={styles.optionTitle}>Ditampilkan ke Pelanggan</Text>
+                    <Text style={styles.optionCaption}>Disiapkan untuk tampilan customer-facing dan e-nota.</Text>
+                  </View>
+                  <View style={[styles.optionToggle, showToCustomer ? styles.optionToggleActive : null]}>
+                    <Text style={[styles.optionToggleText, showToCustomer ? styles.optionToggleTextActive : null]}>
+                      {showToCustomer ? "Aktif" : "Nonaktif"}
+                    </Text>
+                  </View>
+                </Pressable>
+              </View>
+
+              {isEdit ? (
+                <View style={styles.deleteActionWrap}>
+                  <AppButton
+                    disabled={!canManage || saving || deleting}
+                    loading={deleting}
+                    onPress={confirmDelete}
+                    title="Hapus Varian"
+                    variant="ghost"
+                  />
+                </View>
+              ) : null}
             </AppPanel>
 
             {errorMessage ? (
@@ -468,9 +646,70 @@ export function ServiceVariantFormScreen() {
           </ScrollView>
 
           <View style={styles.footerDock}>
-            <AppButton disabled={!canManage || saving} loading={saving} onPress={() => void handleSave()} title={isEdit ? "Simpan Varian" : "Buat Varian"} />
+            <View style={styles.footerActions}>
+              <View style={styles.primaryActionFull}>
+                <AppButton
+                  disabled={!canManage || saving || deleting}
+                  loading={saving}
+                  onPress={() => void handleSave()}
+                  title={isEdit ? "Simpan Varian" : "Buat Varian"}
+                />
+              </View>
+            </View>
           </View>
         </View>
+
+        <Modal animationType="fade" onRequestClose={() => setIconPickerVisible(false)} transparent visible={iconPickerVisible}>
+          <View style={styles.iconModalOverlay}>
+            <Pressable onPress={() => setIconPickerVisible(false)} style={StyleSheet.absoluteFill} />
+            <AppPanel style={styles.iconModalCard}>
+              <View style={styles.iconModalHeader}>
+                <View>
+                  <Text style={styles.iconModalTitle}>Pilih Ikon Varian</Text>
+                  <Text style={styles.helperText}>Gunakan ikon yang paling mendekati jenis layanan.</Text>
+                </View>
+                <Pressable onPress={() => setIconPickerVisible(false)} style={styles.iconModalClose}>
+                  <Ionicons color={theme.colors.textSecondary} name="close-outline" size={20} />
+                </Pressable>
+              </View>
+
+              <ScrollView contentContainerStyle={styles.iconModalContent} showsVerticalScrollIndicator={false}>
+                {VARIANT_ICON_CATEGORIES.map((category) => (
+                  <View key={category.label} style={styles.iconCategorySection}>
+                    <View style={styles.iconCategoryHeader}>
+                      <View style={[styles.iconCategoryDot, { backgroundColor: category.tone }]} />
+                      <Text style={styles.iconCategoryTitle}>{category.label}</Text>
+                    </View>
+                    <View style={styles.iconGrid}>
+                      {category.options.map((option) => {
+                        const selected = imageIcon === option.value;
+                        return (
+                          <Pressable
+                            key={option.value}
+                            onPress={() => {
+                              setImageIcon(option.value);
+                              setIconPickerVisible(false);
+                            }}
+                            style={[
+                              styles.iconOption,
+                              { backgroundColor: `${category.tone}10` },
+                              selected ? [styles.iconOptionActive, { borderColor: category.tone, backgroundColor: `${category.tone}1e` }] : null,
+                            ]}
+                          >
+                            <View style={[styles.iconOptionBadge, { backgroundColor: `${category.tone}22` }]}>
+                              <Text style={styles.iconOptionEmoji}>{option.emoji}</Text>
+                            </View>
+                            <Text style={[styles.iconOptionLabel, selected ? [styles.iconOptionLabelActive, { color: category.tone }] : null]}>{option.label}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ))}
+              </ScrollView>
+            </AppPanel>
+          </View>
+        </Modal>
       </AppScreen>
     </KeyboardAvoidingView>
   );
@@ -501,6 +740,17 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       backgroundColor: theme.colors.background,
       borderTopWidth: 1,
       borderTopColor: theme.colors.border,
+    },
+    footerActions: {
+      flexDirection: "row",
+      gap: theme.spacing.sm,
+      alignItems: "center",
+    },
+    primaryAction: {
+      flex: 1.2,
+    },
+    primaryActionFull: {
+      flex: 1,
     },
     headerPanel: {
       backgroundColor: theme.mode === "dark" ? "#12304a" : "#f7f9fb",
@@ -557,14 +807,19 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
     input: {
       borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
+      borderColor: theme.mode === "dark" ? "#3f90c4" : "#79d2f0",
       borderRadius: theme.radii.md,
-      backgroundColor: theme.colors.inputBg,
+      backgroundColor: theme.mode === "dark" ? "rgba(31, 67, 99, 0.95)" : "#f1fbff",
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.medium,
       fontSize: 14,
       paddingHorizontal: 12,
       paddingVertical: 10,
+      shadowColor: theme.mode === "dark" ? "#000000" : "#66c7ec",
+      shadowOpacity: theme.mode === "dark" ? 0.14 : 0.12,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: 2,
     },
     durationRow: {
       flexDirection: "row",
@@ -616,6 +871,145 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       flexDirection: "row",
       flexWrap: "wrap",
       gap: 8,
+    },
+    iconPickerPreview: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.spacing.sm,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? "#3f90c4" : "#b6e7f6",
+      borderRadius: theme.radii.lg,
+      backgroundColor: theme.mode === "dark" ? "rgba(31, 67, 99, 0.72)" : "#f4fcff",
+    },
+    iconPickerPreviewPressed: {
+      opacity: 0.9,
+    },
+    iconPreviewBadge: {
+      width: 56,
+      height: 56,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? "#5fa7d8" : "#9fd9ee",
+      backgroundColor: theme.mode === "dark" ? "rgba(17, 48, 72, 0.95)" : "#ffffff",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    iconPreviewEmoji: {
+      fontSize: 28,
+      lineHeight: 30,
+      textAlign: "center",
+      includeFontPadding: false,
+    },
+    iconPreviewCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    iconPreviewTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13,
+    },
+    iconGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 10,
+    },
+    iconOption: {
+      width: 84,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.lg,
+      paddingHorizontal: 10,
+      paddingVertical: 12,
+      backgroundColor: theme.colors.surface,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+    },
+    iconOptionActive: {
+      borderColor: theme.colors.info,
+    },
+    iconOptionBadge: {
+      width: 42,
+      height: 42,
+      borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    iconOptionEmoji: {
+      fontSize: 22,
+      lineHeight: 24,
+      textAlign: "center",
+      includeFontPadding: false,
+    },
+    iconOptionLabel: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      textAlign: "center",
+    },
+    iconOptionLabelActive: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.semibold,
+    },
+    iconModalOverlay: {
+      flex: 1,
+      backgroundColor: "rgba(7, 18, 31, 0.32)",
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: isTablet ? 48 : 20,
+    },
+    iconModalCard: {
+      width: "100%",
+      maxWidth: 420,
+      gap: theme.spacing.md,
+      paddingVertical: theme.spacing.lg,
+      maxHeight: "76%",
+    },
+    iconModalHeader: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: theme.spacing.md,
+    },
+    iconModalTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 16,
+    },
+    iconModalClose: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    iconModalContent: {
+      gap: theme.spacing.md,
+      paddingBottom: theme.spacing.xs,
+    },
+    iconCategorySection: {
+      gap: theme.spacing.sm,
+    },
+    iconCategoryHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    iconCategoryDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+    },
+    iconCategoryTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13,
     },
     tagChip: {
       flexDirection: "row",
@@ -671,6 +1065,56 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     statusChipTextActive: {
       color: theme.colors.success,
     },
+    optionList: {
+      gap: theme.spacing.sm,
+    },
+    optionRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.md,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.lg,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      backgroundColor: theme.mode === "dark" ? "rgba(80,140,255,0.1)" : "#eef8ff",
+    },
+    optionCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    optionTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13,
+    },
+    optionCaption: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 16,
+    },
+    optionToggle: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.pill,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      backgroundColor: theme.colors.surface,
+    },
+    optionToggleActive: {
+      borderColor: theme.colors.info,
+      backgroundColor: theme.colors.primarySoft,
+    },
+    optionToggleText: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+    },
+    optionToggleTextActive: {
+      color: theme.colors.info,
+    },
     errorWrap: {
       borderWidth: 1,
       borderColor: theme.mode === "dark" ? "#6c3242" : "#f0bbc5",
@@ -688,6 +1132,12 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 18,
+    },
+    deleteActionWrap: {
+      marginTop: theme.spacing.sm,
+      paddingTop: theme.spacing.sm,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
     },
   });
 }

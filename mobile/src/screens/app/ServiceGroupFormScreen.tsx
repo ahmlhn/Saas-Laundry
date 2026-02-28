@@ -3,12 +3,12 @@ import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/nativ
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useCallback, useMemo, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { ServiceModuleHeader } from "../../components/services/ServiceModuleHeader";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
-import { createService, updateService } from "../../features/services/serviceApi";
+import { archiveService, createService, updateService } from "../../features/services/serviceApi";
 import { formatServiceDuration } from "../../features/services/defaultDuration";
 import { listServiceProcessTags } from "../../features/services/serviceTagApi";
 import { hasAnyRole } from "../../lib/accessControl";
@@ -62,6 +62,7 @@ export function ServiceGroupFormScreen() {
   const [tags, setTags] = useState<ServiceProcessTag[]>([]);
   const [loadingTags, setLoadingTags] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const liveGroupName = nameInput.trim() || group?.name || "Group layanan";
   const headerSubtitle = isEdit
@@ -97,7 +98,7 @@ export function ServiceGroupFormScreen() {
   }
 
   async function handleSave(nextAction: "back" | "addVariant" = "back"): Promise<void> {
-    if (!canManage || saving) {
+    if (!canManage || saving || deleting) {
       return;
     }
 
@@ -154,6 +155,50 @@ export function ServiceGroupFormScreen() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleDelete(): Promise<void> {
+    if (!group || !canManage || saving || deleting) {
+      return;
+    }
+
+    if (variants.length > 0) {
+      setErrorMessage("Hapus semua varian di dalam group ini terlebih dahulu.");
+      return;
+    }
+
+    setDeleting(true);
+    setErrorMessage(null);
+
+    try {
+      await archiveService(group.id);
+      navigation.goBack();
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  function confirmDelete(): void {
+    if (!group) {
+      return;
+    }
+
+    Alert.alert(
+      "Hapus Group",
+      `Group "${group.name}" akan diarsipkan. Lanjutkan?`,
+      [
+        { text: "Batal", style: "cancel" },
+        {
+          text: "Hapus",
+          style: "destructive",
+          onPress: () => {
+            void handleDelete();
+          },
+        },
+      ],
+    );
   }
 
   return (
@@ -265,6 +310,18 @@ export function ServiceGroupFormScreen() {
                 </View>
               )}
             </View>
+
+              {isEdit ? (
+                <View style={styles.deleteActionWrap}>
+                  <AppButton
+                    disabled={!canManage || saving || deleting}
+                    loading={deleting}
+                    onPress={confirmDelete}
+                    title="Hapus Group"
+                    variant="ghost"
+                  />
+                </View>
+              ) : null}
             </AppPanel>
 
             {errorMessage ? (
@@ -276,7 +333,16 @@ export function ServiceGroupFormScreen() {
           </ScrollView>
 
           <View style={styles.footerDock}>
-            <AppButton disabled={!canManage || saving} loading={saving} onPress={() => void handleSave()} title={isEdit ? "Simpan Group" : "Buat Group"} />
+            <View style={styles.footerActions}>
+              <View style={styles.primaryActionFull}>
+                <AppButton
+                  disabled={!canManage || saving || deleting}
+                  loading={saving}
+                  onPress={() => void handleSave()}
+                  title={isEdit ? "Simpan Group" : "Buat Group"}
+                />
+              </View>
+            </View>
           </View>
         </View>
       </AppScreen>
@@ -309,6 +375,17 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       backgroundColor: theme.colors.background,
       borderTopWidth: 1,
       borderTopColor: theme.colors.border,
+    },
+    footerActions: {
+      flexDirection: "row",
+      gap: theme.spacing.sm,
+      alignItems: "center",
+    },
+    primaryAction: {
+      flex: 1.2,
+    },
+    primaryActionFull: {
+      flex: 1,
     },
     headerPanel: {
       backgroundColor: theme.mode === "dark" ? "#12304a" : "#f7f9fb",
@@ -360,14 +437,19 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
     input: {
       borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
+      borderColor: theme.mode === "dark" ? "#3f90c4" : "#79d2f0",
       borderRadius: theme.radii.md,
-      backgroundColor: theme.colors.inputBg,
+      backgroundColor: theme.mode === "dark" ? "rgba(31, 67, 99, 0.95)" : "#f1fbff",
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.medium,
       fontSize: 14,
       paddingHorizontal: 12,
       paddingVertical: 10,
+      shadowColor: theme.mode === "dark" ? "#000000" : "#66c7ec",
+      shadowOpacity: theme.mode === "dark" ? 0.14 : 0.12,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: 2,
     },
     tagWrap: {
       flexDirection: "row",
@@ -531,6 +613,12 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 18,
+    },
+    deleteActionWrap: {
+      marginTop: theme.spacing.sm,
+      paddingTop: theme.spacing.sm,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
     },
   });
 }

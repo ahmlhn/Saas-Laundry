@@ -34,6 +34,8 @@ class Service extends Model
         'package_valid_days',
         'package_accumulation_mode',
         'active',
+        'show_in_cashier',
+        'show_to_customer',
         'sort_order',
         'image_icon',
     ];
@@ -43,6 +45,8 @@ class Service extends Model
         return [
             'active' => 'boolean',
             'is_group' => 'boolean',
+            'show_in_cashier' => 'boolean',
+            'show_to_customer' => 'boolean',
             'duration_days' => 'integer',
             'duration_hours' => 'integer',
             'package_quota_value' => 'decimal:2',
