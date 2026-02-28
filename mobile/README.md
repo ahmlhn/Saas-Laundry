@@ -1,4 +1,4 @@
-# SaaS Laundry Mobile
+# Laundry Poin
 
 Kickoff aplikasi mobile (Expo + React Native + TypeScript) untuk backend Laravel di repo ini.
 

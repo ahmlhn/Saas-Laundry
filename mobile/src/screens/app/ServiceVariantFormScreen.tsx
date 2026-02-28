@@ -5,9 +5,17 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useCallback, useMemo, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
+import { ServiceModuleHeader } from "../../components/services/ServiceModuleHeader";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
-import { getDefaultDurationDays } from "../../features/services/defaultDuration";
+import {
+  formatServiceDuration,
+  getDefaultDurationDays,
+  getDefaultDurationUnit,
+  resolveDurationPartsFromValue,
+  resolveDurationValueAndUnit,
+  type ServiceDurationUnit,
+} from "../../features/services/defaultDuration";
 import { createService, listServices, updateService } from "../../features/services/serviceApi";
 import { listServiceProcessTags } from "../../features/services/serviceTagApi";
 import { hasAnyRole } from "../../lib/accessControl";
@@ -25,8 +33,37 @@ const PACKAGE_MODES: Array<{ label: string; value: PackageAccumulationMode }> = 
   { label: "Jendela Tetap", value: "fixed_window" },
 ];
 
+const currencyFormatter = new Intl.NumberFormat("id-ID");
+
 function normalizeDigits(value: string): string {
   return value.replace(/[^\d]/g, "");
+}
+
+function formatServiceTypeLabel(serviceType: string): string {
+  switch (serviceType) {
+    case "regular":
+      return "Reguler";
+    case "package":
+      return "Paket";
+    case "perfume":
+      return "Parfum";
+    case "item":
+      return "Item";
+    default:
+      return serviceType;
+  }
+}
+
+function resolveUnitTypeFromDisplayUnit(displayUnit: ServiceDisplayUnit): "kg" | "pcs" | "meter" {
+  if (displayUnit === "kg") {
+    return "kg";
+  }
+
+  if (displayUnit === "meter") {
+    return "meter";
+  }
+
+  return "pcs";
 }
 
 export function ServiceVariantFormScreen() {
@@ -48,6 +85,7 @@ export function ServiceVariantFormScreen() {
   const serviceType = route.params.serviceType;
   const variant = route.params.variant;
   const defaultDurationDays = getDefaultDurationDays(serviceType);
+  const defaultDuration = resolveDurationValueAndUnit(variant?.duration_days, variant?.duration_hours, serviceType);
 
   const [groups, setGroups] = useState<ServiceCatalogItem[]>([]);
   const [tags, setTags] = useState<ServiceProcessTag[]>([]);
@@ -60,11 +98,17 @@ export function ServiceVariantFormScreen() {
     variant?.parent_service_id ?? route.params.parentServiceId ?? null
   );
   const [basePriceInput, setBasePriceInput] = useState(variant ? String(variant.base_price_amount) : "");
-  const [durationInput, setDurationInput] = useState(variant?.duration_days ? String(variant.duration_days) : String(defaultDurationDays));
+  const [durationInput, setDurationInput] = useState(String(defaultDuration.value));
+  const [durationUnit, setDurationUnit] = useState<ServiceDurationUnit>(defaultDuration.unit ?? getDefaultDurationUnit(serviceType));
   const [displayUnit, setDisplayUnit] = useState<ServiceDisplayUnit>(
-    variant?.display_unit === "kg" || variant?.display_unit === "pcs" || variant?.display_unit === "satuan" ? variant.display_unit : "satuan"
+    variant?.display_unit === "kg" || variant?.display_unit === "pcs" || variant?.display_unit === "meter"
+      ? variant.display_unit
+      : variant?.unit_type === "kg"
+        ? "kg"
+        : variant?.unit_type === "meter"
+          ? "meter"
+        : "pcs"
   );
-  const [unitType, setUnitType] = useState<"kg" | "pcs">(variant?.unit_type === "kg" ? "kg" : "pcs");
   const [imageIcon, setImageIcon] = useState(variant?.image_icon ?? "");
   const [active, setActive] = useState(variant?.active ?? true);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>(variant?.process_tags?.map((tag) => tag.id) ?? []);
@@ -77,6 +121,20 @@ export function ServiceVariantFormScreen() {
   );
 
   const isPackage = serviceType === "package";
+  const selectedGroup = groups.find((groupItem) => groupItem.id === parentServiceId) ?? null;
+  const liveVariantName = nameInput.trim() || variant?.name || "Varian layanan";
+  const parsedHeaderPrice = Number.parseInt(basePriceInput, 10);
+  const headerPriceLabel = Number.isFinite(parsedHeaderPrice) ? `Rp ${currencyFormatter.format(parsedHeaderPrice)}` : "Harga belum diatur";
+  const previewDurationValue = durationInput.trim() === "" ? defaultDuration.value : Number.parseInt(durationInput, 10);
+  const headerDurationLabel = formatServiceDuration(
+    durationUnit === "day" ? previewDurationValue : 0,
+    durationUnit === "hour" ? previewDurationValue : 0,
+    "Durasi belum diatur"
+  );
+  const defaultDurationLabel = formatServiceDuration(defaultDuration.unit === "day" ? defaultDuration.value : 0, defaultDuration.unit === "hour" ? defaultDuration.value : 0);
+  const headerSubtitle = isEdit
+    ? `${selectedGroup?.name ?? "Belum pilih group"} • ${headerPriceLabel} • ${headerDurationLabel}`
+    : `${formatServiceTypeLabel(serviceType)} • ${selectedGroup?.name ?? "Belum pilih group"}`;
 
   const loadReferences = useCallback(async () => {
     setLoadingReferences(true);
@@ -136,11 +194,16 @@ export function ServiceVariantFormScreen() {
       return;
     }
 
-    const parsedDuration = durationInput.trim() === "" ? null : Number.parseInt(durationInput, 10);
-    if (parsedDuration !== null && (!Number.isFinite(parsedDuration) || parsedDuration <= 0)) {
-      setErrorMessage("Durasi hari tidak valid.");
+    const parsedDurationValue = durationInput.trim() === "" ? null : Number.parseInt(durationInput, 10);
+    if (parsedDurationValue === null || !Number.isFinite(parsedDurationValue) || parsedDurationValue <= 0) {
+      setErrorMessage("Durasi layanan tidak valid.");
       return;
     }
+    if (durationUnit === "hour" && parsedDurationValue > 23) {
+      setErrorMessage("Durasi jam maksimal 23 jam.");
+      return;
+    }
+    const resolvedDuration = resolveDurationPartsFromValue(parsedDurationValue, durationUnit);
 
     if ((serviceType === "regular" || serviceType === "package") && !parentServiceId) {
       setErrorMessage("Pilih group layanan terlebih dahulu.");
@@ -168,6 +231,8 @@ export function ServiceVariantFormScreen() {
     setErrorMessage(null);
 
     try {
+      const unitType = resolveUnitTypeFromDisplayUnit(displayUnit);
+
       if (isEdit && variant) {
         await updateService(variant.id, {
           name: trimmedName,
@@ -177,7 +242,8 @@ export function ServiceVariantFormScreen() {
           unitType,
           displayUnit,
           basePriceAmount: parsedBasePrice,
-          durationDays: parsedDuration,
+          durationDays: resolvedDuration.durationDays,
+          durationHours: resolvedDuration.durationHours,
           packageQuotaValue,
           packageQuotaUnit: isPackage ? packageQuotaUnit : null,
           packageValidDays,
@@ -195,7 +261,8 @@ export function ServiceVariantFormScreen() {
           unitType,
           displayUnit,
           basePriceAmount: parsedBasePrice,
-          durationDays: parsedDuration,
+          durationDays: resolvedDuration.durationDays,
+          durationHours: resolvedDuration.durationHours,
           packageQuotaValue,
           packageQuotaUnit: isPackage ? packageQuotaUnit : null,
           packageValidDays,
@@ -216,184 +283,194 @@ export function ServiceVariantFormScreen() {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
-      <AppScreen contentContainerStyle={styles.content} scroll>
-        <AppPanel style={styles.headerPanel}>
-          <View style={styles.headerRow}>
-            <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.backButton, pressed ? styles.backButtonPressed : null]}>
-              <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={18} />
-            </Pressable>
-            <Text style={styles.title}>{isEdit ? "Edit Varian" : "Tambah Varian"}</Text>
-            <View style={styles.spacer} />
-          </View>
-          <Text style={styles.subtitle}>Tipe: {serviceType.toUpperCase()}</Text>
-        </AppPanel>
+      <AppScreen contentContainerStyle={styles.screenShell}>
+        <View style={styles.screenBody}>
+          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <ServiceModuleHeader onBack={() => navigation.goBack()} title={isEdit ? liveVariantName : "Tambah Varian"}>
+              <Text style={styles.subtitle}>{headerSubtitle}</Text>
+            </ServiceModuleHeader>
 
-        <AppPanel style={styles.formPanel}>
-          <Text style={styles.label}>Nama Varian</Text>
-          <TextInput
-            editable={!saving && canManage}
-            onChangeText={setNameInput}
-            placeholder="Contoh: Queen"
-            placeholderTextColor={theme.colors.textMuted}
-            style={styles.input}
-            value={nameInput}
-          />
-
-          <Text style={styles.label}>Group</Text>
-          {loadingReferences ? <Text style={styles.helperText}>Memuat group...</Text> : null}
-          {!loadingReferences && groups.length === 0 ? (
-            <Text style={styles.helperText}>Belum ada group. Tambahkan group dulu.</Text>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={styles.chipRow}>
-                {groups.map((groupItem) => {
-                  const selected = parentServiceId === groupItem.id;
-                  return (
-                    <Pressable key={groupItem.id} onPress={() => setParentServiceId(groupItem.id)} style={[styles.chip, selected ? styles.chipActive : null]}>
-                      <Text style={[styles.chipText, selected ? styles.chipTextActive : null]}>{groupItem.name}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </ScrollView>
-          )}
-
-          <Text style={styles.label}>Harga</Text>
-          <TextInput
-            editable={!saving && canManage}
-            keyboardType="number-pad"
-            onChangeText={(text) => setBasePriceInput(normalizeDigits(text))}
-            placeholder="Contoh: 15000"
-            placeholderTextColor={theme.colors.textMuted}
-            style={styles.input}
-            value={basePriceInput}
-          />
-
-          <Text style={styles.label}>Durasi (hari)</Text>
-          <TextInput
-            editable={!saving && canManage}
-            keyboardType="number-pad"
-            onChangeText={(text) => setDurationInput(normalizeDigits(text))}
-            placeholder={`Contoh: ${defaultDurationDays}`}
-            placeholderTextColor={theme.colors.textMuted}
-            style={styles.input}
-            value={durationInput}
-          />
-          <Text style={styles.helperText}>Default otomatis {defaultDurationDays} hari, tetap bisa diubah sebelum disimpan.</Text>
-
-          <Text style={styles.label}>Satuan Tampil</Text>
-          <View style={styles.chipRowWrap}>
-            {(["satuan", "kg", "pcs"] as const).map((unit) => {
-              const selected = displayUnit === unit;
-              return (
-                <Pressable key={unit} onPress={() => setDisplayUnit(unit)} style={[styles.chip, selected ? styles.chipActive : null]}>
-                  <Text style={[styles.chipText, selected ? styles.chipTextActive : null]}>{unit.toUpperCase()}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <Text style={styles.label}>Unit Hitung Order</Text>
-          <View style={styles.chipRowWrap}>
-            {(["kg", "pcs"] as const).map((unit) => {
-              const selected = unitType === unit;
-              return (
-                <Pressable key={unit} onPress={() => setUnitType(unit)} style={[styles.chip, selected ? styles.chipActive : null]}>
-                  <Text style={[styles.chipText, selected ? styles.chipTextActive : null]}>{unit.toUpperCase()}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          {isPackage ? (
-            <>
-              <Text style={styles.label}>Kuota Paket</Text>
+            <AppPanel style={styles.formPanel}>
+              <Text style={styles.label}>Nama Varian</Text>
               <TextInput
                 editable={!saving && canManage}
-                keyboardType="decimal-pad"
-                onChangeText={setPackageQuotaInput}
-                placeholder="Contoh: 10"
+                onChangeText={setNameInput}
+                placeholder="Contoh: Queen"
                 placeholderTextColor={theme.colors.textMuted}
                 style={styles.input}
-                value={packageQuotaInput}
+                value={nameInput}
               />
 
-              <Text style={styles.label}>Unit Kuota Paket</Text>
+              <Text style={styles.label}>Group</Text>
+              {loadingReferences ? <Text style={styles.helperText}>Memuat group...</Text> : null}
+              {!loadingReferences && groups.length === 0 ? (
+                <Text style={styles.helperText}>Belum ada group. Tambahkan group dulu.</Text>
+              ) : (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={styles.chipRow}>
+                    {groups.map((groupItem) => {
+                      const selected = parentServiceId === groupItem.id;
+                      return (
+                        <Pressable key={groupItem.id} onPress={() => setParentServiceId(groupItem.id)} style={[styles.chip, selected ? styles.chipActive : null]}>
+                          <Text style={[styles.chipText, selected ? styles.chipTextActive : null]}>{groupItem.name}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+              )}
+
+              <Text style={styles.label}>Harga</Text>
+              <TextInput
+                editable={!saving && canManage}
+                keyboardType="number-pad"
+                onChangeText={(text) => setBasePriceInput(normalizeDigits(text))}
+                placeholder="Contoh: 15000"
+                placeholderTextColor={theme.colors.textMuted}
+                style={styles.input}
+                value={basePriceInput}
+              />
+
+              <Text style={styles.label}>Durasi Layanan</Text>
+              <View style={styles.durationRow}>
+                <View style={styles.durationField}>
+                  <TextInput
+                    editable={!saving && canManage}
+                    keyboardType="number-pad"
+                    onChangeText={(text) => setDurationInput(normalizeDigits(text))}
+                    placeholder={`Contoh: ${defaultDuration.value}`}
+                    placeholderTextColor={theme.colors.textMuted}
+                    style={styles.input}
+                    value={durationInput}
+                  />
+                </View>
+                <View style={styles.durationUnitRow}>
+                  {([
+                    { label: "Hari", value: "day" },
+                    { label: "Jam", value: "hour" },
+                  ] as const).map((option) => (
+                    <Pressable
+                      key={option.value}
+                      onPress={() => setDurationUnit(option.value)}
+                      style={[styles.chip, durationUnit === option.value ? styles.chipActive : null]}
+                    >
+                      <Text style={[styles.chipText, durationUnit === option.value ? styles.chipTextActive : null]}>{option.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+              <Text style={styles.helperText}>
+                Default otomatis {defaultDurationLabel}, tetap bisa diubah sebelum disimpan.
+              </Text>
+
+              <Text style={styles.label}>Satuan Hitung</Text>
               <View style={styles.chipRowWrap}>
-                {(["kg", "pcs"] as const).map((unit) => {
-                  const selected = packageQuotaUnit === unit;
+                {(["kg", "pcs", "meter"] as const).map((unit) => {
+                  const selected = displayUnit === unit;
                   return (
-                    <Pressable key={unit} onPress={() => setPackageQuotaUnit(unit)} style={[styles.chip, selected ? styles.chipActive : null]}>
+                    <Pressable key={unit} onPress={() => setDisplayUnit(unit)} style={[styles.chip, selected ? styles.chipActive : null]}>
                       <Text style={[styles.chipText, selected ? styles.chipTextActive : null]}>{unit.toUpperCase()}</Text>
                     </Pressable>
                   );
                 })}
               </View>
+              <Text style={styles.helperText}>
+                Satuan hitung order otomatis mengikuti pilihan ini: {resolveUnitTypeFromDisplayUnit(displayUnit).toUpperCase()}.
+              </Text>
 
-              <Text style={styles.label}>Masa Aktif Paket (hari)</Text>
+              {isPackage ? (
+                <>
+                  <Text style={styles.label}>Kuota Paket</Text>
+                  <TextInput
+                    editable={!saving && canManage}
+                    keyboardType="decimal-pad"
+                    onChangeText={setPackageQuotaInput}
+                    placeholder="Contoh: 10"
+                    placeholderTextColor={theme.colors.textMuted}
+                    style={styles.input}
+                    value={packageQuotaInput}
+                  />
+
+                  <Text style={styles.label}>Unit Kuota Paket</Text>
+                  <View style={styles.chipRowWrap}>
+                    {(["kg", "pcs"] as const).map((unit) => {
+                      const selected = packageQuotaUnit === unit;
+                      return (
+                        <Pressable key={unit} onPress={() => setPackageQuotaUnit(unit)} style={[styles.chip, selected ? styles.chipActive : null]}>
+                          <Text style={[styles.chipText, selected ? styles.chipTextActive : null]}>{unit.toUpperCase()}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <Text style={styles.label}>Masa Aktif Paket (hari)</Text>
+                  <TextInput
+                    editable={!saving && canManage}
+                    keyboardType="number-pad"
+                    onChangeText={(text) => setPackageValidDaysInput(normalizeDigits(text))}
+                    placeholder="Contoh: 30"
+                    placeholderTextColor={theme.colors.textMuted}
+                    style={styles.input}
+                    value={packageValidDaysInput}
+                  />
+
+                  <Text style={styles.label}>Mode Akumulasi</Text>
+                  <View style={styles.chipRowWrap}>
+                    {PACKAGE_MODES.map((option) => {
+                      const selected = packageMode === option.value;
+                      return (
+                        <Pressable key={option.value} onPress={() => setPackageMode(option.value)} style={[styles.chip, selected ? styles.chipActive : null]}>
+                          <Text style={[styles.chipText, selected ? styles.chipTextActive : null]}>{option.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </>
+              ) : null}
+
+              <Text style={styles.label}>Icon Nama (opsional)</Text>
               <TextInput
                 editable={!saving && canManage}
-                keyboardType="number-pad"
-                onChangeText={(text) => setPackageValidDaysInput(normalizeDigits(text))}
-                placeholder="Contoh: 30"
+                onChangeText={setImageIcon}
+                placeholder="Contoh: bed-outline"
                 placeholderTextColor={theme.colors.textMuted}
                 style={styles.input}
-                value={packageValidDaysInput}
+                value={imageIcon}
               />
 
-              <Text style={styles.label}>Mode Akumulasi</Text>
-              <View style={styles.chipRowWrap}>
-                {PACKAGE_MODES.map((option) => {
-                  const selected = packageMode === option.value;
+              <Text style={styles.label}>Tag Proses</Text>
+              <View style={styles.tagWrap}>
+                {tags.map((tag) => {
+                  const selected = selectedTagIds.includes(tag.id);
                   return (
-                    <Pressable key={option.value} onPress={() => setPackageMode(option.value)} style={[styles.chip, selected ? styles.chipActive : null]}>
-                      <Text style={[styles.chipText, selected ? styles.chipTextActive : null]}>{option.label}</Text>
+                    <Pressable key={tag.id} onPress={() => toggleTag(tag.id)} style={[styles.tagChip, selected ? styles.tagChipActive : null]}>
+                      <View style={[styles.tagDot, { backgroundColor: tag.color_hex }]} />
+                      <Text style={[styles.tagText, selected ? styles.tagTextActive : null]}>{tag.name}</Text>
                     </Pressable>
                   );
                 })}
               </View>
-            </>
-          ) : null}
 
-          <Text style={styles.label}>Icon Nama (opsional)</Text>
-          <TextInput
-            editable={!saving && canManage}
-            onChangeText={setImageIcon}
-            placeholder="Contoh: bed-outline"
-            placeholderTextColor={theme.colors.textMuted}
-            style={styles.input}
-            value={imageIcon}
-          />
-
-          <Text style={styles.label}>Tag Proses</Text>
-          <View style={styles.tagWrap}>
-            {tags.map((tag) => {
-              const selected = selectedTagIds.includes(tag.id);
-              return (
-                <Pressable key={tag.id} onPress={() => toggleTag(tag.id)} style={[styles.tagChip, selected ? styles.tagChipActive : null]}>
-                  <View style={[styles.tagDot, { backgroundColor: tag.color_hex }]} />
-                  <Text style={[styles.tagText, selected ? styles.tagTextActive : null]}>{tag.name}</Text>
+              <View style={styles.statusRow}>
+                <Text style={styles.label}>Status</Text>
+                <Pressable onPress={() => setActive((value) => !value)} style={[styles.statusChip, active ? styles.statusChipActive : null]}>
+                  <Text style={[styles.statusChipText, active ? styles.statusChipTextActive : null]}>{active ? "Aktif" : "Nonaktif"}</Text>
                 </Pressable>
-              );
-            })}
-          </View>
+              </View>
+            </AppPanel>
 
-          <View style={styles.statusRow}>
-            <Text style={styles.label}>Status</Text>
-            <Pressable onPress={() => setActive((value) => !value)} style={[styles.statusChip, active ? styles.statusChipActive : null]}>
-              <Text style={[styles.statusChipText, active ? styles.statusChipTextActive : null]}>{active ? "Aktif" : "Nonaktif"}</Text>
-            </Pressable>
-          </View>
-        </AppPanel>
+            {errorMessage ? (
+              <View style={styles.errorWrap}>
+                <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
+                <Text style={styles.errorText}>{errorMessage}</Text>
+              </View>
+            ) : null}
+          </ScrollView>
 
-        {errorMessage ? (
-          <View style={styles.errorWrap}>
-            <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
-            <Text style={styles.errorText}>{errorMessage}</Text>
+          <View style={styles.footerDock}>
+            <AppButton disabled={!canManage || saving} loading={saving} onPress={() => void handleSave()} title={isEdit ? "Simpan Varian" : "Buat Varian"} />
           </View>
-        ) : null}
-
-        <AppButton disabled={!canManage || saving} loading={saving} onPress={() => void handleSave()} title={isEdit ? "Simpan Varian" : "Buat Varian"} />
+        </View>
       </AppScreen>
     </KeyboardAvoidingView>
   );
@@ -404,12 +481,26 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     flex: {
       flex: 1,
     },
+    screenShell: {
+      flex: 1,
+    },
+    screenBody: {
+      flex: 1,
+    },
     content: {
       flexGrow: 1,
       paddingHorizontal: isTablet ? theme.spacing.xl : theme.spacing.lg,
       paddingTop: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
-      paddingBottom: theme.spacing.xxl,
+      paddingBottom: 132,
       gap: theme.spacing.sm,
+    },
+    footerDock: {
+      paddingHorizontal: isTablet ? theme.spacing.xl : theme.spacing.lg,
+      paddingTop: theme.spacing.sm,
+      paddingBottom: theme.spacing.lg,
+      backgroundColor: theme.colors.background,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
     },
     headerPanel: {
       backgroundColor: theme.mode === "dark" ? "#12304a" : "#f7f9fb",
@@ -474,6 +565,21 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontSize: 14,
       paddingHorizontal: 12,
       paddingVertical: 10,
+    },
+    durationRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 8,
+    },
+    durationField: {
+      flex: 1,
+      gap: 6,
+    },
+    durationUnitRow: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "stretch",
+      gap: 8,
     },
     chipRow: {
       flexDirection: "row",

@@ -1,6 +1,6 @@
 export type ServiceType = "regular" | "package" | "perfume" | "item";
 
-export type ServiceDisplayUnit = "kg" | "pcs" | "satuan";
+export type ServiceDisplayUnit = "kg" | "pcs" | "meter";
 
 export type PackageQuotaUnit = "kg" | "pcs";
 
@@ -30,10 +30,11 @@ export interface ServiceCatalogItem {
   service_type: ServiceType | string;
   parent_service_id: string | null;
   is_group: boolean;
-  unit_type: "kg" | "pcs" | string;
+  unit_type: "kg" | "pcs" | "meter" | string;
   display_unit: ServiceDisplayUnit | string;
   base_price_amount: number;
   duration_days: number | null;
+  duration_hours: number | null;
   package_quota_value: number | null;
   package_quota_unit: PackageQuotaUnit | null;
   package_valid_days: number | null;
@@ -54,10 +55,11 @@ export interface ServiceCreatePayload {
   serviceType?: ServiceType;
   parentServiceId?: string | null;
   isGroup?: boolean;
-  unitType?: "kg" | "pcs";
+  unitType?: "kg" | "pcs" | "meter";
   displayUnit?: ServiceDisplayUnit;
   basePriceAmount: number;
   durationDays?: number | null;
+  durationHours?: number | null;
   packageQuotaValue?: number | null;
   packageQuotaUnit?: PackageQuotaUnit | null;
   packageValidDays?: number | null;
@@ -73,10 +75,11 @@ export interface ServiceUpdatePayload {
   serviceType?: ServiceType;
   parentServiceId?: string | null;
   isGroup?: boolean;
-  unitType?: "kg" | "pcs";
+  unitType?: "kg" | "pcs" | "meter";
   displayUnit?: ServiceDisplayUnit;
   basePriceAmount?: number;
   durationDays?: number | null;
+  durationHours?: number | null;
   packageQuotaValue?: number | null;
   packageQuotaUnit?: PackageQuotaUnit | null;
   packageValidDays?: number | null;

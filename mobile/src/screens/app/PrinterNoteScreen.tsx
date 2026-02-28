@@ -19,7 +19,14 @@ import {
   uploadPrinterLogo,
 } from "../../features/settings/printerNoteApi";
 import { DEFAULT_PRINTER_NOTE_SETTINGS, getPrinterNoteSettings, setPrinterNoteSettings } from "../../features/settings/printerNoteStorage";
-import { connectBluetoothThermalPrinter, ensureBluetoothThermalPermissions, isBluetoothThermalPrinterRuntimeAvailable, printBluetoothThermalTest, scanBluetoothThermalPrinters } from "../../features/settings/thermalBluetoothPrinter";
+import {
+  checkBluetoothThermalPrinterConnection,
+  connectBluetoothThermalPrinter,
+  ensureBluetoothThermalPermissions,
+  isBluetoothThermalPrinterRuntimeAvailable,
+  printBluetoothThermalTest,
+  scanBluetoothThermalPrinters,
+} from "../../features/settings/thermalBluetoothPrinter";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AccountStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
@@ -30,6 +37,7 @@ import type { PrinterLocalSettings, PrinterPaperWidth } from "../../types/printe
 import type { PrinterNoteSettings } from "../../types/printerNote";
 
 type Navigation = NativeStackNavigationProp<AccountStackParamList, "PrinterNote">;
+type PrinterConnectionState = "unknown" | "checking" | "connected" | "disconnected";
 const PRINTER_NOTE_BOOTSTRAP_SYNC_TIMEOUT_MS = 8000;
 const PRINTER_NOTE_ALERT_AUTO_HIDE_MS = 4000;
 
@@ -152,6 +160,7 @@ export function PrinterNoteScreen() {
   const [scanningBluetoothPrinters, setScanningBluetoothPrinters] = useState(false);
   const [pairingBluetoothPrinter, setPairingBluetoothPrinter] = useState(false);
   const [testingBluetoothPrinter, setTestingBluetoothPrinter] = useState(false);
+  const [printerConnectionState, setPrinterConnectionState] = useState<PrinterConnectionState>("unknown");
   const [bluetoothPrinterReady, setBluetoothPrinterReady] = useState<boolean | null>(null);
   const [discoveredBluetoothPrinters, setDiscoveredBluetoothPrinters] = useState<BluetoothThermalPrinterDevice[]>([]);
   const [pairedBluetoothPrinter, setPairedBluetoothPrinter] = useState<StoredBluetoothThermalPrinter | null>(null);
@@ -187,6 +196,10 @@ export function PrinterNoteScreen() {
   }, [selectedOutlet?.id]);
 
   useEffect(() => {
+    setPrinterConnectionState("unknown");
+  }, [pairedBluetoothPrinter?.address, selectedOutlet?.id]);
+
+  useEffect(() => {
     if (!successMessage && !errorMessage) {
       return;
     }
@@ -220,6 +233,7 @@ export function PrinterNoteScreen() {
 
       setForm(localMerged);
       setPairedBluetoothPrinter(pairedPrinter);
+      setPrinterConnectionState("unknown");
       setPrinterSettings(storedPrinterSettings);
       setDiscoveredBluetoothPrinters([]);
       setLoading(false);
@@ -261,6 +275,7 @@ export function PrinterNoteScreen() {
       });
       setPrinterSettings(DEFAULT_PRINTER_LOCAL_SETTINGS);
       setPairedBluetoothPrinter(null);
+      setPrinterConnectionState("unknown");
       setDiscoveredBluetoothPrinters([]);
       setErrorMessage("Gagal memuat pengaturan nota. Menampilkan konfigurasi default perangkat.");
     } finally {
@@ -630,6 +645,7 @@ export function PrinterNoteScreen() {
 
       await setStoredBluetoothThermalPrinter(nextPaired, selectedOutlet?.id ?? null);
       setPairedBluetoothPrinter(nextPaired);
+      setPrinterConnectionState("connected");
       setDevicePickerVisible(false);
       setSuccessMessage(`Printer ${nextPaired.name} tersanding dan disimpan.`);
       focusFeedback();
@@ -649,6 +665,7 @@ export function PrinterNoteScreen() {
     try {
       await clearStoredBluetoothThermalPrinter(selectedOutlet?.id ?? null);
       setPairedBluetoothPrinter(null);
+      setPrinterConnectionState("unknown");
       setSuccessMessage("Pairing printer Bluetooth dihapus.");
       setErrorMessage(null);
       focusFeedback();
@@ -678,15 +695,82 @@ export function PrinterNoteScreen() {
         form?.profileName || selectedOutlet?.name || "Outlet",
         printerSettings ?? DEFAULT_PRINTER_LOCAL_SETTINGS,
       );
+      setPrinterConnectionState("connected");
       setSuccessMessage("Perintah test print berhasil dikirim ke printer.");
       focusFeedback();
     } catch (error) {
+      setPrinterConnectionState("disconnected");
       setErrorMessage(getApiErrorMessage(error));
       focusFeedback();
     } finally {
       setTestingBluetoothPrinter(false);
     }
   }
+
+  async function handleCheckBluetoothPrinterConnection(): Promise<void> {
+    if (!pairedBluetoothPrinter || pairingBluetoothPrinter || scanningBluetoothPrinters || testingBluetoothPrinter || printerConnectionState === "checking") {
+      return;
+    }
+
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    setPrinterConnectionState("checking");
+
+    try {
+      const allowed = await ensureBluetoothRuntimeAndPermission();
+      if (!allowed) {
+        setPrinterConnectionState("unknown");
+        return;
+      }
+
+      const connected = await checkBluetoothThermalPrinterConnection(pairedBluetoothPrinter.address);
+      if (connected) {
+        setPrinterConnectionState("connected");
+        setSuccessMessage("Printer terhubung dan siap digunakan.");
+      } else {
+        setPrinterConnectionState("disconnected");
+        setErrorMessage("Printer tidak bisa dihubungi. Pastikan printer aktif dan masih dalam jangkauan Bluetooth.");
+      }
+      focusFeedback();
+    } catch (error) {
+      setPrinterConnectionState("disconnected");
+      setErrorMessage(getApiErrorMessage(error));
+      focusFeedback();
+    }
+  }
+
+  const printerConnectionMeta = useMemo(() => {
+    switch (printerConnectionState) {
+      case "checking":
+        return {
+          label: "Mengecek...",
+          tone: "neutral" as const,
+          hint: "Memastikan printer bisa dihubungi.",
+          icon: "sync-outline" as const,
+        };
+      case "connected":
+        return {
+          label: "Terhubung",
+          tone: "success" as const,
+          hint: "Printer aktif dan siap menerima cetak.",
+          icon: "checkmark-circle-outline" as const,
+        };
+      case "disconnected":
+        return {
+          label: "Tidak Terhubung",
+          tone: "danger" as const,
+          hint: "Nyalakan printer atau dekatkan ke perangkat ini.",
+          icon: "alert-circle-outline" as const,
+        };
+      default:
+        return {
+          label: "Belum Dicek",
+          tone: "neutral" as const,
+          hint: "Ketuk Cek Koneksi untuk verifikasi printer.",
+          icon: "help-circle-outline" as const,
+        };
+    }
+  }, [printerConnectionState]);
 
   const feedbackBanner = successMessage ? (
     <View style={styles.successWrap}>
@@ -832,13 +916,72 @@ export function PrinterNoteScreen() {
                     {pairedBluetoothPrinter ? (
                       <View style={styles.pairedPrinterCard}>
                         <View style={styles.pairedPrinterMain}>
-                          <Text style={styles.pairedPrinterTitle}>Printer Tersanding</Text>
+                          <View style={styles.pairedPrinterHeadingRow}>
+                            <Text style={styles.pairedPrinterTitle}>Printer Tersanding</Text>
+                            <View
+                              style={[
+                                styles.connectionBadge,
+                                printerConnectionMeta.tone === "success"
+                                  ? styles.connectionBadgeSuccess
+                                  : printerConnectionMeta.tone === "danger"
+                                    ? styles.connectionBadgeDanger
+                                    : styles.connectionBadgeNeutral,
+                              ]}
+                            >
+                              <Ionicons
+                                color={
+                                  printerConnectionMeta.tone === "success"
+                                    ? theme.colors.success
+                                    : printerConnectionMeta.tone === "danger"
+                                      ? theme.colors.danger
+                                      : theme.colors.textSecondary
+                                }
+                                name={printerConnectionMeta.icon}
+                                size={13}
+                              />
+                              <Text
+                                style={[
+                                  styles.connectionBadgeText,
+                                  printerConnectionMeta.tone === "success"
+                                    ? styles.connectionBadgeTextSuccess
+                                    : printerConnectionMeta.tone === "danger"
+                                      ? styles.connectionBadgeTextDanger
+                                      : styles.connectionBadgeTextNeutral,
+                                ]}
+                              >
+                                {printerConnectionMeta.label}
+                              </Text>
+                            </View>
+                          </View>
                           <Text style={styles.pairedPrinterName}>{pairedBluetoothPrinter.name}</Text>
                           <Text style={styles.pairedPrinterMeta}>{pairedBluetoothPrinter.address}</Text>
+                          <View style={styles.connectionHintRow}>
+                            <Text style={styles.connectionHintText}>{printerConnectionMeta.hint}</Text>
+                            <Pressable
+                              disabled={pairingBluetoothPrinter || scanningBluetoothPrinters || testingBluetoothPrinter || printerConnectionState === "checking"}
+                              onPress={() => void handleCheckBluetoothPrinterConnection()}
+                              style={({ pressed }) => [
+                                styles.checkConnectionAction,
+                                pressed ? styles.heroIconButtonPressed : null,
+                                pairingBluetoothPrinter || scanningBluetoothPrinters || testingBluetoothPrinter || printerConnectionState === "checking"
+                                  ? styles.checkConnectionActionDisabled
+                                  : null,
+                              ]}
+                            >
+                              {printerConnectionState === "checking" ? (
+                                <ActivityIndicator color={theme.colors.info} size="small" />
+                              ) : (
+                                <>
+                                  <Ionicons color={theme.colors.info} name="sync-outline" size={14} />
+                                  <Text style={styles.checkConnectionActionText}>Cek Koneksi</Text>
+                                </>
+                              )}
+                            </Pressable>
+                          </View>
                         </View>
                         <View style={styles.pairedActionRow}>
                           <AppButton
-                            disabled={testingBluetoothPrinter || pairingBluetoothPrinter || scanningBluetoothPrinters}
+                            disabled={testingBluetoothPrinter || pairingBluetoothPrinter || scanningBluetoothPrinters || printerConnectionState === "checking"}
                             leftElement={<Ionicons color={theme.colors.info} name="print-outline" size={16} />}
                             loading={testingBluetoothPrinter}
                             onPress={() => void handleBluetoothTestPrint()}
@@ -846,12 +989,12 @@ export function PrinterNoteScreen() {
                             variant="secondary"
                           />
                           <Pressable
-                            disabled={testingBluetoothPrinter || pairingBluetoothPrinter || scanningBluetoothPrinters}
+                            disabled={testingBluetoothPrinter || pairingBluetoothPrinter || scanningBluetoothPrinters || printerConnectionState === "checking"}
                             onPress={() => void handleUnpairBluetoothPrinter()}
                             style={({ pressed }) => [
                               styles.logoDangerAction,
                               pressed ? styles.heroIconButtonPressed : null,
-                              testingBluetoothPrinter || pairingBluetoothPrinter || scanningBluetoothPrinters ? styles.logoDangerActionDisabled : null,
+                              testingBluetoothPrinter || pairingBluetoothPrinter || scanningBluetoothPrinters || printerConnectionState === "checking" ? styles.logoDangerActionDisabled : null,
                             ]}
                           >
                             <Ionicons color={theme.colors.danger} name="unlink-outline" size={15} />
@@ -1453,7 +1596,13 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       gap: theme.spacing.xs,
     },
     pairedPrinterMain: {
-      gap: 2,
+      gap: 6,
+    },
+    pairedPrinterHeadingRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
     },
     pairedPrinterTitle: {
       color: theme.colors.textMuted,
@@ -1471,6 +1620,74 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontFamily: theme.fonts.medium,
       fontSize: 11.5,
       lineHeight: 15,
+    },
+    connectionHintRow: {
+      flexDirection: isTablet || isCompactLandscape ? "row" : "column",
+      alignItems: isTablet || isCompactLandscape ? "center" : "stretch",
+      justifyContent: "space-between",
+      gap: 8,
+      marginTop: 2,
+    },
+    connectionHintText: {
+      flex: 1,
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 15,
+    },
+    connectionBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      borderWidth: 1,
+      borderRadius: theme.radii.pill,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+    },
+    connectionBadgeNeutral: {
+      borderColor: theme.colors.borderStrong,
+      backgroundColor: theme.colors.surfaceSoft,
+    },
+    connectionBadgeSuccess: {
+      borderColor: theme.colors.success,
+      backgroundColor: theme.mode === "dark" ? "rgba(39,174,96,0.14)" : "rgba(39,174,96,0.08)",
+    },
+    connectionBadgeDanger: {
+      borderColor: theme.colors.danger,
+      backgroundColor: theme.mode === "dark" ? "rgba(209,74,74,0.14)" : "rgba(209,74,74,0.08)",
+    },
+    connectionBadgeText: {
+      fontFamily: theme.fonts.semibold,
+      fontSize: 10.5,
+    },
+    connectionBadgeTextNeutral: {
+      color: theme.colors.textSecondary,
+    },
+    connectionBadgeTextSuccess: {
+      color: theme.colors.success,
+    },
+    connectionBadgeTextDanger: {
+      color: theme.colors.danger,
+    },
+    checkConnectionAction: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+      minHeight: 34,
+      borderWidth: 1,
+      borderColor: theme.colors.info,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.primarySoft,
+      paddingHorizontal: 12,
+    },
+    checkConnectionActionDisabled: {
+      opacity: 0.55,
+    },
+    checkConnectionActionText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11.5,
     },
     pairedActionRow: {
       flexDirection: isTablet || isCompactLandscape ? "row" : "column",

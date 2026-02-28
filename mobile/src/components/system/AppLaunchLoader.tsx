@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import { Animated, Easing, StyleSheet, Text, View } from "react-native";
+import { BrandMark } from "../branding/BrandMark";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAppTheme } from "../../theme/useAppTheme";
 
@@ -112,11 +113,10 @@ export function AppLaunchLoader({ message, version }: AppLaunchLoaderProps) {
         <View style={styles.loaderCard}>
           <Animated.View pointerEvents="none" style={[styles.spinRing, ringAnimatedStyle]} />
           <Animated.View style={[styles.badge, badgeAnimatedStyle]}>
-            <View style={styles.badgeWave} />
-            <Text style={styles.badgeText}>CL</Text>
+            <BrandMark size={76} />
           </Animated.View>
 
-          <Text style={styles.brandTitle}>Cuci Laundry</Text>
+          <Text style={styles.brandTitle}>Laundry Poin</Text>
           <Text style={styles.brandSubtitle}>OPERASIONAL MOBILE</Text>
           {hasMessage ? <Text style={styles.messageText}>{message}</Text> : null}
 
@@ -200,32 +200,9 @@ function createStyles(theme: ReturnType<typeof useAppTheme>) {
       borderTopColor: "rgba(34, 164, 218, 0.85)",
     },
     badge: {
-      width: 76,
-      height: 76,
-      borderRadius: 38,
-      borderWidth: 2,
-      borderColor: theme.mode === "dark" ? "rgba(235, 244, 252, 0.72)" : "rgba(255,255,255,0.94)",
-      backgroundColor: "#2f84db",
       alignItems: "center",
       justifyContent: "center",
       marginBottom: 14,
-      overflow: "hidden",
-    },
-    badgeWave: {
-      position: "absolute",
-      bottom: -15,
-      width: 72,
-      height: 28,
-      borderRadius: 16,
-      backgroundColor: "#ffd467",
-      opacity: 0.95,
-    },
-    badgeText: {
-      color: "#ffffff",
-      fontFamily: theme.fonts.heavy,
-      fontSize: 30,
-      lineHeight: 34,
-      letterSpacing: 0.4,
     },
     brandTitle: {
       color: theme.colors.textPrimary,

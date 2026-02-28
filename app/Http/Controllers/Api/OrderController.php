@@ -1138,7 +1138,7 @@ class OrderController extends Controller
     {
         $loadedOrder = $order->load([
             'customer:id,name,phone_normalized,notes',
-            'items.service:id,duration_days,service_type',
+            'items.service:id,duration_days,duration_hours,service_type',
             'items',
             'payments',
             'courier:id,name,phone',
@@ -1151,25 +1151,30 @@ class OrderController extends Controller
             ->unique()
             ->values();
 
-        $maxDurationDays = null;
+        $maxDurationMinutes = null;
         if ($serviceIds->isNotEmpty()) {
-            $maxDurationDays = Service::query()
+            $maxDurationMinutes = Service::query()
                 ->withTrashed()
                 ->whereIn('id', $serviceIds->all())
-                ->max('duration_days');
+                ->get(['duration_days', 'duration_hours'])
+                ->map(static function (Service $service): int {
+                    return ((int) ($service->duration_days ?? 0) * 24 * 60) + ((int) ($service->duration_hours ?? 0) * 60);
+                })
+                ->max();
         }
 
         $estimatedCompletionAt = null;
         $isLate = false;
 
-        if ($maxDurationDays !== null && $loadedOrder->created_at) {
-            $estimatedCompletionAt = $loadedOrder->created_at->copy()->addDays((int) $maxDurationDays);
+        if ($maxDurationMinutes !== null && $maxDurationMinutes > 0 && $loadedOrder->created_at) {
+            $estimatedCompletionAt = $loadedOrder->created_at->copy()->addMinutes((int) $maxDurationMinutes);
             $isLate = ! in_array((string) $loadedOrder->laundry_status, ['ready', 'completed'], true)
                 && CarbonImmutable::now(config('app.timezone', 'UTC'))->greaterThan($estimatedCompletionAt);
         }
 
         $payload['estimated_completion_at'] = $estimatedCompletionAt?->toIso8601String();
-        $payload['estimated_completion_duration_days'] = $maxDurationDays !== null ? (int) $maxDurationDays : null;
+        $payload['estimated_completion_duration_days'] = $maxDurationMinutes !== null ? intdiv((int) $maxDurationMinutes, 24 * 60) : null;
+        $payload['estimated_completion_duration_hours'] = $maxDurationMinutes !== null ? intdiv(((int) $maxDurationMinutes) % (24 * 60), 60) : 0;
         $payload['estimated_completion_is_late'] = $isLate;
 
         return $payload;

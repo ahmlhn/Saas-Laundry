@@ -112,6 +112,7 @@ export async function createService(payload: ServiceCreatePayload): Promise<Serv
     display_unit: payload.displayUnit,
     base_price_amount: payload.basePriceAmount,
     duration_days: payload.durationDays,
+    duration_hours: payload.durationHours,
     package_quota_value: payload.packageQuotaValue,
     package_quota_unit: payload.packageQuotaUnit,
     package_valid_days: payload.packageValidDays,
@@ -159,6 +160,10 @@ export async function updateService(serviceId: string, payload: ServiceUpdatePay
 
   if ("durationDays" in payload) {
     body.duration_days = payload.durationDays ?? null;
+  }
+
+  if ("durationHours" in payload) {
+    body.duration_hours = payload.durationHours ?? 0;
   }
 
   if ("packageQuotaValue" in payload) {

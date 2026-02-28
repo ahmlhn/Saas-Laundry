@@ -5,10 +5,19 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useMemo, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
+import { ServiceModuleHeader } from "../../components/services/ServiceModuleHeader";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
+import { StatusPill } from "../../components/ui/StatusPill";
 import { createService, updateService } from "../../features/services/serviceApi";
-import { getDefaultDurationDays } from "../../features/services/defaultDuration";
+import {
+  formatServiceDuration,
+  getDefaultDurationDays,
+  getDefaultDurationUnit,
+  resolveDurationPartsFromValue,
+  resolveDurationValueAndUnit,
+  type ServiceDurationUnit,
+} from "../../features/services/defaultDuration";
 import { hasAnyRole } from "../../lib/accessControl";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AccountStackParamList } from "../../navigation/types";
@@ -32,6 +41,20 @@ function normalizeDigitInput(input: string): string {
   return input.replace(/[^\d]/g, "");
 }
 
+function resolveServiceTypeLabel(serviceType: string): string {
+  if (serviceType === "package") {
+    return "Paket";
+  }
+  if (serviceType === "perfume") {
+    return "Parfum";
+  }
+  if (serviceType === "item") {
+    return "Item";
+  }
+
+  return "Reguler";
+}
+
 export function ServiceFormScreen() {
   const theme = useAppTheme();
   const { width, height } = useWindowDimensions();
@@ -50,17 +73,22 @@ export function ServiceFormScreen() {
   const isEditMode = route.params.mode === "edit";
   const serviceType = typeof editingService?.service_type === "string" ? editingService.service_type : "regular";
   const defaultDurationDays = getDefaultDurationDays(serviceType);
+  const defaultDuration = resolveDurationValueAndUnit(editingService?.duration_days, editingService?.duration_hours, serviceType);
 
   const [name, setName] = useState(editingService?.name ?? "");
-  const [unitType, setUnitType] = useState<"kg" | "pcs">(editingService?.unit_type === "pcs" ? "pcs" : "kg");
+  const [unitType, setUnitType] = useState<"kg" | "pcs" | "meter">(
+    editingService?.unit_type === "pcs" || editingService?.unit_type === "meter" ? editingService.unit_type : "kg"
+  );
   const [basePriceInput, setBasePriceInput] = useState(editingService ? String(editingService.base_price_amount) : "");
-  const [durationInput, setDurationInput] = useState(editingService?.duration_days ? String(editingService.duration_days) : String(defaultDurationDays));
+  const [durationInput, setDurationInput] = useState(String(defaultDuration.value));
+  const [durationUnit, setDurationUnit] = useState<ServiceDurationUnit>(defaultDuration.unit ?? getDefaultDurationUnit(serviceType));
   const [active, setActive] = useState(editingService?.active ?? true);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const parsedBasePrice = Number.parseInt(normalizePriceInput(basePriceInput), 10);
   const basePriceAmount = Number.isFinite(parsedBasePrice) ? parsedBasePrice : 0;
+  const defaultDurationLabel = formatServiceDuration(defaultDuration.unit === "day" ? defaultDuration.value : 0, defaultDuration.unit === "hour" ? defaultDuration.value : 0);
 
   async function handleSave(): Promise<void> {
     if (!canManage || saving) {
@@ -78,11 +106,16 @@ export function ServiceFormScreen() {
       return;
     }
 
-    const parsedDuration = durationInput.trim() === "" ? null : Number.parseInt(normalizeDigitInput(durationInput), 10);
-    if (parsedDuration !== null && (!Number.isFinite(parsedDuration) || parsedDuration <= 0)) {
+    const parsedDurationValue = durationInput.trim() === "" ? null : Number.parseInt(normalizeDigitInput(durationInput), 10);
+    if (parsedDurationValue === null || !Number.isFinite(parsedDurationValue) || parsedDurationValue <= 0) {
       setErrorMessage("Durasi layanan tidak valid.");
       return;
     }
+    if (durationUnit === "hour" && parsedDurationValue > 23) {
+      setErrorMessage("Durasi jam maksimal 23 jam.");
+      return;
+    }
+    const resolvedDuration = resolveDurationPartsFromValue(parsedDurationValue, durationUnit);
 
     if (isEditMode && !editingService) {
       setErrorMessage("Data layanan tidak ditemukan untuk mode edit.");
@@ -98,7 +131,8 @@ export function ServiceFormScreen() {
           name: trimmedName,
           unitType,
           basePriceAmount,
-          durationDays: parsedDuration,
+          durationDays: resolvedDuration.durationDays,
+          durationHours: resolvedDuration.durationHours,
           active,
         });
       } else {
@@ -106,7 +140,8 @@ export function ServiceFormScreen() {
           name: trimmedName,
           unitType,
           basePriceAmount,
-          durationDays: parsedDuration,
+          durationDays: resolvedDuration.durationDays,
+          durationHours: resolvedDuration.durationHours,
           active,
         });
       }
@@ -122,22 +157,19 @@ export function ServiceFormScreen() {
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
       <AppScreen contentContainerStyle={styles.content} scroll>
-        <AppPanel style={styles.headerPanel}>
-          <View style={styles.headerTopRow}>
-            <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.backButton, pressed ? styles.backButtonPressed : null]}>
-              <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={18} />
-            </Pressable>
-            <View style={styles.headerBadge}>
-              <Ionicons color={theme.colors.info} name={isEditMode ? "create-outline" : "add-circle-outline"} size={14} />
-              <Text style={styles.headerBadgeText}>{isEditMode ? "Edit Layanan" : "Tambah Layanan"}</Text>
-            </View>
-            <View style={styles.headerSpacer} />
+        <ServiceModuleHeader onBack={() => navigation.goBack()} title={isEditMode ? "Edit Layanan" : "Tambah Layanan"}>
+          <View style={styles.headerMetaRow}>
+            <StatusPill label={resolveServiceTypeLabel(serviceType)} tone={serviceType === "package" ? "success" : "info"} />
+            <StatusPill label={active ? "Aktif" : "Nonaktif"} tone={active ? "success" : "warning"} />
           </View>
-          <Text style={styles.title}>{isEditMode ? "Perbarui layanan" : "Tambah layanan baru"}</Text>
-          <Text style={styles.subtitle}>Atur nama, unit, harga dasar, dan status aktif layanan untuk katalog outlet.</Text>
-        </AppPanel>
+        </ServiceModuleHeader>
 
-        <AppPanel style={styles.formPanel}>
+        <AppPanel style={styles.panel}>
+          <View style={styles.panelHeader}>
+            <Text style={styles.panelEyebrow}>Informasi Inti</Text>
+            <Text style={styles.panelTitle}>Identitas layanan</Text>
+          </View>
+
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Nama Layanan/Produk</Text>
             <TextInput
@@ -152,13 +184,19 @@ export function ServiceFormScreen() {
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Unit</Text>
             <View style={styles.segmentRow}>
-              <Pressable onPress={() => setUnitType("kg")} style={[styles.segmentChip, unitType === "kg" ? styles.segmentChipActive : null]}>
-                <Text style={[styles.segmentChipText, unitType === "kg" ? styles.segmentChipTextActive : null]}>Kg</Text>
-              </Pressable>
-              <Pressable onPress={() => setUnitType("pcs")} style={[styles.segmentChip, unitType === "pcs" ? styles.segmentChipActive : null]}>
-                <Text style={[styles.segmentChipText, unitType === "pcs" ? styles.segmentChipTextActive : null]}>Pcs</Text>
-              </Pressable>
+              {(["kg", "pcs", "meter"] as const).map((unit) => (
+                <Pressable key={unit} onPress={() => setUnitType(unit)} style={[styles.segmentChip, unitType === unit ? styles.segmentChipActive : null]}>
+                  <Text style={[styles.segmentChipText, unitType === unit ? styles.segmentChipTextActive : null]}>{unit.toUpperCase()}</Text>
+                </Pressable>
+              ))}
             </View>
+          </View>
+        </AppPanel>
+
+        <AppPanel style={styles.panel}>
+          <View style={styles.panelHeader}>
+            <Text style={styles.panelEyebrow}>Harga & SLA</Text>
+            <Text style={styles.panelTitle}>Nilai layanan</Text>
           </View>
 
           <View style={styles.fieldGroup}>
@@ -171,32 +209,73 @@ export function ServiceFormScreen() {
               style={styles.input}
               value={basePriceInput}
             />
-            <Text style={styles.pricePreview}>Preview: {formatMoney(basePriceAmount)}</Text>
           </View>
 
           <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Durasi (hari)</Text>
-            <TextInput
-              keyboardType="number-pad"
-              onChangeText={(text) => setDurationInput(normalizeDigitInput(text))}
-              placeholder={`Contoh: ${defaultDurationDays}`}
-              placeholderTextColor={theme.colors.textMuted}
-              style={styles.input}
-              value={durationInput}
-            />
-            <Text style={styles.fieldHint}>Default otomatis {defaultDurationDays} hari, tetap bisa diubah oleh admin.</Text>
-          </View>
-
-          <View style={styles.fieldGroup}>
-            <View style={styles.switchRow}>
-              <View style={styles.switchTextWrap}>
-                <Text style={styles.label}>Status Layanan</Text>
-                <Text style={styles.switchHint}>Layanan nonaktif tetap tersimpan tapi tidak diprioritaskan di transaksi.</Text>
+            <Text style={styles.label}>Durasi Layanan</Text>
+            <View style={styles.durationRow}>
+              <View style={styles.durationField}>
+                <TextInput
+                  keyboardType="number-pad"
+                  onChangeText={(text) => setDurationInput(normalizeDigitInput(text))}
+                  placeholder={`Contoh: ${defaultDuration.value}`}
+                  placeholderTextColor={theme.colors.textMuted}
+                  style={styles.input}
+                  value={durationInput}
+                />
               </View>
-              <Pressable onPress={() => setActive((value) => !value)} style={[styles.switchChip, active ? styles.switchChipActive : null]}>
-                <Text style={[styles.switchChipText, active ? styles.switchChipTextActive : null]}>{active ? "Aktif" : "Nonaktif"}</Text>
-              </Pressable>
+              <View style={styles.durationUnitRow}>
+                {([
+                  { label: "Hari", value: "day" },
+                  { label: "Jam", value: "hour" },
+                ] as const).map((option) => (
+                  <Pressable
+                    key={option.value}
+                    onPress={() => setDurationUnit(option.value)}
+                    style={[styles.segmentChip, durationUnit === option.value ? styles.segmentChipActive : null]}
+                  >
+                    <Text style={[styles.segmentChipText, durationUnit === option.value ? styles.segmentChipTextActive : null]}>{option.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
             </View>
+            <Text style={styles.fieldHint}>
+              Default otomatis {defaultDurationLabel} dan tetap bisa diubah sesuai kebutuhan outlet.
+            </Text>
+          </View>
+
+          <View style={styles.statsRow}>
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>Preview Harga</Text>
+              <Text style={styles.statValue}>{formatMoney(basePriceAmount)}</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>Durasi Aktif</Text>
+              <Text style={styles.statValue}>
+                {formatServiceDuration(
+                  durationUnit === "day" ? (durationInput.trim() === "" ? defaultDuration.value : Number.parseInt(durationInput, 10)) : 0,
+                  durationUnit === "hour" ? (durationInput.trim() === "" ? defaultDuration.value : Number.parseInt(durationInput, 10)) : 0,
+                  "Belum diatur"
+                )}
+              </Text>
+            </View>
+          </View>
+        </AppPanel>
+
+        <AppPanel style={styles.panel}>
+          <View style={styles.panelHeader}>
+            <Text style={styles.panelEyebrow}>Status</Text>
+            <Text style={styles.panelTitle}>Ketersediaan layanan</Text>
+          </View>
+
+          <View style={styles.statusRow}>
+            <View style={styles.statusCopy}>
+              <Text style={styles.label}>Status Layanan</Text>
+              <Text style={styles.fieldHint}>Layanan nonaktif tetap tersimpan, tetapi tidak diprioritaskan saat membuat pesanan.</Text>
+            </View>
+            <Pressable onPress={() => setActive((value) => !value)} style={[styles.statusChip, active ? styles.statusChipActive : null]}>
+              <Text style={[styles.statusChipText, active ? styles.statusChipTextActive : null]}>{active ? "Aktif" : "Nonaktif"}</Text>
+            </Pressable>
           </View>
         </AppPanel>
 
@@ -233,66 +312,127 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       paddingBottom: theme.spacing.xxl,
       gap: theme.spacing.sm,
     },
-    headerPanel: {
+    headerMetaRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
       gap: theme.spacing.xs,
-      backgroundColor: theme.mode === "dark" ? "#12304a" : "#f2faff",
-      borderColor: theme.colors.borderStrong,
     },
-    headerTopRow: {
+    heroShell: {
+      position: "relative",
+      overflow: "hidden",
+      borderRadius: isTablet ? 30 : 26,
+      borderWidth: 1,
+      borderColor: "rgba(120, 212, 236, 0.34)",
+      backgroundColor: "#0d66bf",
+      minHeight: isTablet ? 232 : 220,
+    },
+    heroLayerPrimary: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: "#0d66bf",
+    },
+    heroLayerSecondary: {
+      position: "absolute",
+      top: 0,
+      right: -36,
+      bottom: 0,
+      width: "68%",
+      backgroundColor: "#19b6dc",
+      opacity: 0.62,
+    },
+    heroGlowLarge: {
+      position: "absolute",
+      top: -96,
+      right: -86,
+      width: 248,
+      height: 248,
+      borderRadius: 140,
+      borderWidth: 36,
+      borderColor: "rgba(255,255,255,0.1)",
+    },
+    heroGlowSmall: {
+      position: "absolute",
+      left: -72,
+      bottom: -124,
+      width: 208,
+      height: 208,
+      borderRadius: 120,
+      backgroundColor: "rgba(255,255,255,0.1)",
+    },
+    heroContent: {
+      paddingHorizontal: theme.spacing.lg,
+      paddingVertical: isCompactLandscape ? theme.spacing.md : theme.spacing.lg,
+      gap: theme.spacing.xs,
+    },
+    heroTopRow: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
       gap: theme.spacing.sm,
     },
-    backButton: {
-      width: 36,
-      height: 36,
-      borderRadius: theme.radii.pill,
+    heroIconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
       borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.surface,
+      borderColor: "rgba(255,255,255,0.25)",
+      backgroundColor: "rgba(255,255,255,0.12)",
       alignItems: "center",
       justifyContent: "center",
     },
-    backButtonPressed: {
-      opacity: 0.84,
+    heroIconButtonPressed: {
+      opacity: 0.82,
     },
-    headerBadge: {
-      flexDirection: "row",
+    heroCenterWrap: {
+      flex: 1,
       alignItems: "center",
       gap: 6,
-      borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.pill,
-      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.04)" : "#ffffff",
-      paddingHorizontal: 10,
-      paddingVertical: 5,
     },
-    headerBadgeText: {
-      color: theme.colors.info,
-      fontFamily: theme.fonts.bold,
-      fontSize: 11,
-      letterSpacing: 0.2,
-      textTransform: "uppercase",
+    heroSpacer: {
+      width: 40,
+      height: 40,
     },
-    headerSpacer: {
-      width: 36,
-      height: 36,
-    },
-    title: {
-      color: theme.colors.textPrimary,
+    heroTitle: {
+      color: "#ffffff",
       fontFamily: theme.fonts.heavy,
-      fontSize: isTablet ? 27 : 24,
-      lineHeight: isTablet ? 33 : 30,
+      fontSize: isTablet ? 28 : 23,
+      lineHeight: isTablet ? 34 : 28,
+      textAlign: "center",
     },
-    subtitle: {
-      color: theme.colors.textSecondary,
+    heroMetaRow: {
+      marginTop: 6,
+      flexDirection: "row",
+      flexWrap: "wrap",
+      justifyContent: "center",
+      gap: theme.spacing.xs,
+    },
+    heroHint: {
+      color: "rgba(231,246,255,0.9)",
       fontFamily: theme.fonts.medium,
       fontSize: 12.5,
       lineHeight: 18,
+      textAlign: "center",
     },
-    formPanel: {
+    panel: {
       gap: theme.spacing.sm,
+      borderRadius: theme.radii.xl,
+      borderColor: theme.colors.borderStrong,
+      backgroundColor: theme.colors.surface,
+    },
+    panelHeader: {
+      gap: 2,
+    },
+    panelEyebrow: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 10,
+      letterSpacing: 1,
+      textTransform: "uppercase",
+    },
+    panelTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 17,
+      lineHeight: 22,
     },
     fieldGroup: {
       gap: 7,
@@ -305,13 +445,28 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     input: {
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.md,
+      borderRadius: theme.radii.lg,
       backgroundColor: theme.colors.inputBg,
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.medium,
       fontSize: 14,
       paddingHorizontal: 12,
-      paddingVertical: 10,
+      paddingVertical: 12,
+    },
+    durationRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: theme.spacing.sm,
+    },
+    durationField: {
+      flex: 1,
+      gap: 6,
+    },
+    durationUnitRow: {
+      flexDirection: "row",
+      gap: theme.spacing.xs,
+      alignItems: "stretch",
+      flex: 1,
     },
     segmentRow: {
       flexDirection: "row",
@@ -322,10 +477,10 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surface,
+      backgroundColor: theme.colors.surfaceSoft,
       alignItems: "center",
       justifyContent: "center",
-      paddingVertical: 10,
+      paddingVertical: 12,
     },
     segmentChipActive: {
       borderColor: theme.colors.info,
@@ -341,54 +496,66 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     segmentChipTextActive: {
       color: theme.colors.info,
     },
-    pricePreview: {
-      color: theme.colors.textMuted,
-      fontFamily: theme.fonts.medium,
-      fontSize: 12,
-    },
     fieldHint: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
       fontSize: 11.5,
       lineHeight: 16,
     },
-    switchRow: {
+    statsRow: {
+      flexDirection: "row",
+      gap: theme.spacing.xs,
+    },
+    statCard: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.lg,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      gap: 4,
+    },
+    statLabel: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
+    },
+    statValue: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 15,
+      lineHeight: 20,
+    },
+    statusRow: {
       flexDirection: "row",
       alignItems: "center",
       gap: theme.spacing.sm,
     },
-    switchTextWrap: {
+    statusCopy: {
       flex: 1,
       gap: 3,
     },
-    switchHint: {
-      color: theme.colors.textMuted,
-      fontFamily: theme.fonts.medium,
-      fontSize: 11.5,
-      lineHeight: 16,
-    },
-    switchChip: {
+    statusChip: {
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surface,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      minWidth: 98,
       alignItems: "center",
-      justifyContent: "center",
-      minWidth: 92,
     },
-    switchChipActive: {
+    statusChipActive: {
       borderColor: theme.colors.success,
       backgroundColor: theme.mode === "dark" ? "rgba(56,211,133,0.2)" : "rgba(56,211,133,0.15)",
     },
-    switchChipText: {
+    statusChipText: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.semibold,
       fontSize: 12,
-      letterSpacing: 0.2,
     },
-    switchChipTextActive: {
+    statusChipTextActive: {
       color: theme.colors.success,
     },
     errorWrap: {
@@ -411,6 +578,8 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
     savePanel: {
       gap: theme.spacing.xs,
+      borderRadius: theme.radii.xl,
+      borderColor: theme.colors.borderStrong,
     },
     saveHint: {
       color: theme.colors.textMuted,

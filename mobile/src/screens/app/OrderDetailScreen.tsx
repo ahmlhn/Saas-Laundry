@@ -12,6 +12,8 @@ import { extractCustomerPhoneDigits } from "../../features/customers/customerPho
 import { getOrderDetail, updateCourierStatus, updateLaundryStatus } from "../../features/orders/orderApi";
 import { buildOrderReceiptText, buildOrderWhatsAppMessage } from "../../features/orders/orderReceipt";
 import { formatStatusLabel, getNextCourierStatus, getNextLaundryStatus, resolveCourierTone, resolveLaundryTone } from "../../features/orders/orderStatus";
+import { formatServiceDuration } from "../../features/services/defaultDuration";
+import { DEFAULT_PRINTER_NOTE_SETTINGS, getPrinterNoteSettings } from "../../features/settings/printerNoteStorage";
 import { DEFAULT_PRINTER_LOCAL_SETTINGS, getPrinterLocalSettings } from "../../features/settings/printerLocalSettingsStorage";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AppRootStackParamList, OrdersStackParamList } from "../../navigation/types";
@@ -171,6 +173,10 @@ function formatEstimatedDateTime(value: Date): string {
   const minutes = String(value.getMinutes()).padStart(2, "0");
 
   return `${weekday}, ${day}-${month}-${year}, ${hours}.${minutes}`;
+}
+
+function formatEstimatedDurationHint(durationDays: number | null | undefined, durationHours: number | null | undefined): string {
+  return `Durasi layanan terlama ${formatServiceDuration(durationDays, durationHours, "Belum diatur")}`;
 }
 
 function hasAnyRole(roles: string[], allowList: string[]): boolean {
@@ -451,6 +457,9 @@ export function OrderDetailScreen() {
         const durationDays = typeof detail.estimated_completion_duration_days === "number" && Number.isFinite(detail.estimated_completion_duration_days)
           ? detail.estimated_completion_duration_days
           : null;
+        const durationHours = typeof detail.estimated_completion_duration_hours === "number" && Number.isFinite(detail.estimated_completion_duration_hours)
+          ? detail.estimated_completion_duration_hours
+          : 0;
         const isLate = !isLaundryFinished && (detail.estimated_completion_is_late === true || clockNow > estimatedDate.getTime());
 
         if (isLate) {
@@ -463,7 +472,7 @@ export function OrderDetailScreen() {
 
         return {
           label: formatEstimatedDateTime(estimatedDate),
-          hint: durationDays !== null ? `Durasi layanan terlama ${durationDays === 1 ? "1 hari" : `${durationDays} hari`}` : "Estimasi dari data layanan.",
+          hint: durationDays !== null ? formatEstimatedDurationHint(durationDays, durationHours) : "Estimasi dari data layanan.",
           isLate: false,
         };
       }
@@ -486,16 +495,18 @@ export function OrderDetailScreen() {
       };
     }
 
-    const maxDurationDays = (detail.items ?? []).reduce((currentMax, item) => {
-      const durationDays = item.service?.duration_days;
-      if (typeof durationDays !== "number" || !Number.isFinite(durationDays)) {
+    const maxDurationMinutes = (detail.items ?? []).reduce((currentMax, item) => {
+      const durationDays = typeof item.service?.duration_days === "number" && Number.isFinite(item.service.duration_days) ? item.service.duration_days : 0;
+      const durationHours = typeof item.service?.duration_hours === "number" && Number.isFinite(item.service.duration_hours) ? item.service.duration_hours : 0;
+      const totalMinutes = (Math.max(durationDays, 0) * 24 * 60) + (Math.max(durationHours, 0) * 60);
+      if (totalMinutes <= 0) {
         return currentMax;
       }
 
-      return Math.max(currentMax, durationDays);
+      return Math.max(currentMax, totalMinutes);
     }, -1);
 
-    if (maxDurationDays < 0) {
+    if (maxDurationMinutes < 0) {
       return {
         label: "Belum diatur",
         hint: "Tambahkan durasi di data layanan.",
@@ -503,7 +514,7 @@ export function OrderDetailScreen() {
       };
     }
 
-    const estimatedTimestamp = createdAt.getTime() + maxDurationDays * 24 * 60 * 60 * 1000;
+    const estimatedTimestamp = createdAt.getTime() + maxDurationMinutes * 60 * 1000;
     const estimatedDate = new Date(estimatedTimestamp);
     if (!isLaundryFinished && clockNow > estimatedTimestamp) {
       return {
@@ -513,14 +524,24 @@ export function OrderDetailScreen() {
       };
     }
 
-    const dayLabel = maxDurationDays === 1 ? "1 hari" : `${maxDurationDays} hari`;
+    const durationDays = Math.floor(maxDurationMinutes / (24 * 60));
+    const durationHours = Math.floor((maxDurationMinutes % (24 * 60)) / 60);
 
     return {
       label: formatEstimatedDateTime(estimatedDate),
-      hint: `Durasi layanan terlama ${dayLabel}`,
+      hint: formatEstimatedDurationHint(durationDays, durationHours),
       isLate: false,
     };
-  }, [clockNow, detail?.created_at, detail?.items, detail?.laundry_status]);
+  }, [
+    clockNow,
+    detail?.created_at,
+    detail?.estimated_completion_at,
+    detail?.estimated_completion_duration_days,
+    detail?.estimated_completion_duration_hours,
+    detail?.estimated_completion_is_late,
+    detail?.items,
+    detail?.laundry_status,
+  ]);
   const paymentStatusLabel = detail?.due_amount && detail.due_amount > 0 ? "Belum Lunas" : "Lunas";
 
   function handleOpenPaymentTools(): void {
@@ -607,11 +628,16 @@ export function OrderDetailScreen() {
 
     try {
       const printerSettings = await getPrinterLocalSettings(selectedOutlet?.id).catch(() => DEFAULT_PRINTER_LOCAL_SETTINGS);
+      const noteSettings = await getPrinterNoteSettings(selectedOutlet?.id).catch(() => ({
+        ...DEFAULT_PRINTER_NOTE_SETTINGS,
+        profileName: selectedOutlet?.name || "",
+      }));
       const receiptText = buildOrderReceiptText({
         kind,
         order: detail,
         outletLabel,
         paperWidth: printerSettings.paperWidth,
+        noteSettings,
       });
       await Share.share({
         title: kind === "production" ? "Nota Produksi Laundry" : "Nota Konsumen Laundry",

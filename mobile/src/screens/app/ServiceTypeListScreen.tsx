@@ -2,12 +2,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useCallback, useMemo, useState } from "react";
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { Animated, FlatList, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
-import { AppButton } from "../../components/ui/AppButton";
+import { ServiceModuleHeader } from "../../components/services/ServiceModuleHeader";
 import { AppPanel } from "../../components/ui/AppPanel";
-import { archiveService, listServices, restoreService } from "../../features/services/serviceApi";
+import { StatusPill } from "../../components/ui/StatusPill";
+import { listServices } from "../../features/services/serviceApi";
+import { formatServiceDuration } from "../../features/services/defaultDuration";
 import { hasAnyRole } from "../../lib/accessControl";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AccountStackParamList } from "../../navigation/types";
@@ -21,17 +23,15 @@ type ServiceTypeListRoute = RouteProp<AccountStackParamList, "ServiceTypeList">;
 const currencyFormatter = new Intl.NumberFormat("id-ID");
 
 function formatMoney(value: number): string {
-  return `${currencyFormatter.format(value)}`;
+  return `Rp ${currencyFormatter.format(value)}`;
 }
 
 function buildVariantMeta(item: ServiceCatalogItem): string {
   const parts: string[] = [];
-  if (item.duration_days) {
-    parts.push(`${item.duration_days} Hari`);
-  }
+  parts.push(formatServiceDuration(item.duration_days, item.duration_hours, "Tanpa durasi"));
 
-  const displayUnit = item.display_unit ?? "satuan";
-  parts.push(displayUnit === "satuan" ? "Satuan" : displayUnit.toUpperCase());
+  const displayUnit = item.display_unit ?? "pcs";
+  parts.push(displayUnit.toUpperCase());
 
   if (item.service_type === "package" && item.package_quota_value && item.package_quota_unit) {
     parts.push(`${item.package_quota_value} ${item.package_quota_unit.toUpperCase()}`);
@@ -48,16 +48,6 @@ function resolveServiceIcon(iconName: string | null | undefined): keyof typeof I
   return "shirt-outline";
 }
 
-type ActionTarget =
-  | {
-      kind: "group";
-      item: ServiceCatalogItem;
-    }
-  | {
-      kind: "variant";
-      item: ServiceCatalogItem;
-    };
-
 export function ServiceTypeListScreen() {
   const theme = useAppTheme();
   const { width, height } = useWindowDimensions();
@@ -69,6 +59,7 @@ export function ServiceTypeListScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AccountStackParamList, "ServiceTypeList">>();
   const route = useRoute<ServiceTypeListRoute>();
   const { session, selectedOutlet } = useSession();
+  const scrollY = useRef(new Animated.Value(0)).current;
   const serviceType = route.params.serviceType;
   const title = route.params.title;
 
@@ -82,10 +73,23 @@ export function ServiceTypeListScreen() {
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [actionTarget, setActionTarget] = useState<ActionTarget | null>(null);
-  const [busyServiceId, setBusyServiceId] = useState<string | null>(null);
   const [fabOpen, setFabOpen] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const headerTranslateY = scrollY.interpolate({
+    inputRange: [0, 96],
+    outputRange: [0, -6],
+    extrapolate: "clamp",
+  });
+  const headerScaleX = scrollY.interpolate({
+    inputRange: [0, 96],
+    outputRange: [1, 0.94],
+    extrapolate: "clamp",
+  });
+  const headerScaleY = scrollY.interpolate({
+    inputRange: [0, 96],
+    outputRange: [1, 0.86],
+    extrapolate: "clamp",
+  });
 
   const outletLabel = selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "Semua outlet";
 
@@ -156,205 +160,178 @@ export function ServiceTypeListScreen() {
       .filter((item): item is ServiceCatalogItem => !!item);
   }, [groups, searchInput]);
 
-  async function handleToggleArchive(item: ServiceCatalogItem): Promise<void> {
-    if (!canManage || busyServiceId) {
-      return;
-    }
-
-    setBusyServiceId(item.id);
-    setErrorMessage(null);
-    setActionMessage(null);
-
-    try {
-      if (item.deleted_at) {
-        await restoreService(item.id);
-        setActionMessage(`"${item.name}" berhasil dipulihkan.`);
-      } else {
-        await archiveService(item.id);
-        setActionMessage(`"${item.name}" berhasil diarsipkan.`);
-      }
-
-      setActionTarget(null);
-      await loadGroups(true);
-    } catch (error) {
-      setErrorMessage(getApiErrorMessage(error));
-    } finally {
-      setBusyServiceId(null);
-    }
-  }
-
-  function openEdit(target: ActionTarget): void {
-    if (!canManage) {
-      return;
-    }
-
-    if (target.kind === "group") {
-      navigation.navigate("ServiceGroupForm", {
-        mode: "edit",
-        serviceType,
-        group: target.item,
-      });
-      setActionTarget(null);
-      return;
-    }
-
-    navigation.navigate("ServiceVariantForm", {
-      mode: "edit",
-      serviceType,
-      variant: target.item,
-      parentServiceId: target.item.parent_service_id,
-    });
-    setActionTarget(null);
-  }
+  const totalVariants = useMemo(() => groups.reduce((total, group) => total + group.children.length, 0), [groups]);
 
   function renderGroupItem(group: ServiceCatalogItem) {
-    return (
-      <View key={group.id} style={styles.groupBlock}>
-        <View style={styles.groupHeader}>
-          <View style={styles.groupHeaderText}>
+    const headerContent = (
+      <View style={styles.groupHeader}>
+        <View style={styles.groupHeaderLeft}>
+          <View style={styles.groupIconWrap}>
+            <Ionicons color={theme.colors.info} name="albums-outline" size={18} />
+          </View>
+          <View style={styles.groupHeaderCopy}>
             <Text style={styles.groupName}>{group.name}</Text>
             <Text style={styles.groupMeta}>{group.process_summary || "Tanpa tag proses"}</Text>
           </View>
-          {canManage ? (
-            <Pressable onPress={() => setActionTarget({ kind: "group", item: group })} style={styles.kebabButton}>
-              <Ionicons color={theme.colors.warning} name="ellipsis-horizontal" size={20} />
-            </Pressable>
-          ) : null}
         </View>
+
+        <View style={styles.groupHeaderRight}>
+          <StatusPill label={`${group.children.length} varian`} tone="neutral" />
+        </View>
+      </View>
+    );
+
+    return (
+      <AppPanel key={group.id} style={styles.groupCard}>
+        {canManage ? (
+          <Pressable
+            onPress={() =>
+              navigation.navigate("ServiceGroupForm", {
+                mode: "edit",
+                serviceType,
+                group,
+              })
+            }
+            style={({ pressed }) => [styles.groupHeaderPressable, pressed ? styles.listItemPressed : null]}
+          >
+            {headerContent}
+          </Pressable>
+        ) : (
+          headerContent
+        )}
 
         <View style={styles.variantList}>
           {group.children.length === 0 ? <Text style={styles.emptyVariant}>Belum ada varian pada group ini.</Text> : null}
           {group.children.map((child) => (
-            <View key={child.id} style={styles.variantItem}>
+            <Pressable
+              key={child.id}
+              disabled={!canManage}
+              onPress={() =>
+                navigation.navigate("ServiceVariantForm", {
+                  mode: "edit",
+                  serviceType,
+                  variant: child,
+                  parentServiceId: child.parent_service_id,
+                })
+              }
+              style={({ pressed }) => [styles.variantItem, canManage && pressed ? styles.listItemPressed : null]}
+            >
               <View style={styles.variantIconWrap}>
-                <Ionicons color={theme.colors.info} name={resolveServiceIcon(child.image_icon)} size={24} />
+                <Ionicons color={theme.colors.info} name={resolveServiceIcon(child.image_icon)} size={22} />
               </View>
               <View style={styles.variantTextWrap}>
-                <Text style={styles.variantName}>{child.name}</Text>
-                <Text style={styles.variantPrice}>{formatMoney(child.effective_price_amount)}</Text>
+                <View style={styles.variantTitleRow}>
+                  <Text style={styles.variantName}>{child.name}</Text>
+                  <Text style={styles.variantPrice}>{formatMoney(child.effective_price_amount)}</Text>
+                </View>
                 <Text style={styles.variantMeta}>{buildVariantMeta(child)}</Text>
               </View>
-              {canManage ? (
-                <Pressable onPress={() => setActionTarget({ kind: "variant", item: child })} style={styles.kebabButton}>
-                  <Ionicons color={theme.colors.warning} name="ellipsis-horizontal" size={20} />
-                </Pressable>
-              ) : null}
-            </View>
+            </Pressable>
           ))}
         </View>
-      </View>
+      </AppPanel>
     );
   }
 
   if (!canView) {
     return (
-      <AppScreen contentContainerStyle={styles.content} scroll>
-        <AppPanel style={styles.headerPanel}>
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.subtitle}>Akun Anda tidak memiliki akses ke modul ini.</Text>
+      <AppScreen contentContainerStyle={styles.screenContent}>
+        <ServiceModuleHeader onBack={() => navigation.goBack()} title={title} />
+        <AppPanel style={styles.blockedPanel}>
+          <Text style={styles.blockedTitle}>{title}</Text>
+          <Text style={styles.blockedText}>Akun Anda tidak memiliki akses ke modul ini.</Text>
         </AppPanel>
       </AppScreen>
     );
   }
 
   return (
-    <AppScreen contentContainerStyle={styles.content} scroll>
-      <AppPanel style={styles.headerPanel}>
-        <View style={styles.headerRow}>
-          <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.headerIconButton, pressed ? styles.headerIconButtonPressed : null]}>
-            <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={18} />
-          </Pressable>
-          <Text style={styles.title}>{title}</Text>
-          <View style={styles.headerActions}>
-            {canManage ? (
-              <Pressable
-                onPress={() => navigation.navigate("ProcessTagManager")}
-                style={({ pressed }) => [styles.headerIconButton, pressed ? styles.headerIconButtonPressed : null]}
-              >
-                <Ionicons color={theme.colors.info} name="pricetags-outline" size={18} />
-              </Pressable>
-            ) : null}
-            <Pressable onPress={() => setSearchVisible((value) => !value)} style={({ pressed }) => [styles.headerIconButton, pressed ? styles.headerIconButtonPressed : null]}>
-              <Ionicons color={theme.colors.textSecondary} name="search-outline" size={18} />
-            </Pressable>
+    <AppScreen contentContainerStyle={styles.screenContent}>
+      <Animated.View style={[styles.headerShell, { transform: [{ translateY: headerTranslateY }] }]}>
+        <Animated.View style={[styles.headerMotionWrap, { transform: [{ scaleX: headerScaleX }, { scaleY: headerScaleY }] }]}>
+          <ServiceModuleHeader
+            onBack={() => navigation.goBack()}
+            rightSlot={
+              canManage ? (
+                <Pressable onPress={() => navigation.navigate("ProcessTagManager")} style={({ pressed }) => [styles.headerActionButton, pressed ? styles.headerActionButtonPressed : null]}>
+                  <Ionicons color={theme.colors.textSecondary} name="pricetags-outline" size={17} />
+                </Pressable>
+              ) : undefined
+            }
+            title={title}
+          />
+        </Animated.View>
+      </Animated.View>
+
+      <Animated.ScrollView
+        contentContainerStyle={styles.scrollContent}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
+        scrollEventThrottle={16}
+        showsVerticalScrollIndicator={false}
+        style={styles.scrollArea}
+      >
+        <AppPanel style={styles.toolbarPanel}>
+          <Text style={styles.toolbarOutlet}>{outletLabel}</Text>
+
+          <View style={styles.toolbarMetaRow}>
+            <StatusPill label={`${visibleGroups.length} group`} tone="neutral" />
+            <StatusPill label={`${totalVariants} varian`} tone="neutral" />
+            <StatusPill label={serviceType === "package" ? "Mode paket" : "Mode reguler"} tone={serviceType === "package" ? "success" : "info"} />
           </View>
-        </View>
-        <Text style={styles.subtitle}>{outletLabel}</Text>
-        {searchVisible ? (
-          <View style={styles.searchRow}>
-            <Ionicons color={theme.colors.textMuted} name="search-outline" size={16} />
+
+          <View style={styles.toolbarSearchWrap}>
+            <Ionicons color={theme.colors.textMuted} name="search-outline" size={18} />
             <TextInput
               onChangeText={setSearchInput}
-              placeholder="Cari group atau varian..."
+              placeholder="Cari group atau varian layanan..."
               placeholderTextColor={theme.colors.textMuted}
-              style={styles.searchInput}
+              style={styles.toolbarSearchInput}
               value={searchInput}
             />
+            <Pressable onPress={() => setSearchVisible((value) => !value)} style={({ pressed }) => [styles.headerActionButton, pressed ? styles.headerActionButtonPressed : null]}>
+              <Ionicons color={theme.colors.textSecondary} name={searchVisible ? "close-outline" : "options-outline"} size={17} />
+            </Pressable>
+          </View>
+
+          {searchVisible ? <Text style={styles.toolbarHint}>Pencarian akan mencocokkan nama group dan nama varian secara langsung.</Text> : null}
+        </AppPanel>
+
+        {errorMessage ? (
+          <View style={styles.errorWrap}>
+            <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
+            <Text style={styles.errorText}>{errorMessage}</Text>
           </View>
         ) : null}
-      </AppPanel>
 
-      {errorMessage ? (
-        <View style={styles.errorWrap}>
-          <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
-          <Text style={styles.errorText}>{errorMessage}</Text>
-        </View>
-      ) : null}
-
-      {actionMessage ? (
-        <View style={styles.successWrap}>
-          <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={16} />
-          <Text style={styles.successText}>{actionMessage}</Text>
-        </View>
-      ) : null}
-
-      {loading ? (
-        <AppPanel style={styles.groupBlock}>
-          <Text style={styles.emptyVariant}>Memuat data layanan...</Text>
-        </AppPanel>
-      ) : (
-        <FlatList
-          contentContainerStyle={styles.listContent}
-          data={visibleGroups}
-          keyExtractor={(item) => item.id}
-          ListEmptyComponent={<AppPanel style={styles.groupBlock}><Text style={styles.emptyVariant}>Tidak ada data layanan.</Text></AppPanel>}
-          onRefresh={() => void loadGroups(true)}
-          refreshing={refreshing}
-          renderItem={({ item }) => renderGroupItem(item)}
-          scrollEnabled={false}
-        />
-      )}
-
-      {actionTarget && canManage ? (
-        <AppPanel style={styles.actionMenuPanel}>
-          <Text style={styles.actionMenuTitle}>{actionTarget.kind === "group" ? "Aksi Group" : "Aksi Varian"}</Text>
-          <Text style={styles.actionMenuName}>{actionTarget.item.name}</Text>
-          <View style={styles.actionMenuButtons}>
-            <View style={styles.actionMenuButtonItem}>
-              <AppButton
-                leftElement={<Ionicons color={theme.colors.info} name="create-outline" size={16} />}
-                onPress={() => openEdit(actionTarget)}
-                title="Edit"
-                variant="secondary"
-              />
-            </View>
-            <View style={styles.actionMenuButtonItem}>
-              <AppButton
-                disabled={busyServiceId === actionTarget.item.id}
-                leftElement={<Ionicons color={theme.colors.textPrimary} name={actionTarget.item.deleted_at ? "refresh-outline" : "archive-outline"} size={16} />}
-                loading={busyServiceId === actionTarget.item.id}
-                onPress={() => void handleToggleArchive(actionTarget.item)}
-                title={actionTarget.item.deleted_at ? "Restore" : "Arsipkan"}
-                variant="ghost"
-              />
-            </View>
-            <View style={styles.actionMenuButtonItem}>
-              <AppButton onPress={() => setActionTarget(null)} title="Tutup" variant="ghost" />
-            </View>
+        {actionMessage ? (
+          <View style={styles.successWrap}>
+            <Ionicons color={theme.colors.success} name="checkmark-circle-outline" size={16} />
+            <Text style={styles.successText}>{actionMessage}</Text>
           </View>
-        </AppPanel>
-      ) : null}
+        ) : null}
 
+        {loading ? (
+          <AppPanel style={styles.groupCard}>
+            <Text style={styles.emptyVariant}>Memuat data layanan...</Text>
+          </AppPanel>
+        ) : (
+          <FlatList
+            contentContainerStyle={styles.listContent}
+            data={visibleGroups}
+            keyExtractor={(item) => item.id}
+            ListEmptyComponent={
+              <AppPanel style={styles.groupCard}>
+                <Text style={styles.emptyVariant}>Tidak ada data layanan.</Text>
+              </AppPanel>
+            }
+            onRefresh={() => void loadGroups(true)}
+            refreshing={refreshing}
+            renderItem={({ item }) => renderGroupItem(item)}
+            scrollEnabled={false}
+          />
+        )}
+
+      </Animated.ScrollView>
       {canManage ? (
         <>
           {fabOpen ? (
@@ -368,7 +345,7 @@ export function ServiceTypeListScreen() {
                     parentServiceId: groups[0]?.id ?? null,
                   });
                 }}
-                style={styles.fabMenuItem}
+                style={({ pressed }) => [styles.fabMenuItem, pressed ? styles.fabMenuItemPressed : null]}
               >
                 <Ionicons color={theme.colors.primaryContrast} name="cube-outline" size={18} />
                 <Text style={styles.fabMenuText}>Tambah Varian</Text>
@@ -381,7 +358,7 @@ export function ServiceTypeListScreen() {
                     serviceType,
                   });
                 }}
-                style={styles.fabMenuItem}
+                style={({ pressed }) => [styles.fabMenuItem, pressed ? styles.fabMenuItemPressed : null]}
               >
                 <Ionicons color={theme.colors.primaryContrast} name="albums-outline" size={18} />
                 <Text style={styles.fabMenuText}>Tambah Group</Text>
@@ -389,7 +366,7 @@ export function ServiceTypeListScreen() {
             </View>
           ) : null}
 
-          <Pressable onPress={() => setFabOpen((value) => !value)} style={styles.fabButton}>
+          <Pressable onPress={() => setFabOpen((value) => !value)} style={({ pressed }) => [styles.fabButton, pressed ? styles.fabButtonPressed : null]}>
             <Ionicons color={theme.colors.primaryContrast} name={fabOpen ? "close" : "add"} size={30} />
           </Pressable>
         </>
@@ -399,32 +376,79 @@ export function ServiceTypeListScreen() {
 }
 
 function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: boolean) {
+  const headerTopPadding = isCompactLandscape ? theme.spacing.xs : theme.spacing.sm;
+  const headerReservedHeight = headerTopPadding + theme.spacing.sm + 72;
+
   return StyleSheet.create({
-    content: {
-      flexGrow: 1,
+    screenContent: {
+      flex: 1,
+      paddingTop: 0,
+    },
+    headerShell: {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      zIndex: 3,
+      backgroundColor: "transparent",
+      paddingTop: headerTopPadding,
+      paddingBottom: theme.spacing.xs,
       paddingHorizontal: isTablet ? theme.spacing.xl : theme.spacing.lg,
-      paddingTop: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
+    },
+    headerMotionWrap: {
+      transformOrigin: "center top",
+    },
+    scrollArea: {
+      flex: 1,
+    },
+    scrollContent: {
+      paddingTop: headerReservedHeight,
+      paddingHorizontal: isTablet ? theme.spacing.xl : theme.spacing.lg,
       paddingBottom: 120,
       gap: theme.spacing.sm,
     },
-    headerPanel: {
-      backgroundColor: theme.mode === "dark" ? "#12304a" : "#f7f9fb",
-      gap: theme.spacing.xs,
-    },
-    headerRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
+    toolbarPanel: {
       gap: theme.spacing.sm,
     },
-    headerActions: {
+    toolbarOutlet: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13,
+      lineHeight: 18,
+    },
+    toolbarMetaRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: theme.spacing.xs,
+    },
+    toolbarSearchWrap: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 8,
+      gap: theme.spacing.sm,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingLeft: 14,
+      paddingRight: 6,
+      minHeight: 48,
     },
-    headerIconButton: {
-      width: 36,
-      height: 36,
+    toolbarSearchInput: {
+      flex: 1,
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 14,
+      paddingVertical: 0,
+    },
+    toolbarHint: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 18,
+    },
+    headerActionButton: {
+      width: 32,
+      height: 32,
       borderRadius: theme.radii.pill,
       borderWidth: 1,
       borderColor: theme.colors.border,
@@ -432,57 +456,187 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       alignItems: "center",
       justifyContent: "center",
     },
-    headerIconButtonPressed: {
+    headerActionButtonPressed: {
       opacity: 0.82,
     },
-    title: {
-      flex: 1,
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.heavy,
-      fontSize: isTablet ? 30 : 24,
-      lineHeight: isTablet ? 36 : 30,
-      textAlign: "center",
-    },
-    subtitle: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.medium,
-      fontSize: 12.5,
-      textAlign: "center",
-    },
-    searchRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8,
+    heroShell: {
+      position: "relative",
+      overflow: "hidden",
+      borderRadius: isTablet ? 30 : 26,
       borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.md,
-      backgroundColor: theme.colors.inputBg,
-      paddingHorizontal: 12,
-      minHeight: 44,
+      borderColor: "rgba(120, 212, 236, 0.34)",
+      backgroundColor: "#0d66bf",
+      minHeight: isTablet ? 250 : 244,
     },
-    searchInput: {
-      flex: 1,
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.medium,
-      fontSize: 13.5,
-      paddingVertical: 10,
+    heroLayerPrimary: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: "#0d66bf",
     },
-    listContent: {
-      gap: theme.spacing.sm,
+    heroLayerSecondary: {
+      position: "absolute",
+      top: 0,
+      right: -30,
+      bottom: 0,
+      width: "68%",
+      backgroundColor: "#19b6dc",
+      opacity: 0.62,
     },
-    groupBlock: {
+    heroGlowLarge: {
+      position: "absolute",
+      top: -96,
+      right: -86,
+      width: 248,
+      height: 248,
+      borderRadius: 140,
+      borderWidth: 36,
+      borderColor: "rgba(255,255,255,0.1)",
+    },
+    heroGlowSmall: {
+      position: "absolute",
+      left: -72,
+      bottom: -124,
+      width: 208,
+      height: 208,
+      borderRadius: 120,
+      backgroundColor: "rgba(255,255,255,0.1)",
+    },
+    heroContent: {
+      paddingHorizontal: theme.spacing.lg,
+      paddingVertical: isCompactLandscape ? theme.spacing.md : theme.spacing.lg,
       gap: theme.spacing.xs,
-      paddingVertical: 12,
     },
-    groupHeader: {
+    heroTopRow: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
       gap: theme.spacing.sm,
     },
-    groupHeaderText: {
+    heroIconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.25)",
+      backgroundColor: "rgba(255,255,255,0.12)",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    heroIconButtonPressed: {
+      opacity: 0.82,
+    },
+    heroCenterWrap: {
       flex: 1,
-      gap: 1,
+      alignItems: "center",
+      gap: 6,
+    },
+    heroActionWrap: {
+      width: 40,
+      alignItems: "flex-end",
+      justifyContent: "center",
+    },
+    heroSpacer: {
+      width: 40,
+      height: 40,
+    },
+    heroTitle: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.heavy,
+      fontSize: isTablet ? 28 : 23,
+      lineHeight: isTablet ? 34 : 28,
+      textAlign: "center",
+    },
+    heroOutlet: {
+      color: "rgba(233,247,255,0.94)",
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13,
+      textAlign: "center",
+    },
+    heroMetaRow: {
+      marginTop: 6,
+      flexDirection: "row",
+      flexWrap: "wrap",
+      justifyContent: "center",
+      gap: theme.spacing.xs,
+    },
+    searchWrap: {
+      marginTop: 4,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.24)",
+      borderRadius: theme.radii.lg,
+      backgroundColor: "rgba(255,255,255,0.12)",
+      minHeight: 50,
+      paddingLeft: 14,
+      paddingRight: 8,
+    },
+    searchInput: {
+      flex: 1,
+      color: "#ffffff",
+      fontFamily: theme.fonts.medium,
+      fontSize: 13.5,
+      paddingVertical: 12,
+    },
+    searchTuner: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    searchHint: {
+      color: "rgba(228,243,255,0.8)",
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 16,
+    },
+    listContent: {
+      gap: theme.spacing.sm,
+    },
+    groupCard: {
+      gap: theme.spacing.sm,
+      borderRadius: theme.radii.xl,
+      borderColor: theme.colors.borderStrong,
+      backgroundColor: theme.colors.surface,
+    },
+    groupHeader: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
+    },
+    groupHeaderPressable: {
+      borderRadius: theme.radii.lg,
+      marginHorizontal: -4,
+      marginTop: -4,
+      paddingHorizontal: 4,
+      paddingTop: 4,
+      paddingBottom: 6,
+    },
+    groupHeaderLeft: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 10,
+    },
+    groupIconWrap: {
+      width: 42,
+      height: 42,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      backgroundColor: theme.colors.primarySoft,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    groupHeaderCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    groupHeaderRight: {
+      alignItems: "flex-end",
+      gap: 8,
     },
     groupName: {
       color: theme.colors.textPrimary,
@@ -493,23 +647,14 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     groupMeta: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
-      fontSize: 13,
+      fontSize: 12.5,
+      lineHeight: 18,
     },
-    kebabButton: {
-      width: 34,
-      height: 34,
-      borderRadius: 17,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.surface,
-      alignItems: "center",
-      justifyContent: "center",
+    listItemPressed: {
+      opacity: 0.84,
     },
     variantList: {
       gap: 10,
-      borderTopWidth: 1,
-      borderTopColor: theme.colors.border,
-      paddingTop: 10,
     },
     emptyVariant: {
       color: theme.colors.textMuted,
@@ -524,41 +669,49 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       gap: 10,
       borderWidth: 1,
       borderColor: theme.colors.border,
-      borderRadius: theme.radii.md,
+      borderRadius: theme.radii.lg,
       backgroundColor: theme.colors.surfaceSoft,
-      paddingHorizontal: 10,
-      paddingVertical: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
     },
     variantIconWrap: {
-      width: 42,
-      height: 42,
-      borderRadius: 10,
+      width: 44,
+      height: 44,
+      borderRadius: 14,
       borderWidth: 1,
-      borderColor: theme.colors.border,
+      borderColor: theme.colors.borderStrong,
       backgroundColor: theme.colors.surface,
       alignItems: "center",
       justifyContent: "center",
     },
     variantTextWrap: {
       flex: 1,
-      gap: 1,
+      gap: 2,
+    },
+    variantTitleRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: 10,
     },
     variantName: {
+      flex: 1,
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.semibold,
-      fontSize: 16,
+      fontSize: 15.5,
       lineHeight: 20,
     },
     variantPrice: {
-      color: theme.colors.textPrimary,
+      color: theme.colors.info,
       fontFamily: theme.fonts.bold,
-      fontSize: 15,
+      fontSize: 14,
       lineHeight: 20,
     },
     variantMeta: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
+      lineHeight: 17,
     },
     errorWrap: {
       borderWidth: 1,
@@ -596,24 +749,22 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontSize: 12,
       lineHeight: 18,
     },
-    actionMenuPanel: {
+    blockedPanel: {
       gap: theme.spacing.xs,
     },
-    actionMenuTitle: {
+    blockedTitle: {
       color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.bold,
-      fontSize: 13,
+      fontFamily: theme.fonts.heavy,
+      fontSize: 24,
+      lineHeight: 30,
+      textAlign: "center",
     },
-    actionMenuName: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 12.5,
-    },
-    actionMenuButtons: {
-      gap: 8,
-    },
-    actionMenuButtonItem: {
-      width: "100%",
+    blockedText: {
+      color: theme.colors.danger,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 18,
+      textAlign: "center",
     },
     fabButton: {
       position: "absolute",
@@ -630,6 +781,10 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       shadowRadius: 10,
       shadowOffset: { width: 0, height: 5 },
       elevation: 6,
+    },
+    fabButtonPressed: {
+      opacity: 0.86,
+      transform: [{ scale: 0.99 }],
     },
     fabMenu: {
       position: "absolute",
@@ -650,6 +805,9 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       shadowRadius: 8,
       shadowOffset: { width: 0, height: 4 },
       elevation: 4,
+    },
+    fabMenuItemPressed: {
+      opacity: 0.86,
     },
     fabMenuText: {
       color: theme.colors.primaryContrast,

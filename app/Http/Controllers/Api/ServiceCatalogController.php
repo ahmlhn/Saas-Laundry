@@ -23,7 +23,7 @@ class ServiceCatalogController extends Controller
 
     private const SERVICE_TYPES = ['regular', 'package', 'perfume', 'item'];
 
-    private const DISPLAY_UNITS = ['kg', 'pcs', 'satuan'];
+    private const DISPLAY_UNITS = ['kg', 'pcs', 'meter'];
 
     private const PACKAGE_QUOTA_UNITS = ['kg', 'pcs'];
 
@@ -174,10 +174,11 @@ class ServiceCatalogController extends Controller
             'service_type' => ['nullable', 'string', Rule::in(self::SERVICE_TYPES)],
             'parent_service_id' => ['nullable', 'uuid'],
             'is_group' => ['nullable', 'boolean'],
-            'unit_type' => ['nullable', 'string', Rule::in(['kg', 'pcs'])],
+            'unit_type' => ['nullable', 'string', Rule::in(['kg', 'pcs', 'meter'])],
             'display_unit' => ['nullable', 'string', Rule::in(self::DISPLAY_UNITS)],
             'base_price_amount' => ['required', 'integer', 'min:0', 'max:1000000000'],
-            'duration_days' => ['nullable', 'integer', 'min:1', 'max:3650'],
+            'duration_days' => ['nullable', 'integer', 'min:0', 'max:3650'],
+            'duration_hours' => ['nullable', 'integer', 'min:0', 'max:23'],
             'package_quota_value' => ['nullable', 'numeric', 'min:0.01', 'max:99999999'],
             'package_quota_unit' => ['nullable', 'string', Rule::in(self::PACKAGE_QUOTA_UNITS)],
             'package_valid_days' => ['nullable', 'integer', 'min:1', 'max:3650'],
@@ -228,9 +229,9 @@ class ServiceCatalogController extends Controller
             ], 422);
         }
 
-        $unitType = (string) ($validated['unit_type'] ?? (($validated['display_unit'] ?? '') === 'kg' ? 'kg' : 'pcs'));
+        $unitType = (string) ($validated['unit_type'] ?? (($validated['display_unit'] ?? '') === 'kg' ? 'kg' : (($validated['display_unit'] ?? '') === 'meter' ? 'meter' : 'pcs')));
         $displayUnit = (string) ($validated['display_unit'] ?? $this->defaultDisplayUnit($unitType));
-        $durationDays = $this->resolveDurationDaysForCreate($serviceType, $validated);
+        [$durationDays, $durationHours] = $this->resolveDurationPartsForCreate($serviceType, $validated);
 
         $packageFields = $this->normalizePackageFields($serviceType, $validated, null);
         if ($packageFields === null) {
@@ -250,6 +251,7 @@ class ServiceCatalogController extends Controller
             'display_unit' => $displayUnit,
             'base_price_amount' => (int) $validated['base_price_amount'],
             'duration_days' => $durationDays,
+            'duration_hours' => $durationHours,
             'package_quota_value' => $packageFields['package_quota_value'],
             'package_quota_unit' => $packageFields['package_quota_unit'],
             'package_valid_days' => $packageFields['package_valid_days'],
@@ -299,10 +301,11 @@ class ServiceCatalogController extends Controller
             'service_type' => ['nullable', 'string', Rule::in(self::SERVICE_TYPES)],
             'parent_service_id' => ['nullable', 'uuid'],
             'is_group' => ['nullable', 'boolean'],
-            'unit_type' => ['nullable', 'string', Rule::in(['kg', 'pcs'])],
+            'unit_type' => ['nullable', 'string', Rule::in(['kg', 'pcs', 'meter'])],
             'display_unit' => ['nullable', 'string', Rule::in(self::DISPLAY_UNITS)],
             'base_price_amount' => ['nullable', 'integer', 'min:0', 'max:1000000000'],
-            'duration_days' => ['nullable', 'integer', 'min:1', 'max:3650'],
+            'duration_days' => ['nullable', 'integer', 'min:0', 'max:3650'],
+            'duration_hours' => ['nullable', 'integer', 'min:0', 'max:23'],
             'package_quota_value' => ['nullable', 'numeric', 'min:0.01', 'max:99999999'],
             'package_quota_unit' => ['nullable', 'string', Rule::in(self::PACKAGE_QUOTA_UNITS)],
             'package_valid_days' => ['nullable', 'integer', 'min:1', 'max:3650'],
@@ -386,7 +389,7 @@ class ServiceCatalogController extends Controller
 
         $nextUnitType = (string) ($validated['unit_type'] ?? $service->unit_type);
         $nextDisplayUnit = (string) ($validated['display_unit'] ?? $service->display_unit ?? $this->defaultDisplayUnit($nextUnitType));
-        $nextDurationDays = $this->resolveDurationDaysForUpdate($nextServiceType, $validated, $service);
+        [$nextDurationDays, $nextDurationHours] = $this->resolveDurationPartsForUpdate($nextServiceType, $validated, $service);
         $packageFields = $this->normalizePackageFields($nextServiceType, $validated, $service);
 
         if ($packageFields === null) {
@@ -407,6 +410,7 @@ class ServiceCatalogController extends Controller
                 ? (int) $validated['base_price_amount']
                 : (int) $service->base_price_amount,
             'duration_days' => $nextDurationDays,
+            'duration_hours' => $nextDurationHours,
             'package_quota_value' => $packageFields['package_quota_value'],
             'package_quota_unit' => $packageFields['package_quota_unit'],
             'package_valid_days' => $packageFields['package_valid_days'],
@@ -573,39 +577,47 @@ class ServiceCatalogController extends Controller
 
     private function defaultDisplayUnit(string $unitType): string
     {
-        return $unitType === 'kg' ? 'kg' : 'pcs';
+        return in_array($unitType, self::DISPLAY_UNITS, true) ? $unitType : 'pcs';
     }
 
     /**
      * @param array<string, mixed> $validated
      */
-    private function resolveDurationDaysForCreate(string $serviceType, array $validated): int
+    private function resolveDurationPartsForCreate(string $serviceType, array $validated): array
     {
-        if (array_key_exists('duration_days', $validated) && $validated['duration_days'] !== null) {
-            return (int) $validated['duration_days'];
+        $days = array_key_exists('duration_days', $validated) && $validated['duration_days'] !== null
+            ? (int) $validated['duration_days']
+            : $this->defaultDurationDays($serviceType);
+        $hours = array_key_exists('duration_hours', $validated) && $validated['duration_hours'] !== null
+            ? (int) $validated['duration_hours']
+            : $this->defaultDurationHours($serviceType);
+
+        if ($days <= 0 && $hours <= 0) {
+            $days = $this->defaultDurationDays($serviceType);
+            $hours = $this->defaultDurationHours($serviceType);
         }
 
-        return $this->defaultDurationDays($serviceType);
+        return [$days, $hours];
     }
 
     /**
      * @param array<string, mixed> $validated
      */
-    private function resolveDurationDaysForUpdate(string $serviceType, array $validated, Service $existing): int
+    private function resolveDurationPartsForUpdate(string $serviceType, array $validated, Service $existing): array
     {
-        if (array_key_exists('duration_days', $validated)) {
-            if ($validated['duration_days'] !== null) {
-                return (int) $validated['duration_days'];
-            }
+        $days = array_key_exists('duration_days', $validated)
+            ? (int) ($validated['duration_days'] ?? $this->defaultDurationDays($serviceType))
+            : ($existing->duration_days !== null ? (int) $existing->duration_days : $this->defaultDurationDays($serviceType));
+        $hours = array_key_exists('duration_hours', $validated)
+            ? (int) ($validated['duration_hours'] ?? $this->defaultDurationHours($serviceType))
+            : ($existing->duration_hours !== null ? (int) $existing->duration_hours : $this->defaultDurationHours($serviceType));
 
-            return $this->defaultDurationDays($serviceType);
+        if ($days <= 0 && $hours <= 0) {
+            $days = $this->defaultDurationDays($serviceType);
+            $hours = $this->defaultDurationHours($serviceType);
         }
 
-        if ($existing->duration_days !== null) {
-            return (int) $existing->duration_days;
-        }
-
-        return $this->defaultDurationDays($serviceType);
+        return [$days, $hours];
     }
 
     private function defaultDurationDays(string $serviceType): int
@@ -614,6 +626,11 @@ class ServiceCatalogController extends Controller
             'package', 'perfume' => 1,
             default => 3,
         };
+    }
+
+    private function defaultDurationHours(string $serviceType): int
+    {
+        return 0;
     }
 
     /**
@@ -830,6 +847,7 @@ class ServiceCatalogController extends Controller
             'display_unit' => (string) ($service->display_unit ?? $this->defaultDisplayUnit((string) $service->unit_type)),
             'base_price_amount' => (int) $service->base_price_amount,
             'duration_days' => $service->duration_days !== null ? (int) $service->duration_days : null,
+            'duration_hours' => $service->duration_hours !== null ? (int) $service->duration_hours : 0,
             'package_quota_value' => $service->package_quota_value !== null ? (float) $service->package_quota_value : null,
             'package_quota_unit' => $service->package_quota_unit,
             'package_valid_days' => $service->package_valid_days !== null ? (int) $service->package_valid_days : null,

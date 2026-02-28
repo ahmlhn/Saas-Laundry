@@ -23,7 +23,7 @@ const HELP_ITEMS: HelpItem[] = [
   { key: "reset", title: "Reset Data", description: "Reset cache sinkronisasi lokal perangkat." },
   { key: "clear-cache", title: "Hapus Cache", description: "Bersihkan data cache untuk muat ulang API." },
   { key: "check-update", title: "Cek Update", description: "Periksa versi app terbaru untuk tenant kamu.", link: "https://saas.daratlaut.com/mobile/latest" },
-  { key: "latest", title: "Terbaru di Cuci Laundry", description: "Lihat fitur baru dan catatan rilis terbaru.", link: "https://saas.daratlaut.com/changelog" },
+  { key: "latest", title: "Terbaru di Laundry Poin", description: "Lihat fitur baru dan catatan rilis terbaru.", link: "https://saas.daratlaut.com/changelog" },
   { key: "trial", title: "Perpanjang Masa Trial", description: "Hubungi tim sales untuk perpanjangan trial.", link: "https://saas.daratlaut.com/pricing" },
 ];
 

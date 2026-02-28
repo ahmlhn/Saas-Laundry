@@ -195,7 +195,7 @@ export function CustomerFormScreen() {
               </Pressable>
 
               <View style={styles.heroBrandWrap}>
-                <Text style={styles.brandText}>Cuci Laundry</Text>
+                <Text style={styles.brandText}>Laundry Poin</Text>
                 <Text style={styles.heroSubtitle}>Form Pelanggan</Text>
               </View>
 

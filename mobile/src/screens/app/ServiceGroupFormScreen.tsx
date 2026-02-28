@@ -3,11 +3,13 @@ import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/nativ
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useCallback, useMemo, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
+import { ServiceModuleHeader } from "../../components/services/ServiceModuleHeader";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { createService, updateService } from "../../features/services/serviceApi";
+import { formatServiceDuration } from "../../features/services/defaultDuration";
 import { listServiceProcessTags } from "../../features/services/serviceTagApi";
 import { hasAnyRole } from "../../lib/accessControl";
 import { getApiErrorMessage } from "../../lib/httpClient";
@@ -18,6 +20,21 @@ import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
 
 type ServiceGroupFormRoute = RouteProp<AccountStackParamList, "ServiceGroupForm">;
+
+function formatServiceTypeLabel(serviceType: string): string {
+  switch (serviceType) {
+    case "regular":
+      return "Reguler";
+    case "package":
+      return "Paket";
+    case "perfume":
+      return "Parfum";
+    case "item":
+      return "Item";
+    default:
+      return serviceType;
+  }
+}
 
 export function ServiceGroupFormScreen() {
   const theme = useAppTheme();
@@ -37,6 +54,7 @@ export function ServiceGroupFormScreen() {
   const isEdit = mode === "edit";
   const serviceType = route.params.serviceType;
   const group = route.params.group;
+  const variants = group?.children ?? [];
 
   const [nameInput, setNameInput] = useState(group?.name ?? "");
   const [active, setActive] = useState(group?.active ?? true);
@@ -45,6 +63,10 @@ export function ServiceGroupFormScreen() {
   const [loadingTags, setLoadingTags] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const liveGroupName = nameInput.trim() || group?.name || "Group layanan";
+  const headerSubtitle = isEdit
+    ? `${formatServiceTypeLabel(serviceType)} • ${variants.length} varian`
+    : `Group baru • ${formatServiceTypeLabel(serviceType)}`;
 
   const loadTags = useCallback(async () => {
     setLoadingTags(true);
@@ -74,7 +96,7 @@ export function ServiceGroupFormScreen() {
     });
   }
 
-  async function handleSave(): Promise<void> {
+  async function handleSave(nextAction: "back" | "addVariant" = "back"): Promise<void> {
     if (!canManage || saving) {
       return;
     }
@@ -89,30 +111,41 @@ export function ServiceGroupFormScreen() {
     setErrorMessage(null);
 
     try {
+      let savedGroup = group ?? null;
+
       if (isEdit && group) {
-        await updateService(group.id, {
+        savedGroup = await updateService(group.id, {
           name: trimmedName,
           serviceType,
           parentServiceId: null,
           isGroup: true,
           unitType: "pcs",
-          displayUnit: "satuan",
+          displayUnit: "pcs",
           basePriceAmount: group.base_price_amount,
           active,
           processTagIds: selectedTagIds,
         });
       } else {
-        await createService({
+        savedGroup = await createService({
           name: trimmedName,
           serviceType,
           parentServiceId: null,
           isGroup: true,
           unitType: "pcs",
-          displayUnit: "satuan",
+          displayUnit: "pcs",
           basePriceAmount: 0,
           active,
           processTagIds: selectedTagIds,
         });
+      }
+
+      if (nextAction === "addVariant" && savedGroup) {
+        navigation.navigate("ServiceVariantForm", {
+          mode: "create",
+          serviceType,
+          parentServiceId: savedGroup.id,
+        });
+        return;
       }
 
       navigation.goBack();
@@ -125,64 +158,127 @@ export function ServiceGroupFormScreen() {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
-      <AppScreen contentContainerStyle={styles.content} scroll>
-        <AppPanel style={styles.headerPanel}>
-          <View style={styles.headerRow}>
-            <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.backButton, pressed ? styles.backButtonPressed : null]}>
-              <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={18} />
-            </Pressable>
-            <Text style={styles.title}>{isEdit ? "Edit Group Layanan" : "Tambah Group Layanan"}</Text>
-            <View style={styles.spacer} />
-          </View>
-          <Text style={styles.subtitle}>Tipe: {serviceType.toUpperCase()}</Text>
-        </AppPanel>
+      <AppScreen contentContainerStyle={styles.screenShell}>
+        <View style={styles.screenBody}>
+          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <ServiceModuleHeader onBack={() => navigation.goBack()} title={isEdit ? liveGroupName : "Tambah Group Layanan"}>
+              <Text style={styles.subtitle}>{headerSubtitle}</Text>
+            </ServiceModuleHeader>
 
-        <AppPanel style={styles.formPanel}>
-          <Text style={styles.label}>Nama Group</Text>
-          <TextInput
-            editable={!saving && canManage}
-            onChangeText={setNameInput}
-            placeholder="Contoh: Bed Cover"
-            placeholderTextColor={theme.colors.textMuted}
-            style={styles.input}
-            value={nameInput}
-          />
+            <AppPanel style={styles.formPanel}>
+              <Text style={styles.label}>Nama Group</Text>
+              <TextInput
+                editable={!saving && canManage}
+                onChangeText={setNameInput}
+                placeholder="Contoh: Bed Cover"
+                placeholderTextColor={theme.colors.textMuted}
+                style={styles.input}
+                value={nameInput}
+              />
 
-          <Text style={styles.label}>Tag Proses</Text>
-          <View style={styles.tagWrap}>
-            {loadingTags ? <Text style={styles.helperText}>Memuat tag...</Text> : null}
-            {!loadingTags && tags.length === 0 ? <Text style={styles.helperText}>Belum ada tag proses aktif.</Text> : null}
-            {tags.map((tag) => {
-              const selected = selectedTagIds.includes(tag.id);
-              return (
-                <Pressable
-                  key={tag.id}
-                  onPress={() => toggleTag(tag.id)}
-                  style={[styles.tagChip, selected ? styles.tagChipActive : null, { borderColor: selected ? tag.color_hex : theme.colors.border }]}
-                >
-                  <View style={[styles.tagDot, { backgroundColor: tag.color_hex }]} />
-                  <Text style={[styles.tagText, selected ? styles.tagTextActive : null]}>{tag.name}</Text>
+              <Text style={styles.label}>Tag Proses</Text>
+              <View style={styles.tagWrap}>
+                {loadingTags ? <Text style={styles.helperText}>Memuat tag...</Text> : null}
+                {!loadingTags && tags.length === 0 ? <Text style={styles.helperText}>Belum ada tag proses aktif.</Text> : null}
+                {tags.map((tag) => {
+                  const selected = selectedTagIds.includes(tag.id);
+                  return (
+                    <Pressable
+                      key={tag.id}
+                      onPress={() => toggleTag(tag.id)}
+                      style={[styles.tagChip, selected ? styles.tagChipActive : null, { borderColor: selected ? tag.color_hex : theme.colors.border }]}
+                    >
+                      <View style={[styles.tagDot, { backgroundColor: tag.color_hex }]} />
+                      <Text style={[styles.tagText, selected ? styles.tagTextActive : null]}>{tag.name}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View style={styles.statusRow}>
+                <Text style={styles.label}>Status</Text>
+                <Pressable onPress={() => setActive((value) => !value)} style={[styles.statusChip, active ? styles.statusChipActive : null]}>
+                  <Text style={[styles.statusChipText, active ? styles.statusChipTextActive : null]}>{active ? "Aktif" : "Nonaktif"}</Text>
                 </Pressable>
-              );
-            })}
-          </View>
+              </View>
 
-          <View style={styles.statusRow}>
-            <Text style={styles.label}>Status</Text>
-            <Pressable onPress={() => setActive((value) => !value)} style={[styles.statusChip, active ? styles.statusChipActive : null]}>
-              <Text style={[styles.statusChipText, active ? styles.statusChipTextActive : null]}>{active ? "Aktif" : "Nonaktif"}</Text>
-            </Pressable>
-          </View>
-        </AppPanel>
+            <View style={styles.variantSection}>
+              <View style={styles.variantSectionHeader}>
+                <Text style={styles.label}>{isEdit ? "Varian dalam Group" : "Varian Group"}</Text>
+                <View style={styles.variantHeaderActions}>
+                  <Text style={styles.variantCount}>{variants.length} varian</Text>
+                  {canManage ? (
+                    <Pressable
+                      onPress={() => {
+                        if (group) {
+                          navigation.navigate("ServiceVariantForm", {
+                            mode: "create",
+                            serviceType,
+                            parentServiceId: group.id,
+                          });
+                          return;
+                        }
 
-        {errorMessage ? (
-          <View style={styles.errorWrap}>
-            <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
-            <Text style={styles.errorText}>{errorMessage}</Text>
-          </View>
-        ) : null}
+                        void handleSave("addVariant");
+                      }}
+                      style={({ pressed }) => [styles.addVariantButton, pressed ? styles.addVariantButtonPressed : null]}
+                    >
+                      <Ionicons color={theme.colors.info} name="add" size={16} />
+                      <Text style={styles.addVariantText}>Tambah Varian</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </View>
 
-        <AppButton disabled={!canManage || saving} loading={saving} onPress={() => void handleSave()} title={isEdit ? "Simpan Group" : "Buat Group"} />
+              {!isEdit ? (
+                <Text style={styles.helperText}>Simpan group lalu form varian akan langsung dibuka.</Text>
+              ) : variants.length === 0 ? (
+                <Text style={styles.helperText}>Belum ada varian pada group ini.</Text>
+              ) : (
+                <View style={styles.variantList}>
+                  {variants.map((variant) => (
+                    <Pressable
+                      key={variant.id}
+                      disabled={!canManage}
+                      onPress={() =>
+                        navigation.navigate("ServiceVariantForm", {
+                          mode: "edit",
+                          serviceType,
+                          variant,
+                          parentServiceId: group?.id ?? null,
+                        })
+                      }
+                      style={({ pressed }) => [styles.variantItem, canManage && pressed ? styles.variantItemPressed : null]}
+                    >
+                      <View style={styles.variantCopy}>
+                        <Text style={styles.variantName}>{variant.name}</Text>
+                        <Text style={styles.variantMeta}>
+                          {(variant.display_unit ?? "pcs").toUpperCase()} • {formatServiceDuration(variant.duration_days, variant.duration_hours)}
+                        </Text>
+                      </View>
+                      <View style={styles.variantRight}>
+                        <Text style={styles.variantPrice}>Rp {variant.effective_price_amount.toLocaleString("id-ID")}</Text>
+                        {canManage ? <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={16} /> : null}
+                      </View>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </View>
+            </AppPanel>
+
+            {errorMessage ? (
+              <View style={styles.errorWrap}>
+                <Ionicons color={theme.colors.danger} name="alert-circle-outline" size={16} />
+                <Text style={styles.errorText}>{errorMessage}</Text>
+              </View>
+            ) : null}
+          </ScrollView>
+
+          <View style={styles.footerDock}>
+            <AppButton disabled={!canManage || saving} loading={saving} onPress={() => void handleSave()} title={isEdit ? "Simpan Group" : "Buat Group"} />
+          </View>
+        </View>
       </AppScreen>
     </KeyboardAvoidingView>
   );
@@ -193,12 +289,26 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     flex: {
       flex: 1,
     },
+    screenShell: {
+      flex: 1,
+    },
+    screenBody: {
+      flex: 1,
+    },
     content: {
       flexGrow: 1,
       paddingHorizontal: isTablet ? theme.spacing.xl : theme.spacing.lg,
       paddingTop: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
-      paddingBottom: theme.spacing.xxl,
+      paddingBottom: 132,
       gap: theme.spacing.sm,
+    },
+    footerDock: {
+      paddingHorizontal: isTablet ? theme.spacing.xl : theme.spacing.lg,
+      paddingTop: theme.spacing.sm,
+      paddingBottom: theme.spacing.lg,
+      backgroundColor: theme.colors.background,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
     },
     headerPanel: {
       backgroundColor: theme.mode === "dark" ? "#12304a" : "#f7f9fb",
@@ -268,6 +378,88 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
+    },
+    variantSection: {
+      gap: theme.spacing.xs,
+      paddingTop: theme.spacing.xs,
+    },
+    variantSectionHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
+    },
+    variantHeaderActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    variantCount: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+    },
+    addVariantButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      minHeight: 32,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 10,
+    },
+    addVariantButtonPressed: {
+      opacity: 0.84,
+    },
+    addVariantText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+    },
+    variantList: {
+      gap: 8,
+    },
+    variantItem: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    variantItemPressed: {
+      opacity: 0.84,
+    },
+    variantCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    variantName: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 14,
+      lineHeight: 20,
+    },
+    variantMeta: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    variantRight: {
+      alignItems: "flex-end",
+      gap: 2,
+    },
+    variantPrice: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.bold,
+      fontSize: 13,
     },
     tagChip: {
       flexDirection: "row",

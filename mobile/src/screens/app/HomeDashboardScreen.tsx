@@ -3,6 +3,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { BrandMark } from "../../components/branding/BrandMark";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { StatusPill } from "../../components/ui/StatusPill";
@@ -255,10 +256,10 @@ export function HomeDashboardScreen() {
           <View style={styles.heroTopRow}>
             <View style={styles.brandWrap}>
               <View style={styles.brandBadge}>
-                <Ionicons color="#ffffff" name="water-outline" size={18} />
+                <BrandMark size={isCompactLandscape ? 34 : 38} />
               </View>
               <View style={styles.brandTextWrap}>
-                <Text style={styles.brandTitle}>Cuci Laundry</Text>
+                <Text style={styles.brandTitle}>Laundry Poin</Text>
                 <Text style={styles.brandSubtitle}>OPERASIONAL HARI INI</Text>
               </View>
             </View>
@@ -474,14 +475,8 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
       minWidth: 0,
     },
     brandBadge: {
-      width: isCompactLandscape ? 34 : 38,
-      height: isCompactLandscape ? 34 : 38,
-      borderRadius: isCompactLandscape ? 17 : 19,
-      borderWidth: 1,
-      borderColor: "rgba(255,255,255,0.74)",
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: "rgba(255,255,255,0.16)",
     },
     brandTextWrap: {
       gap: 1,

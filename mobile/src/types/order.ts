@@ -12,6 +12,7 @@ export interface OrderCourier {
 export interface OrderItemServiceDetail {
   id: string;
   duration_days: number | null;
+  duration_hours: number | null;
   service_type?: string | null;
 }
 
@@ -67,6 +68,7 @@ export interface OrderDetail extends OrderSummary {
   notes?: string | null;
   estimated_completion_at?: string | null;
   estimated_completion_duration_days?: number | null;
+  estimated_completion_duration_hours?: number | null;
   estimated_completion_is_late?: boolean;
   pickup?: Record<string, unknown> | null;
   delivery?: Record<string, unknown> | null;

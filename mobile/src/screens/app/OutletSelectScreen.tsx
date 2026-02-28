@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
+import { BrandMark } from "../../components/branding/BrandMark";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
@@ -82,10 +83,10 @@ export function OutletSelectScreen() {
         <View style={styles.heroContent}>
           <View style={styles.brandRow}>
             <View style={styles.brandBadge}>
-              <Text style={styles.brandBadgeText}>CL</Text>
+              <BrandMark size={50} />
             </View>
             <View style={styles.brandTextWrap}>
-              <Text style={styles.brandTitle}>Cuci Laundry</Text>
+              <Text style={styles.brandTitle}>Laundry Poin</Text>
               <Text style={styles.brandSubTitle}>Pilih outlet aktif</Text>
             </View>
           </View>
@@ -238,20 +239,8 @@ function createStyles(theme: AppTheme) {
       gap: theme.spacing.sm,
     },
     brandBadge: {
-      width: 50,
-      height: 50,
-      borderRadius: 26,
-      borderWidth: 2,
-      borderColor: "rgba(255,255,255,0.95)",
-      backgroundColor: "rgba(10, 81, 166, 0.43)",
       alignItems: "center",
       justifyContent: "center",
-    },
-    brandBadgeText: {
-      color: "#ffffff",
-      fontFamily: theme.fonts.heavy,
-      fontSize: 18,
-      letterSpacing: 0.6,
     },
     brandTextWrap: {
       gap: 1,

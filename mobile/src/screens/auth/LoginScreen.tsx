@@ -18,6 +18,7 @@ import {
   View,
   type ScrollView,
 } from "react-native";
+import { BrandMark } from "../../components/branding/BrandMark";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppPanel } from "../../components/ui/AppPanel";
 import {
@@ -428,11 +429,10 @@ export function LoginScreen() {
           <View style={styles.heroContent}>
             <View style={styles.brandRow}>
               <View style={styles.brandMarkWrap}>
-                <View style={styles.brandMarkBubble} />
-                <Text style={styles.brandMarkText}>CL</Text>
+                <BrandMark size={58} />
               </View>
               <View style={styles.brandTextWrap}>
-                <Text style={styles.brandTitle}>Cuci Laundry</Text>
+                <Text style={styles.brandTitle}>Laundry Poin</Text>
                 <Text style={styles.brandSubtitle}>Operasional Mobile</Text>
               </View>
             </View>
@@ -745,30 +745,8 @@ function createStyles(theme: AppTheme, layout: LoginLayoutMode) {
       marginBottom: 3,
     },
     brandMarkWrap: {
-      width: 58,
-      height: 58,
-      borderRadius: 30,
-      borderWidth: 2,
-      borderColor: "rgba(255,255,255,0.9)",
       alignItems: "center",
       justifyContent: "center",
-      overflow: "hidden",
-      backgroundColor: "rgba(11, 81, 178, 0.45)",
-    },
-    brandMarkBubble: {
-      position: "absolute",
-      bottom: -16,
-      width: 52,
-      height: 31,
-      borderRadius: 16,
-      backgroundColor: "#ffd45c",
-      opacity: 0.95,
-    },
-    brandMarkText: {
-      color: "#ffffff",
-      fontFamily: theme.fonts.heavy,
-      fontSize: 18,
-      letterSpacing: 0.3,
     },
     brandTextWrap: {
       gap: 2,

@@ -65,7 +65,7 @@ export function AppScreen({
           onScroll={onScroll}
           ref={scrollRef}
           scrollEventThrottle={scrollEventThrottle}
-          style={[styles.flex, style]}
+          style={[styles.flex, styles.contentLayer, style]}
           showsVerticalScrollIndicator={false}
         >
           {children}
@@ -75,6 +75,7 @@ export function AppScreen({
           style={[
             styles.flex,
             styles.fixedContent,
+            styles.contentLayer,
             { maxWidth: maxContentWidth },
             style,
             contentContainerStyle,
@@ -101,6 +102,11 @@ const styles = StyleSheet.create({
   fixedContent: {
     width: "100%",
     alignSelf: "center",
+  },
+  contentLayer: {
+    position: "relative",
+    zIndex: 1,
+    elevation: 1,
   },
   backdropLayer: {
     ...StyleSheet.absoluteFillObject,

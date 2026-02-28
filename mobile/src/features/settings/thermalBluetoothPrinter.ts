@@ -9,6 +9,18 @@ interface ThermalPrinterModule {
     getDeviceList(): Promise<unknown[]>;
     connectPrinter(inner_mac_address: string): Promise<unknown>;
     closeConn(): Promise<void>;
+    printImage(
+      imgUrl: string,
+      opts?: {
+        beep?: boolean;
+        cut?: boolean;
+        tailingLine?: boolean;
+        encoding?: string;
+        imageWidth?: number;
+        imageHeight?: number;
+        onError?: (error: Error) => void;
+      },
+    ): void;
     printBill(
       text: string,
       opts?: {
@@ -171,6 +183,29 @@ export async function connectBluetoothThermalPrinter(address: string): Promise<B
   return mapped[0];
 }
 
+export async function checkBluetoothThermalPrinterConnection(address: string): Promise<boolean> {
+  const sanitizedAddress = normalizePrinterAddress(address);
+  if (!sanitizedAddress) {
+    throw new Error("Printer belum dipilih.");
+  }
+
+  const module = await getBlePrinterModuleOrThrow();
+  await module.BLEPrinter.init();
+
+  try {
+    await module.BLEPrinter.connectPrinter(sanitizedAddress);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    try {
+      await module.BLEPrinter.closeConn();
+    } catch {
+      // Ignore close errors, we only need the reachability result.
+    }
+  }
+}
+
 function buildDivider(paperWidth: PrinterLocalSettings["paperWidth"] | undefined): string {
   return paperWidth === "80mm" ? "------------------------------------------------" : "--------------------------------";
 }
@@ -207,6 +242,85 @@ export async function printBluetoothThermalTest(address: string, title?: string,
   ];
 
   module.BLEPrinter.printBill(lines.join("\n"), {
+    beep: false,
+    cut: settings?.autoCut === true,
+    tailingLine: true,
+  });
+}
+
+function resolveLogoPrintWidth(paperWidth: PrinterLocalSettings["paperWidth"] | undefined): number {
+  return paperWidth === "80mm" ? 420 : 280;
+}
+
+async function printBluetoothThermalLogoIfAny(
+  module: ThermalPrinterModule,
+  logoUrl: string | null | undefined,
+  settings?: PrinterLocalSettings,
+): Promise<void> {
+  const normalizedLogoUrl = typeof logoUrl === "string" ? logoUrl.trim() : "";
+  if (!normalizedLogoUrl) {
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+
+    const finishResolve = () => {
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    };
+
+    const finishReject = (error: Error) => {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    };
+
+    try {
+      module.BLEPrinter.printImage(normalizedLogoUrl, {
+        beep: false,
+        cut: false,
+        tailingLine: false,
+        imageWidth: resolveLogoPrintWidth(settings?.paperWidth),
+        imageHeight: 0,
+        onError: (error) => finishReject(error),
+      });
+      setTimeout(finishResolve, 500);
+    } catch (error) {
+      finishReject(error instanceof Error ? error : new Error("Gagal mencetak logo nota."));
+    }
+  });
+}
+
+export async function printBluetoothThermalReceipt(
+  address: string,
+  text: string,
+  settings?: PrinterLocalSettings,
+  logoUrl?: string | null,
+): Promise<void> {
+  const sanitizedAddress = normalizePrinterAddress(address);
+  if (!sanitizedAddress) {
+    throw new Error("Printer belum dipilih.");
+  }
+
+  const receiptText = typeof text === "string" ? text.trim() : "";
+  if (!receiptText) {
+    throw new Error("Isi nota kosong.");
+  }
+
+  const module = await getBlePrinterModuleOrThrow();
+  await module.BLEPrinter.init();
+  await module.BLEPrinter.connectPrinter(sanitizedAddress);
+  try {
+    await printBluetoothThermalLogoIfAny(module, logoUrl, settings);
+  } catch {
+    // Some printers fail on bitmap/logo printing. Continue with text receipt.
+  }
+
+  module.BLEPrinter.printBill(receiptText, {
     beep: false,
     cut: settings?.autoCut === true,
     tailingLine: true,

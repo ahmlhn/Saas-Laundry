@@ -272,7 +272,7 @@ export function CustomersScreen() {
                   </Pressable>
 
                   <View style={styles.heroBrandWrap}>
-                    <Text style={styles.brandText}>Cuci Laundry</Text>
+                    <Text style={styles.brandText}>Laundry Poin</Text>
                     <Text style={styles.heroSubtitle}>Pelanggan</Text>
                   </View>
 

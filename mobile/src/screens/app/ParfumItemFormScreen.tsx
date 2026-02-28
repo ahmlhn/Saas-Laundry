@@ -5,10 +5,19 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useMemo, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
+import { ServiceModuleHeader } from "../../components/services/ServiceModuleHeader";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
+import { StatusPill } from "../../components/ui/StatusPill";
 import { createService, updateService } from "../../features/services/serviceApi";
-import { getDefaultDurationDays } from "../../features/services/defaultDuration";
+import {
+  formatServiceDuration,
+  getDefaultDurationDays,
+  getDefaultDurationUnit,
+  resolveDurationPartsFromValue,
+  resolveDurationValueAndUnit,
+  type ServiceDurationUnit,
+} from "../../features/services/defaultDuration";
 import { hasAnyRole } from "../../lib/accessControl";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AccountStackParamList } from "../../navigation/types";
@@ -21,6 +30,22 @@ type ParfumItemFormRoute = RouteProp<AccountStackParamList, "ParfumItemForm">;
 
 function normalizeDigits(value: string): string {
   return value.replace(/[^\d]/g, "");
+}
+
+function resolveTypeLabel(serviceType: "perfume" | "item"): string {
+  return serviceType === "perfume" ? "Parfum" : "Item";
+}
+
+function resolveUnitTypeFromDisplayUnit(displayUnit: ServiceDisplayUnit): "kg" | "pcs" | "meter" {
+  if (displayUnit === "kg") {
+    return "kg";
+  }
+
+  if (displayUnit === "meter") {
+    return "meter";
+  }
+
+  return "pcs";
 }
 
 export function ParfumItemFormScreen() {
@@ -42,16 +67,25 @@ export function ParfumItemFormScreen() {
   const serviceType = route.params.serviceType;
   const item = route.params.item;
   const defaultDurationDays = getDefaultDurationDays(serviceType);
+  const defaultDuration = resolveDurationValueAndUnit(item?.duration_days, item?.duration_hours, serviceType);
 
   const [nameInput, setNameInput] = useState(item?.name ?? "");
   const [basePriceInput, setBasePriceInput] = useState(item ? String(item.base_price_amount) : "");
-  const [durationInput, setDurationInput] = useState(item?.duration_days ? String(item.duration_days) : String(defaultDurationDays));
+  const [durationInput, setDurationInput] = useState(String(defaultDuration.value));
+  const [durationUnit, setDurationUnit] = useState<ServiceDurationUnit>(defaultDuration.unit ?? getDefaultDurationUnit(serviceType));
   const [displayUnit, setDisplayUnit] = useState<ServiceDisplayUnit>(
-    item?.display_unit === "kg" || item?.display_unit === "pcs" || item?.display_unit === "satuan" ? item.display_unit : "satuan"
+    item?.display_unit === "kg" || item?.display_unit === "pcs" || item?.display_unit === "meter"
+      ? item.display_unit
+      : item?.unit_type === "kg"
+        ? "kg"
+        : item?.unit_type === "meter"
+          ? "meter"
+          : "pcs"
   );
   const [active, setActive] = useState(item?.active ?? true);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const defaultDurationLabel = formatServiceDuration(defaultDuration.unit === "day" ? defaultDuration.value : 0, defaultDuration.unit === "hour" ? defaultDuration.value : 0);
 
   async function handleSave(): Promise<void> {
     if (!canManage || saving) {
@@ -70,26 +104,34 @@ export function ParfumItemFormScreen() {
       return;
     }
 
-    const parsedDuration = durationInput.trim() === "" ? null : Number.parseInt(durationInput, 10);
-    if (parsedDuration !== null && (!Number.isFinite(parsedDuration) || parsedDuration <= 0)) {
-      setErrorMessage("Durasi hari tidak valid.");
+    const parsedDurationValue = durationInput.trim() === "" ? null : Number.parseInt(durationInput, 10);
+    if (parsedDurationValue === null || !Number.isFinite(parsedDurationValue) || parsedDurationValue <= 0) {
+      setErrorMessage("Durasi layanan tidak valid.");
       return;
     }
+    if (durationUnit === "hour" && parsedDurationValue > 23) {
+      setErrorMessage("Durasi jam maksimal 23 jam.");
+      return;
+    }
+    const resolvedDuration = resolveDurationPartsFromValue(parsedDurationValue, durationUnit);
 
     setSaving(true);
     setErrorMessage(null);
 
     try {
+      const unitType = resolveUnitTypeFromDisplayUnit(displayUnit);
+
       if (isEdit && item) {
         await updateService(item.id, {
           name: trimmedName,
           serviceType,
           parentServiceId: null,
           isGroup: false,
-          unitType: "pcs",
+          unitType,
           displayUnit,
           basePriceAmount: parsedPrice,
-          durationDays: parsedDuration,
+          durationDays: resolvedDuration.durationDays,
+          durationHours: resolvedDuration.durationHours,
           active,
         });
       } else {
@@ -98,10 +140,11 @@ export function ParfumItemFormScreen() {
           serviceType,
           parentServiceId: null,
           isGroup: false,
-          unitType: "pcs",
+          unitType,
           displayUnit,
           basePriceAmount: parsedPrice,
-          durationDays: parsedDuration,
+          durationDays: resolvedDuration.durationDays,
+          durationHours: resolvedDuration.durationHours,
           active,
         });
       }
@@ -117,65 +160,110 @@ export function ParfumItemFormScreen() {
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
       <AppScreen contentContainerStyle={styles.content} scroll>
-        <AppPanel style={styles.headerPanel}>
-          <View style={styles.headerRow}>
-            <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.backButton, pressed ? styles.backButtonPressed : null]}>
-              <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={18} />
-            </Pressable>
-            <Text style={styles.title}>{isEdit ? "Edit Data" : "Tambah Data"}</Text>
-            <View style={styles.spacer} />
+        <ServiceModuleHeader onBack={() => navigation.goBack()} title={isEdit ? "Edit Data" : "Tambah Data"}>
+          <View style={styles.headerMetaRow}>
+            <StatusPill label={resolveTypeLabel(serviceType)} tone={serviceType === "perfume" ? "info" : "warning"} />
+            <StatusPill label={active ? "Aktif" : "Nonaktif"} tone={active ? "success" : "warning"} />
           </View>
-          <Text style={styles.subtitle}>{serviceType === "perfume" ? "PARFUM" : "ITEM"}</Text>
+        </ServiceModuleHeader>
+
+        <AppPanel style={styles.panel}>
+          <View style={styles.panelHeader}>
+            <Text style={styles.panelEyebrow}>Identitas</Text>
+            <Text style={styles.panelTitle}>Data inti</Text>
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Nama</Text>
+            <TextInput
+              editable={!saving && canManage}
+              onChangeText={setNameInput}
+              placeholder={serviceType === "perfume" ? "Contoh: Parfum Mawar" : "Contoh: Kemeja Panjang"}
+              placeholderTextColor={theme.colors.textMuted}
+              style={styles.input}
+              value={nameInput}
+            />
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Satuan Hitung</Text>
+            <View style={styles.segmentRow}>
+              {(["kg", "pcs", "meter"] as const).map((unit) => {
+                const selected = displayUnit === unit;
+                return (
+                  <Pressable key={unit} onPress={() => setDisplayUnit(unit)} style={[styles.segmentChip, selected ? styles.segmentChipActive : null]}>
+                    <Text style={[styles.segmentText, selected ? styles.segmentTextActive : null]}>{unit.toUpperCase()}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
         </AppPanel>
 
-        <AppPanel style={styles.formPanel}>
-          <Text style={styles.label}>Nama</Text>
-          <TextInput
-            editable={!saving && canManage}
-            onChangeText={setNameInput}
-            placeholder={serviceType === "perfume" ? "Contoh: Parfum Mawar" : "Contoh: Kemeja Panjang"}
-            placeholderTextColor={theme.colors.textMuted}
-            style={styles.input}
-            value={nameInput}
-          />
+        <AppPanel style={styles.panel}>
+          <View style={styles.panelHeader}>
+            <Text style={styles.panelEyebrow}>Harga & Durasi</Text>
+            <Text style={styles.panelTitle}>Nilai data</Text>
+          </View>
 
-          <Text style={styles.label}>Harga</Text>
-          <TextInput
-            editable={!saving && canManage}
-            keyboardType="number-pad"
-            onChangeText={(text) => setBasePriceInput(normalizeDigits(text))}
-            placeholder="Contoh: 5000"
-            placeholderTextColor={theme.colors.textMuted}
-            style={styles.input}
-            value={basePriceInput}
-          />
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Harga</Text>
+            <TextInput
+              editable={!saving && canManage}
+              keyboardType="number-pad"
+              onChangeText={(text) => setBasePriceInput(normalizeDigits(text))}
+              placeholder="Contoh: 5000"
+              placeholderTextColor={theme.colors.textMuted}
+              style={styles.input}
+              value={basePriceInput}
+            />
+          </View>
 
-          <Text style={styles.label}>Durasi (hari)</Text>
-          <TextInput
-            editable={!saving && canManage}
-            keyboardType="number-pad"
-            onChangeText={(text) => setDurationInput(normalizeDigits(text))}
-            placeholder={`Contoh: ${defaultDurationDays}`}
-            placeholderTextColor={theme.colors.textMuted}
-            style={styles.input}
-            value={durationInput}
-          />
-          <Text style={styles.fieldHint}>Default otomatis {defaultDurationDays} hari, tetap bisa diubah oleh admin.</Text>
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Durasi Layanan</Text>
+            <View style={styles.durationRow}>
+              <View style={styles.durationField}>
+                <TextInput
+                  editable={!saving && canManage}
+                  keyboardType="number-pad"
+                  onChangeText={(text) => setDurationInput(normalizeDigits(text))}
+                  placeholder={`Contoh: ${defaultDuration.value}`}
+                  placeholderTextColor={theme.colors.textMuted}
+                  style={styles.input}
+                  value={durationInput}
+                />
+              </View>
+              <View style={styles.durationUnitRow}>
+                {([
+                  { label: "Hari", value: "day" },
+                  { label: "Jam", value: "hour" },
+                ] as const).map((option) => {
+                  const selected = durationUnit === option.value;
+                  return (
+                    <Pressable key={option.value} onPress={() => setDurationUnit(option.value)} style={[styles.segmentChip, selected ? styles.segmentChipActive : null]}>
+                      <Text style={[styles.segmentText, selected ? styles.segmentTextActive : null]}>{option.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+            <Text style={styles.fieldHint}>
+              Default otomatis {defaultDurationLabel} dan tetap bisa disesuaikan oleh admin.
+            </Text>
+          </View>
+        </AppPanel>
 
-          <Text style={styles.label}>Satuan Tampil</Text>
-          <View style={styles.segmentRow}>
-            {(["satuan", "pcs", "kg"] as const).map((unit) => {
-              const selected = displayUnit === unit;
-              return (
-                <Pressable key={unit} onPress={() => setDisplayUnit(unit)} style={[styles.segmentChip, selected ? styles.segmentChipActive : null]}>
-                  <Text style={[styles.segmentText, selected ? styles.segmentTextActive : null]}>{unit.toUpperCase()}</Text>
-                </Pressable>
-              );
-            })}
+        <AppPanel style={styles.panel}>
+          <View style={styles.panelHeader}>
+            <Text style={styles.panelEyebrow}>Status</Text>
+            <Text style={styles.panelTitle}>Ketersediaan data</Text>
           </View>
 
           <View style={styles.statusRow}>
-            <Text style={styles.label}>Status</Text>
+            <View style={styles.statusCopy}>
+              <Text style={styles.label}>Status</Text>
+              <Text style={styles.fieldHint}>Data nonaktif tetap tersimpan, tetapi tidak muncul sebagai pilihan utama di transaksi.</Text>
+            </View>
             <Pressable onPress={() => setActive((value) => !value)} style={[styles.statusChip, active ? styles.statusChipActive : null]}>
               <Text style={[styles.statusText, active ? styles.statusTextActive : null]}>{active ? "Aktif" : "Nonaktif"}</Text>
             </Pressable>
@@ -189,7 +277,10 @@ export function ParfumItemFormScreen() {
           </View>
         ) : null}
 
-        <AppButton disabled={!canManage || saving} loading={saving} onPress={() => void handleSave()} title={isEdit ? "Simpan Data" : "Tambah Data"} />
+        <AppPanel style={styles.savePanel}>
+          <Text style={styles.saveHint}>Pastikan nama, harga, dan satuan hitung sudah benar sebelum menyimpan.</Text>
+          <AppButton disabled={!canManage || saving} loading={saving} onPress={() => void handleSave()} title={isEdit ? "Simpan Data" : "Tambah Data"} />
+        </AppPanel>
       </AppScreen>
     </KeyboardAvoidingView>
   );
@@ -207,48 +298,130 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       paddingBottom: theme.spacing.xxl,
       gap: theme.spacing.sm,
     },
-    headerPanel: {
-      backgroundColor: theme.mode === "dark" ? "#12304a" : "#f7f9fb",
+    headerMetaRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
       gap: theme.spacing.xs,
     },
-    headerRow: {
+    heroShell: {
+      position: "relative",
+      overflow: "hidden",
+      borderRadius: isTablet ? 30 : 26,
+      borderWidth: 1,
+      borderColor: "rgba(120, 212, 236, 0.34)",
+      backgroundColor: "#0d66bf",
+      minHeight: isTablet ? 232 : 220,
+    },
+    heroLayerPrimary: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: "#0d66bf",
+    },
+    heroLayerSecondary: {
+      position: "absolute",
+      top: 0,
+      right: -36,
+      bottom: 0,
+      width: "68%",
+      backgroundColor: "#19b6dc",
+      opacity: 0.62,
+    },
+    heroGlowLarge: {
+      position: "absolute",
+      top: -96,
+      right: -86,
+      width: 248,
+      height: 248,
+      borderRadius: 140,
+      borderWidth: 36,
+      borderColor: "rgba(255,255,255,0.1)",
+    },
+    heroGlowSmall: {
+      position: "absolute",
+      left: -72,
+      bottom: -124,
+      width: 208,
+      height: 208,
+      borderRadius: 120,
+      backgroundColor: "rgba(255,255,255,0.1)",
+    },
+    heroContent: {
+      paddingHorizontal: theme.spacing.lg,
+      paddingVertical: isCompactLandscape ? theme.spacing.md : theme.spacing.lg,
+      gap: theme.spacing.xs,
+    },
+    heroTopRow: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
       gap: theme.spacing.sm,
     },
-    backButton: {
-      width: 36,
-      height: 36,
-      borderRadius: theme.radii.pill,
+    heroIconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
       borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.surface,
+      borderColor: "rgba(255,255,255,0.25)",
+      backgroundColor: "rgba(255,255,255,0.12)",
       alignItems: "center",
       justifyContent: "center",
     },
-    backButtonPressed: {
+    heroIconButtonPressed: {
       opacity: 0.82,
     },
-    spacer: {
-      width: 36,
-      height: 36,
-    },
-    title: {
+    heroCenterWrap: {
       flex: 1,
-      textAlign: "center",
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.heavy,
-      fontSize: isTablet ? 23 : 21,
+      alignItems: "center",
+      gap: 6,
     },
-    subtitle: {
-      color: theme.colors.textSecondary,
+    heroSpacer: {
+      width: 40,
+      height: 40,
+    },
+    heroTitle: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.heavy,
+      fontSize: isTablet ? 28 : 23,
+      lineHeight: isTablet ? 34 : 28,
+      textAlign: "center",
+    },
+    heroMetaRow: {
+      marginTop: 6,
+      flexDirection: "row",
+      flexWrap: "wrap",
+      justifyContent: "center",
+      gap: theme.spacing.xs,
+    },
+    heroHint: {
+      color: "rgba(231,246,255,0.9)",
       fontFamily: theme.fonts.medium,
       fontSize: 12.5,
+      lineHeight: 18,
       textAlign: "center",
     },
-    formPanel: {
-      gap: theme.spacing.xs,
+    panel: {
+      gap: theme.spacing.sm,
+      borderRadius: theme.radii.xl,
+      borderColor: theme.colors.borderStrong,
+      backgroundColor: theme.colors.surface,
+    },
+    panelHeader: {
+      gap: 2,
+    },
+    panelEyebrow: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 10,
+      letterSpacing: 1,
+      textTransform: "uppercase",
+    },
+    panelTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 17,
+      lineHeight: 22,
+    },
+    fieldGroup: {
+      gap: 7,
     },
     label: {
       color: theme.colors.textPrimary,
@@ -264,13 +437,28 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     input: {
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
-      borderRadius: theme.radii.md,
+      borderRadius: theme.radii.lg,
       backgroundColor: theme.colors.inputBg,
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.medium,
       fontSize: 14,
       paddingHorizontal: 12,
-      paddingVertical: 10,
+      paddingVertical: 12,
+    },
+    durationRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 8,
+    },
+    durationField: {
+      flex: 1,
+      gap: 6,
+    },
+    durationUnitRow: {
+      flex: 1,
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
     },
     segmentRow: {
       flexDirection: "row",
@@ -281,9 +469,11 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.surface,
+      backgroundColor: theme.colors.surfaceSoft,
       paddingHorizontal: 12,
-      paddingVertical: 8,
+      paddingVertical: 10,
+      minWidth: 82,
+      alignItems: "center",
     },
     segmentChipActive: {
       borderColor: theme.colors.info,
@@ -300,16 +490,21 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     statusRow: {
       flexDirection: "row",
       alignItems: "center",
-      justifyContent: "space-between",
       gap: theme.spacing.sm,
+    },
+    statusCopy: {
+      flex: 1,
+      gap: 3,
     },
     statusChip: {
       borderWidth: 1,
       borderColor: theme.colors.border,
       borderRadius: theme.radii.pill,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      backgroundColor: theme.colors.surfaceSoft,
+      minWidth: 98,
+      alignItems: "center",
     },
     statusChipActive: {
       borderColor: theme.colors.success,
@@ -337,6 +532,17 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     errorText: {
       flex: 1,
       color: theme.colors.danger,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 18,
+    },
+    savePanel: {
+      gap: theme.spacing.xs,
+      borderRadius: theme.radii.xl,
+      borderColor: theme.colors.borderStrong,
+    },
+    saveHint: {
+      color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 18,

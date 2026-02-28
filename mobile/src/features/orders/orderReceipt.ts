@@ -1,5 +1,6 @@
 import type { OrderDetail, OrderItemDetail } from "../../types/order";
 import type { PrinterPaperWidth } from "../../types/printerLocalSettings";
+import type { PrinterNoteSettings } from "../../types/printerNote";
 import { formatStatusLabel } from "./orderStatus";
 
 export type OrderReceiptKind = "production" | "customer";
@@ -9,6 +10,7 @@ interface BuildOrderReceiptParams {
   order: OrderDetail;
   outletLabel?: string;
   paperWidth?: PrinterPaperWidth;
+  noteSettings?: PrinterNoteSettings | null;
 }
 
 const moneyFormatter = new Intl.NumberFormat("id-ID");
@@ -134,19 +136,45 @@ function resolveSelectedPerfumeLabel(order: OrderDetail): string | null {
   return perfumeNames.join(", ");
 }
 
+function resolveReceiptProfileName(noteSettings: PrinterNoteSettings | null | undefined, outletLabel?: string): string {
+  return noteSettings?.profileName.trim() || outletLabel?.trim() || "Laundry";
+}
+
+function resolveReceiptDescription(noteSettings: PrinterNoteSettings | null | undefined): string {
+  return noteSettings?.descriptionLine.trim() || "";
+}
+
+function resolveReceiptPhone(noteSettings: PrinterNoteSettings | null | undefined): string {
+  return noteSettings?.phone.trim() || "";
+}
+
+function resolveReceiptFooter(noteSettings: PrinterNoteSettings | null | undefined, fallback: string): string {
+  return noteSettings?.footerNote.trim() || fallback;
+}
+
 export function buildOrderReceiptText(params: BuildOrderReceiptParams): string {
-  const { kind, order, outletLabel, paperWidth } = params;
+  const { kind, order, outletLabel, paperWidth, noteSettings } = params;
   const reference = resolveOrderRef(order);
   const customerName = order.customer?.name ?? "-";
   const customerPhone = order.customer?.phone_normalized ?? "-";
   const itemSubTotal = resolveItemSubTotal(order);
   const selectedPerfume = resolveSelectedPerfumeLabel(order);
   const { divider, labelWidth } = resolveReceiptLayout(paperWidth);
+  const profileName = resolveReceiptProfileName(noteSettings, outletLabel);
+  const descriptionLine = resolveReceiptDescription(noteSettings);
+  const outletPhone = resolveReceiptPhone(noteSettings);
+  const customerReceiptEnabled = noteSettings?.showCustomerReceipt !== false;
   const lines: string[] = [];
 
   if (kind === "production") {
     lines.push(centerReceiptLine("(Nota Produksi)", divider.length));
-    lines.push(centerReceiptLine(outletLabel || "Laundry", divider.length));
+    lines.push(centerReceiptLine(profileName, divider.length));
+    if (descriptionLine) {
+      lines.push(centerReceiptLine(descriptionLine, divider.length));
+    }
+    if (outletPhone) {
+      lines.push(centerReceiptLine(`Telp. ${outletPhone}`, divider.length));
+    }
     lines.push(centerReceiptLine(reference, divider.length));
     lines.push(centerReceiptLine(customerName, divider.length));
     lines.push(centerReceiptLine("Sisa Pembayaran", divider.length));
@@ -168,21 +196,31 @@ export function buildOrderReceiptText(params: BuildOrderReceiptParams): string {
       lines.push(buildKeyValueLine("Catatan", order.notes.trim(), labelWidth));
     }
     lines.push(divider);
-    lines.push("Internal produksi. Tanpa informasi harga.");
+    lines.push(centerReceiptLine(resolveReceiptFooter(noteSettings, "Internal produksi. Tanpa informasi harga."), divider.length));
     return lines.join("\n");
   }
 
-  lines.push("NOTA KONSUMEN LAUNDRY");
+  lines.push(centerReceiptLine(profileName, divider.length));
+  if (descriptionLine) {
+    lines.push(centerReceiptLine(descriptionLine, divider.length));
+  }
+  if (outletPhone) {
+    lines.push(centerReceiptLine(`Telp. ${outletPhone}`, divider.length));
+  }
   lines.push(divider);
-  lines.push(buildKeyValueLine("Ref", reference, labelWidth));
-  lines.push(buildKeyValueLine("Order Code", order.order_code, labelWidth));
+  lines.push(buildKeyValueLine("Nomor Nota", reference, labelWidth));
   lines.push(buildKeyValueLine("Tanggal", formatDateTime(order.created_at), labelWidth));
   lines.push(buildKeyValueLine("Pelanggan", customerName, labelWidth));
   lines.push(buildKeyValueLine("Telepon", customerPhone, labelWidth));
-  if (outletLabel) {
-    lines.push(buildKeyValueLine("Outlet", outletLabel, labelWidth));
-  }
   lines.push("");
+
+  if (!customerReceiptEnabled) {
+    lines.push("Nota pelanggan dinonaktifkan.");
+    lines.push(divider);
+    lines.push(resolveReceiptFooter(noteSettings, "Terima kasih sudah mempercayakan laundry Anda."));
+    return lines.join("\n");
+  }
+
   lines.push("ITEM LAYANAN");
   lines.push(divider);
   lines.push(...buildCustomerLines(order));
@@ -203,7 +241,7 @@ export function buildOrderReceiptText(params: BuildOrderReceiptParams): string {
     lines.push(buildKeyValueLine("Catatan", order.notes.trim(), labelWidth));
   }
   lines.push(divider);
-  lines.push("Terima kasih sudah mempercayakan laundry Anda.");
+  lines.push(resolveReceiptFooter(noteSettings, "Terima kasih sudah mempercayakan laundry Anda."));
 
   return lines.join("\n");
 }

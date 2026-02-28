@@ -222,8 +222,14 @@ export async function addOrderPayment(payload: AddOrderPaymentPayload): Promise<
     notes: payload.notes?.trim() || undefined,
   });
 
+  const fallbackOrder = response.data.order ?? null;
   invalidateCache("orders:list:");
-  return response.data.order ?? null;
+
+  try {
+    return await getOrderDetail(payload.orderId);
+  } catch {
+    return fallbackOrder;
+  }
 }
 
 export async function createOrderQrisIntent(payload: { orderId: string; amount?: number }): Promise<OrderQrisIntentResult> {
