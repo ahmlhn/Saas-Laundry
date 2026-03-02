@@ -23,7 +23,7 @@ const HELP_ITEMS: HelpItem[] = [
   { key: "reset", title: "Reset Data", description: "Reset cache sinkronisasi lokal perangkat." },
   { key: "clear-cache", title: "Hapus Cache", description: "Bersihkan data cache untuk muat ulang API." },
   { key: "check-update", title: "Cek Update", description: "Periksa versi app terbaru untuk tenant kamu.", link: "https://saas.daratlaut.com/mobile/latest" },
-  { key: "latest", title: "Terbaru di Laundry Poin", description: "Lihat fitur baru dan catatan rilis terbaru.", link: "https://saas.daratlaut.com/changelog" },
+  { key: "latest", title: "Terbaru di Cuci", description: "Lihat fitur baru dan catatan rilis terbaru.", link: "https://saas.daratlaut.com/changelog" },
   { key: "trial", title: "Perpanjang Masa Trial", description: "Hubungi tim sales untuk perpanjangan trial.", link: "https://saas.daratlaut.com/pricing" },
 ];
 
@@ -33,7 +33,7 @@ const INFO_ITEMS: HelpItem[] = [
   { key: "video", title: "Video Tutorial", description: "Panduan video ringkas penggunaan aplikasi.", link: "https://saas.daratlaut.com/docs/tutorial-video" },
   { key: "support", title: "Pusat Bantuan", description: "Buka tiket bantuan saat ada kendala operasional.", link: "https://saas.daratlaut.com/support" },
   { key: "privacy", title: "Kebijakan Privasi", description: "Ketentuan pengelolaan data pengguna dan tenant.", link: "https://saas.daratlaut.com/privacy" },
-  { key: "tos", title: "Syarat dan Ketentuan", description: "Aturan penggunaan layanan SaaS Laundry.", link: "https://saas.daratlaut.com/terms" },
+  { key: "tos", title: "Syarat dan Ketentuan", description: "Aturan penggunaan layanan Cuci.", link: "https://saas.daratlaut.com/terms" },
   { key: "contact", title: "Hubungi Kami", description: "Kontak tim support dan customer success.", link: "mailto:support@daratlaut.com" },
   { key: "about", title: "Tentang Aplikasi", description: "Informasi versi, build, dan lisensi aplikasi." },
 ];

@@ -50,7 +50,7 @@ npm run build
 
 Jalankan app:
 ```bash
-php artisan serve --host=127.0.0.1 --port=8000
+php artisan serve --host=0.0.0.0 --port=8000
 ```
 
 Jalankan queue worker (terminal terpisah):
@@ -72,7 +72,13 @@ php artisan tinker --execute="echo App\\Models\\Tenant::query()->where('name','D
 ```
 
 Akses login web:
-- `http://127.0.0.1:8000/t/{tenant_id}/login`
+- Lokal di PC yang sama: `http://127.0.0.1:8000/t/{tenant_id}/login`
+- Android/device fisik di jaringan yang sama: `http://<LAN-IP-PC>:8000/t/{tenant_id}/login`
+
+Catatan akses Android/device fisik:
+- Pastikan HP dan PC berada di jaringan Wi-Fi/LAN yang sama.
+- Saat backend lokal diakses dari device lain, `APP_URL` di `.env` harus memakai IP LAN mesin backend, contoh `http://192.168.1.10:8000`, bukan `http://localhost`.
+- Jika menjalankan Vite dev server, gunakan `npm run dev` yang sekarang listen ke jaringan LAN.
 
 ## Test
 Pastikan database test tersedia (default: `saas_laundry_test`) dan kredensial di `.env.testing` sesuai mesin lokal.
@@ -102,6 +108,8 @@ npm run start
 ```
 
 Panduan detail ada di `mobile/README.md`.
+
+Jika mobile app dijalankan di Android fisik terhadap backend lokal, set `EXPO_PUBLIC_API_URL` di `mobile/.env` ke IP LAN backend yang sama, contoh `http://192.168.1.10:8000`.
 
 ## Operational Commands
 - Readiness check staging/release:

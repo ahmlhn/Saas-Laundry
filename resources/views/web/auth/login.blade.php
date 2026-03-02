@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Masuk {{ $tenant->name }}</title>
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @include('partials.vite-assets')
     <script>
         (() => {
             if (localStorage.getItem('panel_theme') === 'dark') {
@@ -17,7 +17,7 @@
     <main class="auth-shell">
         <aside class="auth-side">
             <div class="auth-side-copy">
-                <p class="panel-kicker">Panel Operasional Laundry</p>
+                <p class="panel-kicker">Panel Operasional Cuci</p>
                 <h1>{{ $tenant->name }}</h1>
                 <p>Masuk untuk mengelola alur pesanan, data master, dan komunikasi pelanggan dalam satu panel operasional modern.</p>
             </div>

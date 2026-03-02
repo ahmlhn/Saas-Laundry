@@ -259,7 +259,7 @@ export function HomeDashboardScreen() {
                 <BrandMark size={isCompactLandscape ? 34 : 38} />
               </View>
               <View style={styles.brandTextWrap}>
-                <Text style={styles.brandTitle}>Laundry Poin</Text>
+                <Text style={styles.brandTitle}>Cuci</Text>
                 <Text style={styles.brandSubtitle}>OPERASIONAL HARI INI</Text>
               </View>
             </View>
@@ -411,7 +411,7 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
       flexGrow: 1,
       paddingHorizontal: isCompactLandscape ? theme.spacing.md : theme.spacing.lg,
       paddingTop: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
-      paddingBottom: isCompactLandscape ? theme.spacing.xl : theme.spacing.xxl,
+      paddingBottom: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
       gap: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
     },
     heroCard: {

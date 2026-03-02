@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { Pressable, StyleSheet, View, useWindowDimensions, type GestureResponderEvent } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { HomeDashboardScreen } from "../screens/app/HomeDashboardScreen";
 import { OrderDetailScreen } from "../screens/app/OrderDetailScreen";
 import { OrderPaymentScreen } from "../screens/app/OrderPaymentScreen";
@@ -36,6 +37,7 @@ import { PromoScreen } from "../screens/app/PromoScreen";
 import { PromoFormScreen } from "../screens/app/PromoFormScreen";
 import { FeaturePlaceholderScreen } from "../screens/app/FeaturePlaceholderScreen";
 import { StaffScreen } from "../screens/app/StaffScreen";
+import { StaffFormScreen } from "../screens/app/StaffFormScreen";
 import { OutletsScreen } from "../screens/app/OutletsScreen";
 import { ShippingZonesScreen } from "../screens/app/ShippingZonesScreen";
 import { TenantManagementScreen } from "../screens/app/TenantManagementScreen";
@@ -77,6 +79,7 @@ function AccountTabNavigator() {
       <AccountStack.Screen name="PromoForm" component={PromoFormScreen} />
       <AccountStack.Screen name="FeaturePlaceholder" component={FeaturePlaceholderScreen} />
       <AccountStack.Screen name="Staff" component={StaffScreen} />
+      <AccountStack.Screen name="StaffForm" component={StaffFormScreen} />
       <AccountStack.Screen name="Outlets" component={OutletsScreen} />
       <AccountStack.Screen name="ShippingZones" component={ShippingZonesScreen} />
       <AccountStack.Screen name="TenantManagement" component={TenantManagementScreen} />
@@ -199,11 +202,16 @@ function QuickActionTabButton(props: BottomTabBarButtonProps) {
 
 function MainTabsNavigator() {
   const theme = useAppTheme();
+  const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const isLandscape = width > height;
   const minEdge = Math.min(width, height);
   const isTablet = minEdge >= 600;
-  const tabBarHeight = isTablet ? 86 : isLandscape ? 68 : 74;
+  const baseTabBarHeight = isTablet ? 86 : isLandscape ? 68 : 74;
+  const baseTabBarPaddingTop = isLandscape ? 6 : 8;
+  const baseTabBarPaddingBottom = isLandscape ? 6 : 8;
+  const bottomInset = Math.max(insets.bottom, 0);
+  const tabBarHeight = baseTabBarHeight + bottomInset;
   const labelSize = isTablet ? 12 : 11;
   const iconSize = isTablet ? 21 : 19;
   const { session } = useSession();
@@ -221,8 +229,8 @@ function MainTabsNavigator() {
           borderTopColor: theme.colors.border,
           borderTopWidth: 1,
           height: tabBarHeight,
-          paddingTop: isLandscape ? 6 : 8,
-          paddingBottom: isLandscape ? 6 : 8,
+          paddingTop: baseTabBarPaddingTop,
+          paddingBottom: baseTabBarPaddingBottom + bottomInset,
         },
         tabBarActiveTintColor: theme.colors.info,
         tabBarInactiveTintColor: theme.colors.textMuted,

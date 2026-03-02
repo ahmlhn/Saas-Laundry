@@ -1,0 +1,22 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="drumClip">
+      <circle cx="512" cy="512" r="160" />
+    </clipPath>
+  </defs>
+
+  <path d="M 740 310 A 300 300 0 1 0 740 714" fill="none" stroke="#FFC107" stroke-width="160" stroke-linecap="butt" />
+
+  <circle cx="512" cy="512" r="180" fill="none" stroke="#FFC107" stroke-width="35" />
+
+  <circle cx="512" cy="512" r="162" fill="#ffffff" />
+
+  <path d="M 350 512 Q 431 460 512 512 T 674 512 L 674 674 L 350 674 Z" fill="#3ec1dd" clip-path="url(#drumClip)" />
+
+  <circle cx="485" cy="440" r="14" fill="#3ec1dd" />
+  <circle cx="512" cy="405" r="20" fill="#3ec1dd" />
+  <circle cx="545" cy="450" r="12" fill="#3ec1dd" />
+  <circle cx="575" cy="420" r="16" fill="#3ec1dd" />
+  <circle cx="512" cy="470" r="9" fill="#3ec1dd" />
+  <circle cx="450" cy="460" r="10" fill="#3ec1dd" />
+</svg>

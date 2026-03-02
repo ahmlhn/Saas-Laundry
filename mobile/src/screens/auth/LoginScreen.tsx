@@ -432,7 +432,7 @@ export function LoginScreen() {
                 <BrandMark size={58} />
               </View>
               <View style={styles.brandTextWrap}>
-                <Text style={styles.brandTitle}>Laundry Poin</Text>
+                <Text style={styles.brandTitle}>Cuci</Text>
                 <Text style={styles.brandSubtitle}>Operasional Mobile</Text>
               </View>
             </View>

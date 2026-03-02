@@ -1,7 +1,7 @@
 import { httpClient } from "../../lib/httpClient";
 import { toQueryBoolean } from "../../lib/httpQuery";
 import { getCachedValue, invalidateCache, setCachedValue } from "../../lib/queryCache";
-import type { StaffMember } from "../../types/staff";
+import type { CreateStaffPayload, StaffMember, UpdateStaffAssignmentPayload } from "../../types/staff";
 
 interface StaffListResponse {
   data: StaffMember[];
@@ -58,6 +58,18 @@ export async function archiveStaff(staffId: string): Promise<string | null> {
 
 export async function restoreStaff(staffId: string): Promise<StaffMember> {
   const response = await httpClient.post<StaffResponse>(`/users/${staffId}/restore`);
+  invalidateCache("staff:list:");
+  return response.data.data;
+}
+
+export async function createStaff(payload: CreateStaffPayload): Promise<StaffMember> {
+  const response = await httpClient.post<StaffResponse>("/users", payload);
+  invalidateCache("staff:list:");
+  return response.data.data;
+}
+
+export async function updateStaffAssignment(staffId: string, payload: UpdateStaffAssignmentPayload): Promise<StaffMember> {
+  const response = await httpClient.patch<StaffResponse>(`/users/${staffId}`, payload);
   invalidateCache("staff:list:");
   return response.data.data;
 }

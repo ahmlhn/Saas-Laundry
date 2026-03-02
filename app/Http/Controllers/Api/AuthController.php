@@ -549,7 +549,7 @@ class AuthController extends Controller
                 ]
             );
 
-            $tenantName = (string) ($user->tenant?->name ?? 'Laundry App');
+            $tenantName = (string) ($user->tenant?->name ?? config('app.name', 'Cuci'));
             $recipient = (string) $user->email;
             $expiresMinutes = 30;
 

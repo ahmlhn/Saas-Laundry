@@ -86,7 +86,7 @@ export function OutletSelectScreen() {
               <BrandMark size={50} />
             </View>
             <View style={styles.brandTextWrap}>
-              <Text style={styles.brandTitle}>Laundry Poin</Text>
+              <Text style={styles.brandTitle}>Cuci</Text>
               <Text style={styles.brandSubTitle}>Pilih outlet aktif</Text>
             </View>
           </View>

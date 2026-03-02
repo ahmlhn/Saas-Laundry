@@ -155,7 +155,7 @@ export function CustomerDetailScreen() {
             </Pressable>
 
             <View style={styles.heroBrandWrap}>
-              <Text style={styles.brandText}>Laundry Poin</Text>
+              <Text style={styles.brandText}>Cuci</Text>
               <Text style={styles.heroSubtitle}>Detail Pelanggan</Text>
             </View>
 

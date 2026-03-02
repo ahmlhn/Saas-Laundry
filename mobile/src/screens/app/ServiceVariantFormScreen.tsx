@@ -2,8 +2,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useCallback, useMemo, useState } from "react";
-import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { Alert, Animated, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { ServiceModuleHeader } from "../../components/services/ServiceModuleHeader";
 import { AppButton } from "../../components/ui/AppButton";
@@ -114,21 +114,6 @@ function formatPriceInput(value: string): string {
   return `Rp ${currencyFormatter.format(parsed)}`;
 }
 
-function formatServiceTypeLabel(serviceType: string): string {
-  switch (serviceType) {
-    case "regular":
-      return "Reguler";
-    case "package":
-      return "Paket";
-    case "perfume":
-      return "Parfum";
-    case "item":
-      return "Item";
-    default:
-      return serviceType;
-  }
-}
-
 function resolveUnitTypeFromDisplayUnit(displayUnit: ServiceDisplayUnit): "kg" | "pcs" | "meter" {
   if (displayUnit === "kg") {
     return "kg";
@@ -164,6 +149,7 @@ export function ServiceVariantFormScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AccountStackParamList, "ServiceVariantForm">>();
   const route = useRoute<ServiceVariantFormRoute>();
   const { session, selectedOutlet } = useSession();
+  const scrollY = useRef(new Animated.Value(0)).current;
 
   const roles = session?.roles ?? [];
   const canManage = hasAnyRole(roles, ["owner", "admin"]);
@@ -211,20 +197,23 @@ export function ServiceVariantFormScreen() {
   );
 
   const isPackage = serviceType === "package";
-  const selectedGroup = groups.find((groupItem) => groupItem.id === parentServiceId) ?? null;
   const liveVariantName = nameInput.trim() || variant?.name || "Varian layanan";
-  const parsedHeaderPrice = Number.parseInt(basePriceInput, 10);
-  const headerPriceLabel = Number.isFinite(parsedHeaderPrice) ? `Rp ${currencyFormatter.format(parsedHeaderPrice)}` : "Harga belum diatur";
-  const previewDurationValue = durationInput.trim() === "" ? defaultDuration.value : Number.parseInt(durationInput, 10);
-  const headerDurationLabel = formatServiceDuration(
-    durationUnit === "day" ? previewDurationValue : 0,
-    durationUnit === "hour" ? previewDurationValue : 0,
-    "Durasi belum diatur"
-  );
   const defaultDurationLabel = formatServiceDuration(defaultDuration.unit === "day" ? defaultDuration.value : 0, defaultDuration.unit === "hour" ? defaultDuration.value : 0);
-  const headerSubtitle = isEdit
-    ? `${selectedGroup?.name ?? "Belum pilih group"} • ${headerPriceLabel} • ${headerDurationLabel}`
-    : `${formatServiceTypeLabel(serviceType)} • ${selectedGroup?.name ?? "Belum pilih group"}`;
+  const headerTranslateY = scrollY.interpolate({
+    inputRange: [0, 96],
+    outputRange: [0, -6],
+    extrapolate: "clamp",
+  });
+  const headerScaleX = scrollY.interpolate({
+    inputRange: [0, 96],
+    outputRange: [1, 0.94],
+    extrapolate: "clamp",
+  });
+  const headerScaleY = scrollY.interpolate({
+    inputRange: [0, 96],
+    outputRange: [1, 0.86],
+    extrapolate: "clamp",
+  });
 
   const loadReferences = useCallback(async () => {
     setLoadingReferences(true);
@@ -418,10 +407,21 @@ export function ServiceVariantFormScreen() {
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
       <AppScreen contentContainerStyle={styles.screenShell}>
         <View style={styles.screenBody}>
-          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-            <ServiceModuleHeader onBack={() => navigation.goBack()} title={isEdit ? liveVariantName : "Tambah Varian"}>
-              <Text style={styles.subtitle}>{headerSubtitle}</Text>
-            </ServiceModuleHeader>
+          <Animated.View style={[styles.headerShell, { transform: [{ translateY: headerTranslateY }] }]}>
+            <Animated.View style={{ transform: [{ scaleX: headerScaleX }, { scaleY: headerScaleY }] }}>
+              <ServiceModuleHeader onBack={() => navigation.goBack()} title={isEdit ? liveVariantName : "Tambah Varian"} />
+            </Animated.View>
+          </Animated.View>
+
+          <Animated.ScrollView
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+              useNativeDriver: true,
+            })}
+            scrollEventThrottle={16}
+            showsVerticalScrollIndicator={false}
+          >
 
             <AppPanel style={styles.formPanel}>
               <Text style={styles.label}>Nama Varian</Text>
@@ -643,7 +643,7 @@ export function ServiceVariantFormScreen() {
                 <Text style={styles.errorText}>{errorMessage}</Text>
               </View>
             ) : null}
-          </ScrollView>
+          </Animated.ScrollView>
 
           <View style={styles.footerDock}>
             <View style={styles.footerActions}>
@@ -726,10 +726,17 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     screenBody: {
       flex: 1,
     },
+    headerShell: {
+      position: "absolute",
+      top: isCompactLandscape ? theme.spacing.xs : theme.spacing.sm,
+      left: isTablet ? theme.spacing.xl : theme.spacing.lg,
+      right: isTablet ? theme.spacing.xl : theme.spacing.lg,
+      zIndex: 3,
+    },
     content: {
       flexGrow: 1,
       paddingHorizontal: isTablet ? theme.spacing.xl : theme.spacing.lg,
-      paddingTop: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
+      paddingTop: (isCompactLandscape ? theme.spacing.xs : theme.spacing.sm) + 86,
       paddingBottom: 132,
       gap: theme.spacing.sm,
     },
@@ -785,12 +792,6 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.heavy,
       fontSize: isTablet ? 23 : 21,
-    },
-    subtitle: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.medium,
-      fontSize: 12.5,
-      textAlign: "center",
     },
     formPanel: {
       gap: theme.spacing.xs,

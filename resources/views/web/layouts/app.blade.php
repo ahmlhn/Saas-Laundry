@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>{{ $title ?? 'Laundry Panel' }}</title>
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    <title>{{ $title ?? config('app.name', 'Cuci') }}</title>
+    @include('partials.vite-assets')
     <script>
         (() => {
             if (localStorage.getItem('panel_theme') === 'dark') {
@@ -20,10 +20,12 @@
 
         <aside class="panel-sidebar" :class="{ 'is-open': sidebarOpen, 'is-collapsed': sidebarCollapsed && isDesktop }">
             <div class="panel-brand">
-                <span class="panel-brand-mark">SL</span>
+                <span class="panel-brand-mark" aria-hidden="true">
+                    <img src="{{ asset('cuci.svg') }}" alt="">
+                </span>
                 <div class="panel-brand-copy">
                     <p class="panel-kicker">Sistem Operasional</p>
-                    <h1>SaaS Laundry</h1>
+                    <h1>{{ config('app.name', 'Cuci') }}</h1>
                     <p>{{ $tenant->name }}</p>
                 </div>
                 <button type="button" class="panel-icon-btn panel-mobile-close" @click="sidebarOpen = false" aria-label="Tutup sidebar">

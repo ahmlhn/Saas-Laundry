@@ -5,13 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ $title ?? 'Platform Subscription Panel' }}</title>
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @include('partials.vite-assets')
 </head>
 <body class="panel-root">
     <div class="panel-layout">
         <aside class="panel-sidebar">
             <div class="panel-brand">
-                <span class="panel-brand-mark">PF</span>
+                <span class="panel-brand-mark" aria-hidden="true">
+                    <img src="{{ asset('cuci.svg') }}" alt="">
+                </span>
                 <div class="panel-brand-copy">
                     <p class="panel-kicker">Platform Console</p>
                     <h1>Subscription Admin</h1>

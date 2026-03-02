@@ -3,6 +3,7 @@ import type { OrderBucket } from "../features/orders/orderBuckets";
 import type { Customer } from "../types/customer";
 import type { Promotion, PromotionType } from "../types/promotion";
 import type { ServiceCatalogItem, ServiceType } from "../types/service";
+import type { StaffMember } from "../types/staff";
 
 export type AuthStackParamList = {
   Login: undefined;
@@ -78,6 +79,10 @@ export type AccountStackParamList = {
     description?: string;
   };
   Staff: undefined;
+  StaffForm: {
+    mode: "create" | "edit";
+    staff?: StaffMember;
+  };
   Outlets: undefined;
   ShippingZones:
     | {

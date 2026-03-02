@@ -2,8 +2,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useCallback, useMemo, useState } from "react";
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { Alert, Animated, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { ServiceModuleHeader } from "../../components/services/ServiceModuleHeader";
 import { AppButton } from "../../components/ui/AppButton";
@@ -21,21 +21,6 @@ import { useAppTheme } from "../../theme/useAppTheme";
 
 type ServiceGroupFormRoute = RouteProp<AccountStackParamList, "ServiceGroupForm">;
 
-function formatServiceTypeLabel(serviceType: string): string {
-  switch (serviceType) {
-    case "regular":
-      return "Reguler";
-    case "package":
-      return "Paket";
-    case "perfume":
-      return "Parfum";
-    case "item":
-      return "Item";
-    default:
-      return serviceType;
-  }
-}
-
 export function ServiceGroupFormScreen() {
   const theme = useAppTheme();
   const { width, height } = useWindowDimensions();
@@ -47,6 +32,7 @@ export function ServiceGroupFormScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AccountStackParamList, "ServiceGroupForm">>();
   const route = useRoute<ServiceGroupFormRoute>();
   const { session } = useSession();
+  const scrollY = useRef(new Animated.Value(0)).current;
 
   const roles = session?.roles ?? [];
   const canManage = hasAnyRole(roles, ["owner", "admin"]);
@@ -65,9 +51,21 @@ export function ServiceGroupFormScreen() {
   const [deleting, setDeleting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const liveGroupName = nameInput.trim() || group?.name || "Group layanan";
-  const headerSubtitle = isEdit
-    ? `${formatServiceTypeLabel(serviceType)} • ${variants.length} varian`
-    : `Group baru • ${formatServiceTypeLabel(serviceType)}`;
+  const headerTranslateY = scrollY.interpolate({
+    inputRange: [0, 96],
+    outputRange: [0, -6],
+    extrapolate: "clamp",
+  });
+  const headerScaleX = scrollY.interpolate({
+    inputRange: [0, 96],
+    outputRange: [1, 0.94],
+    extrapolate: "clamp",
+  });
+  const headerScaleY = scrollY.interpolate({
+    inputRange: [0, 96],
+    outputRange: [1, 0.86],
+    extrapolate: "clamp",
+  });
 
   const loadTags = useCallback(async () => {
     setLoadingTags(true);
@@ -205,10 +203,21 @@ export function ServiceGroupFormScreen() {
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
       <AppScreen contentContainerStyle={styles.screenShell}>
         <View style={styles.screenBody}>
-          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-            <ServiceModuleHeader onBack={() => navigation.goBack()} title={isEdit ? liveGroupName : "Tambah Group Layanan"}>
-              <Text style={styles.subtitle}>{headerSubtitle}</Text>
-            </ServiceModuleHeader>
+          <Animated.View style={[styles.headerShell, { transform: [{ translateY: headerTranslateY }] }]}>
+            <Animated.View style={{ transform: [{ scaleX: headerScaleX }, { scaleY: headerScaleY }] }}>
+              <ServiceModuleHeader onBack={() => navigation.goBack()} title={isEdit ? liveGroupName : "Tambah Group"} />
+            </Animated.View>
+          </Animated.View>
+
+          <Animated.ScrollView
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+              useNativeDriver: true,
+            })}
+            scrollEventThrottle={16}
+            showsVerticalScrollIndicator={false}
+          >
 
             <AppPanel style={styles.formPanel}>
               <Text style={styles.label}>Nama Group</Text>
@@ -330,7 +339,7 @@ export function ServiceGroupFormScreen() {
                 <Text style={styles.errorText}>{errorMessage}</Text>
               </View>
             ) : null}
-          </ScrollView>
+          </Animated.ScrollView>
 
           <View style={styles.footerDock}>
             <View style={styles.footerActions}>
@@ -361,10 +370,17 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     screenBody: {
       flex: 1,
     },
+    headerShell: {
+      position: "absolute",
+      top: isCompactLandscape ? theme.spacing.xs : theme.spacing.sm,
+      left: isTablet ? theme.spacing.xl : theme.spacing.lg,
+      right: isTablet ? theme.spacing.xl : theme.spacing.lg,
+      zIndex: 3,
+    },
     content: {
       flexGrow: 1,
       paddingHorizontal: isTablet ? theme.spacing.xl : theme.spacing.lg,
-      paddingTop: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
+      paddingTop: (isCompactLandscape ? theme.spacing.xs : theme.spacing.sm) + 86,
       paddingBottom: 132,
       gap: theme.spacing.sm,
     },
@@ -386,46 +402,6 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
     primaryActionFull: {
       flex: 1,
-    },
-    headerPanel: {
-      backgroundColor: theme.mode === "dark" ? "#12304a" : "#f7f9fb",
-      gap: theme.spacing.xs,
-    },
-    headerRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: theme.spacing.sm,
-    },
-    backButton: {
-      width: 36,
-      height: 36,
-      borderRadius: theme.radii.pill,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.surface,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    backButtonPressed: {
-      opacity: 0.82,
-    },
-    spacer: {
-      width: 36,
-      height: 36,
-    },
-    title: {
-      flex: 1,
-      textAlign: "center",
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.heavy,
-      fontSize: isTablet ? 23 : 21,
-    },
-    subtitle: {
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.medium,
-      fontSize: 12.5,
-      textAlign: "center",
     },
     formPanel: {
       gap: theme.spacing.xs,

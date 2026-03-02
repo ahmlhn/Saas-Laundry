@@ -88,6 +88,8 @@ Route::middleware(['auth:sanctum', 'outlet.access'])->group(function (): void {
     Route::post('/outlets/{outlet}/restore', [OutletManagementController::class, 'restore']);
 
     Route::get('/users', [UserManagementController::class, 'index']);
+    Route::post('/users', [UserManagementController::class, 'store']);
+    Route::patch('/users/{user}', [UserManagementController::class, 'update']);
     Route::delete('/users/{user}', [UserManagementController::class, 'destroy']);
     Route::post('/users/{user}/restore', [UserManagementController::class, 'restore']);
 

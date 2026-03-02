@@ -21,3 +21,27 @@ export interface StaffMember {
   roles: StaffRole[];
   outlets: StaffOutlet[];
 }
+
+export type StaffAssignableRoleKey = "tenant_manager" | "admin" | "cashier" | "worker" | "courier";
+
+export type StaffLifecycleStatus = "active" | "inactive";
+
+export interface CreateStaffPayload {
+  name: string;
+  email: string;
+  phone?: string | null;
+  password: string;
+  status: StaffLifecycleStatus;
+  role_key: StaffAssignableRoleKey;
+  outlet_ids: string[];
+}
+
+export interface UpdateStaffAssignmentPayload {
+  name: string;
+  email: string;
+  phone?: string | null;
+  password?: string | null;
+  status: StaffLifecycleStatus;
+  role_key: StaffAssignableRoleKey;
+  outlet_ids: string[];
+}

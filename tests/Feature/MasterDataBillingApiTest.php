@@ -675,6 +675,110 @@ class MasterDataBillingApiTest extends TestCase
         $this->assertNotNull($archivedCashier['deleted_at']);
     }
 
+    public function test_user_create_and_assignment_update_follow_role_and_outlet_scope(): void
+    {
+        $ownerCreate = $this->apiAs($this->owner)
+            ->postJson('/api/users', [
+                'name' => 'Supervisor Outlet',
+                'email' => 'supervisor@master.local',
+                'phone' => '081288887777',
+                'password' => 'password123',
+                'status' => 'active',
+                'role_key' => 'admin',
+                'outlet_ids' => [$this->outletA->id, $this->outletB->id],
+            ]);
+
+        $ownerCreate->assertCreated()
+            ->assertJsonPath('data.email', 'supervisor@master.local')
+            ->assertJsonPath('data.roles.0.key', 'admin')
+            ->assertJsonCount(2, 'data.outlets');
+
+        $createdUserId = (string) $ownerCreate->json('data.id');
+
+        $this->assertDatabaseHas('users', [
+            'id' => $createdUserId,
+            'tenant_id' => $this->tenant->id,
+            'email' => 'supervisor@master.local',
+            'status' => 'active',
+        ]);
+
+        $this->apiAs($this->admin)
+            ->postJson('/api/users', [
+                'name' => 'Blocked Admin',
+                'email' => 'blocked-admin@master.local',
+                'password' => 'password123',
+                'status' => 'active',
+                'role_key' => 'admin',
+                'outlet_ids' => [$this->outletA->id],
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['role_key']);
+
+        $this->apiAs($this->admin)
+            ->postJson('/api/users', [
+                'name' => 'Out of Scope Worker',
+                'email' => 'scope-worker@master.local',
+                'password' => 'password123',
+                'status' => 'active',
+                'role_key' => 'worker',
+                'outlet_ids' => [$this->outletB->id],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('reason_code', 'VALIDATION_FAILED');
+
+        $this->apiAs($this->owner)
+            ->patchJson('/api/users/'.$this->cashier->id, [
+                'name' => 'Kasir Updated',
+                'email' => 'cashier.updated@master.local',
+                'phone' => '081299998888',
+                'password' => 'newpassword123',
+                'status' => 'inactive',
+                'role_key' => 'worker',
+                'outlet_ids' => [$this->outletA->id, $this->outletB->id],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.name', 'Kasir Updated')
+            ->assertJsonPath('data.email', 'cashier.updated@master.local')
+            ->assertJsonPath('data.phone', '081299998888')
+            ->assertJsonPath('data.status', 'inactive')
+            ->assertJsonPath('data.roles.0.key', 'worker')
+            ->assertJsonCount(2, 'data.outlets');
+
+        $this->assertDatabaseHas('users', [
+            'id' => $this->cashier->id,
+            'name' => 'Kasir Updated',
+            'email' => 'cashier.updated@master.local',
+            'phone' => '081299998888',
+            'status' => 'inactive',
+        ]);
+        $this->assertTrue($this->cashier->fresh()->roles()->where('key', 'worker')->exists());
+        $this->assertTrue(Hash::check('newpassword123', $this->cashier->fresh()->password));
+
+        $this->apiAs($this->admin)
+            ->patchJson('/api/users/'.$createdUserId, [
+                'name' => 'Supervisor Outlet',
+                'email' => 'supervisor@master.local',
+                'phone' => '081288887777',
+                'status' => 'active',
+                'role_key' => 'cashier',
+                'outlet_ids' => [$this->outletA->id],
+            ])
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'ROLE_ACCESS_DENIED');
+
+        $this->apiAs($this->owner)
+            ->patchJson('/api/users/'.$this->worker->id, [
+                'name' => 'Worker Duplicate',
+                'email' => 'cashier.updated@master.local',
+                'phone' => '081233330000',
+                'status' => 'active',
+                'role_key' => 'worker',
+                'outlet_ids' => [$this->outletA->id],
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['email']);
+    }
+
     public function test_shipping_zone_endpoints_support_create_and_list(): void
     {
         $create = $this->apiAs($this->admin)

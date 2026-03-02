@@ -116,7 +116,7 @@ export function AppLaunchLoader({ message, version }: AppLaunchLoaderProps) {
             <BrandMark size={76} />
           </Animated.View>
 
-          <Text style={styles.brandTitle}>Laundry Poin</Text>
+          <Text style={styles.brandTitle}>Cuci</Text>
           <Text style={styles.brandSubtitle}>OPERASIONAL MOBILE</Text>
           {hasMessage ? <Text style={styles.messageText}>{message}</Text> : null}
 

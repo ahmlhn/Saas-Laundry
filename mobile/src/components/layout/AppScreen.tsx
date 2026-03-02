@@ -1,39 +1,48 @@
-import type { ReactNode, RefObject } from "react";
+import { useContext, type ReactNode, type RefObject } from "react";
+import { BottomTabBarHeightContext } from "@react-navigation/bottom-tabs";
 import type { ScrollViewProps, StyleProp, ViewStyle } from "react-native";
 import { ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, type Edge } from "react-native-safe-area-context";
 import { useAppTheme } from "../../theme/useAppTheme";
 
 interface AppScreenProps {
   children: ReactNode;
+  overlay?: ReactNode;
   scroll?: boolean;
   style?: StyleProp<ViewStyle>;
   contentContainerStyle?: StyleProp<ViewStyle>;
+  refreshControl?: ScrollViewProps["refreshControl"];
   keyboardShouldPersistTaps?: ScrollViewProps["keyboardShouldPersistTaps"];
   scrollRef?: RefObject<ScrollView | null>;
   onScroll?: ScrollViewProps["onScroll"];
   scrollEventThrottle?: number;
+  safeAreaEdges?: Edge[];
 }
 
 export function AppScreen({
   children,
+  overlay,
   scroll = false,
   style,
   contentContainerStyle,
+  refreshControl,
   keyboardShouldPersistTaps = "handled",
   scrollRef,
   onScroll,
   scrollEventThrottle = 16,
+  safeAreaEdges,
 }: AppScreenProps) {
   const theme = useAppTheme();
+  const bottomTabBarHeight = useContext(BottomTabBarHeightContext);
   const { width, height } = useWindowDimensions();
   const minEdge = Math.min(width, height);
   const isLandscape = width > height;
   const isTablet = minEdge >= 600;
   const maxContentWidth = isTablet ? (isLandscape ? 1100 : 840) : isLandscape ? 760 : 540;
+  const resolvedSafeAreaEdges = safeAreaEdges ?? (bottomTabBarHeight === undefined ? ["top", "right", "bottom", "left"] : ["top", "right", "left"]);
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.colors.background }]}>
+    <SafeAreaView edges={resolvedSafeAreaEdges} style={[styles.safeArea, { backgroundColor: theme.colors.background }]}>
       <View style={styles.backdropLayer} pointerEvents="none">
         <View
           style={[
@@ -63,6 +72,7 @@ export function AppScreen({
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps={keyboardShouldPersistTaps}
           onScroll={onScroll}
+          refreshControl={refreshControl}
           ref={scrollRef}
           scrollEventThrottle={scrollEventThrottle}
           style={[styles.flex, styles.contentLayer, style]}
@@ -84,6 +94,7 @@ export function AppScreen({
           {children}
         </View>
       )}
+      {overlay}
     </SafeAreaView>
   );
 }
@@ -98,6 +109,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     width: "100%",
     alignSelf: "center",
+    flexGrow: 1,
   },
   fixedContent: {
     width: "100%",

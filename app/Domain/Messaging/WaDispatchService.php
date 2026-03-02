@@ -191,7 +191,7 @@ class WaDispatchService
     private function baseVariables(Order $order): array
     {
         return [
-            'brand_name' => config('app.name', 'Laundry'),
+            'brand_name' => config('app.name', 'Cuci'),
             'customer_name' => $order->customer?->name ?? 'Pelanggan',
             'customer_display_name' => $order->customer?->name ?? null,
             'to_phone' => $order->customer?->phone_normalized,

@@ -28,7 +28,7 @@ interface AccountMenuItem {
   badge?: "Hot" | "Soon";
   route?: Exclude<
     keyof AccountStackParamList,
-    "CustomerForm" | "CustomerDetail" | "ServiceForm" | "ServiceTypeList" | "ServiceGroupForm" | "ServiceVariantForm" | "ParfumItemForm" | "PromoForm" | "FeaturePlaceholder"
+    "CustomerForm" | "CustomerDetail" | "ServiceForm" | "ServiceTypeList" | "ServiceGroupForm" | "ServiceVariantForm" | "ParfumItemForm" | "PromoForm" | "FeaturePlaceholder" | "StaffForm"
   >;
   allowedRoles?: UserRole[];
   locked?: boolean;

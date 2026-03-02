@@ -253,7 +253,7 @@ class RunBusinessUatCommand extends Command
         $lines[] = '# UAT Findings - Automated Pack';
         $lines[] = '';
         $lines[] = '## Header';
-        $lines[] = "- Project: `SaaS Laundry`";
+        $lines[] = "- Project: `Cuci`";
         $lines[] = "- UAT Date: `{$reportDate}`";
         $lines[] = "- Environment: `{$environment}`";
         $lines[] = '- Tester(s): `ops:uat:run (automated)`';

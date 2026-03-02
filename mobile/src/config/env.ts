@@ -1,6 +1,5 @@
-const FALLBACK_API_URL = "https://saas.daratlaut.com";
-const DEFAULT_API_FALLBACKS = [
-  "https://saas.daratlaut.com",
+const HOSTED_API_URL = "https://saas.daratlaut.com";
+const LOCAL_API_FALLBACKS = [
   "http://10.0.2.2:8000",
   "http://127.0.0.1:8000",
   "http://localhost:8000",
@@ -41,10 +40,24 @@ function readBooleanPublicEnv(name: string, defaultValue: boolean): boolean {
   return defaultValue;
 }
 
-const configuredApiUrl = normalizeApiBaseUrl(process.env.EXPO_PUBLIC_API_URL?.trim() || FALLBACK_API_URL);
+const configuredApiUrl = normalizeApiBaseUrl(process.env.EXPO_PUBLIC_API_URL?.trim() || HOSTED_API_URL);
 const configuredFallbacks = process.env.EXPO_PUBLIC_API_URL_FALLBACKS?.split(",")
   .map((item: string) => normalizeApiBaseUrl(item))
   .filter((item: string) => item.length > 0) ?? [];
+
+function resolveDefaultFallbacks(apiUrl: string): string[] {
+  const normalized = normalizeApiBaseUrl(apiUrl);
+
+  if (normalized === HOSTED_API_URL || normalized.startsWith("https://")) {
+    return [HOSTED_API_URL];
+  }
+
+  if (normalized.includes("10.0.2.2") || normalized.includes("127.0.0.1") || normalized.includes("localhost")) {
+    return [normalized, ...LOCAL_API_FALLBACKS];
+  }
+
+  return [normalized];
+}
 
 export const API_BASE_URL = configuredApiUrl;
 
@@ -59,7 +72,7 @@ function withIndexPhpFallback(url: string): string[] {
 
 export const API_BASE_URL_CANDIDATES = Array.from(
   new Set(
-    [API_BASE_URL, ...configuredFallbacks, ...DEFAULT_API_FALLBACKS]
+    [API_BASE_URL, ...configuredFallbacks, ...resolveDefaultFallbacks(API_BASE_URL)]
       .flatMap((url) => withIndexPhpFallback(url))
       .filter((url) => /^https?:\/\//i.test(url))
   )
