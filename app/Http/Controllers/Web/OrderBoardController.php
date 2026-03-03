@@ -526,7 +526,7 @@ class OrderBoardController extends Controller
         );
 
         return redirect()
-            ->route('tenant.orders.show', ['tenant' => $tenant, 'order' => $order->id])
+            ->route('tenant.orders.show', ['order' => $order->id])
             ->with('status', 'Transaksi baru berhasil dibuat.');
     }
 
@@ -670,7 +670,7 @@ class OrderBoardController extends Controller
         }
 
         return redirect()
-            ->route('tenant.orders.show', ['tenant' => $tenant, 'order' => $orderRow->id])
+            ->route('tenant.orders.show', ['order' => $orderRow->id])
             ->with('status', 'Status laundry berhasil diperbarui.');
     }
 
@@ -714,7 +714,7 @@ class OrderBoardController extends Controller
         }
 
         return redirect()
-            ->route('tenant.orders.show', ['tenant' => $tenant, 'order' => $orderRow->id])
+            ->route('tenant.orders.show', ['order' => $orderRow->id])
             ->with('status', 'Status kurir berhasil diperbarui.');
     }
 
@@ -766,7 +766,7 @@ class OrderBoardController extends Controller
         }
 
         return redirect()
-            ->route('tenant.orders.show', ['tenant' => $tenant, 'order' => $orderRow->id])
+            ->route('tenant.orders.show', ['order' => $orderRow->id])
             ->with('status', 'Kurir berhasil ditetapkan ke pesanan.');
     }
 
@@ -873,7 +873,7 @@ class OrderBoardController extends Controller
         );
 
         return redirect()
-            ->route('tenant.orders.show', ['tenant' => $tenant, 'order' => $orderRow->id])
+            ->route('tenant.orders.show', ['order' => $orderRow->id])
             ->with('status', 'Pembayaran berhasil ditambahkan ke transaksi.');
     }
 
@@ -1082,7 +1082,7 @@ class OrderBoardController extends Controller
         }
 
         return redirect()
-            ->route('tenant.orders.index', ['tenant' => $tenant])
+            ->route('tenant.orders.index')
             ->with('status', sprintf(
                 'Bulk %s selesai: %d updated, %d skipped.',
                 $validated['action'],

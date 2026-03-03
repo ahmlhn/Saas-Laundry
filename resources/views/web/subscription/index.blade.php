@@ -63,13 +63,13 @@
                 Target: <strong>{{ $pendingChange->targetPlan?->name ?? '-' }}</strong>
                 | Berlaku: <strong>{{ $pendingChange->effective_at?->format('d M Y H:i') ?? '-' }}</strong>
             </p>
-            <form method="POST" action="{{ route('tenant.subscription.change-request.cancel', ['tenant' => $tenant, 'changeRequestId' => $pendingChange->id]) }}">
+            <form method="POST" action="{{ route('tenant.subscription.change-request.cancel', ['changeRequestId' => $pendingChange->id]) }}">
                 @csrf
                 @method('DELETE')
                 <button class="btn btn-muted" type="submit">Batalkan Request</button>
             </form>
         @else
-            <form method="POST" action="{{ route('tenant.subscription.change-request.store', ['tenant' => $tenant]) }}" class="filters-grid">
+            <form method="POST" action="{{ route('tenant.subscription.change-request.store') }}" class="filters-grid">
                 @csrf
                 <div>
                     <label for="target_plan_id">Paket Tujuan</label>
@@ -139,7 +139,7 @@
                             @if($latestIntent)
                                 <p class="row-subtitle">QRIS expire: {{ $latestIntent->expires_at?->format('d M Y H:i') ?? '-' }}</p>
                             @endif
-                            <form method="POST" action="{{ route('tenant.subscription.invoices.qris-intent', ['tenant' => $tenant, 'invoiceId' => $invoice->id]) }}" style="margin-top:8px;">
+                            <form method="POST" action="{{ route('tenant.subscription.invoices.qris-intent', ['invoiceId' => $invoice->id]) }}" style="margin-top:8px;">
                                 @csrf
                                 <button class="btn btn-muted" type="submit">Refresh QRIS Intent</button>
                             </form>
@@ -148,7 +148,7 @@
                             @endif
                         @else
                             <p class="row-subtitle">{{ number_format((int) $invoice->proofs_count) }} file</p>
-                            <form method="POST" action="{{ route('tenant.subscription.invoices.proof.upload', ['tenant' => $tenant, 'invoiceId' => $invoice->id]) }}" enctype="multipart/form-data" class="filters-grid" style="margin-top:8px;">
+                            <form method="POST" action="{{ route('tenant.subscription.invoices.proof.upload', ['invoiceId' => $invoice->id]) }}" enctype="multipart/form-data" class="filters-grid" style="margin-top:8px;">
                                 @csrf
                                 <div>
                                     <input type="file" name="proof_file" accept=".jpg,.jpeg,.png,.pdf" required>

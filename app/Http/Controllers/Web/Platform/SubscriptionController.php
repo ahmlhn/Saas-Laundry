@@ -210,7 +210,7 @@ class SubscriptionController extends Controller
         );
 
         return redirect()
-            ->route('platform.subscriptions.show', ['tenant' => $tenant->id])
+            ->route('platform.subscriptions.show', ['tenant' => $tenant])
             ->with('status', 'Tenant berhasil disuspend (read-only).');
     }
 
@@ -242,7 +242,7 @@ class SubscriptionController extends Controller
         );
 
         return redirect()
-            ->route('platform.subscriptions.show', ['tenant' => $tenant->id])
+            ->route('platform.subscriptions.show', ['tenant' => $tenant])
             ->with('status', 'Tenant berhasil diaktifkan kembali.');
     }
 }

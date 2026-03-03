@@ -17,15 +17,14 @@ class EnsureTenantPathAccess
             abort(401, 'Authentication is required.');
         }
 
-        $tenant = $request->route('tenant');
+        $tenant = $user->tenant()->first();
 
-        $tenantId = $tenant instanceof Tenant
-            ? $tenant->id
-            : (is_string($tenant) ? $tenant : null);
-
-        if (! $tenantId || $user->tenant_id !== $tenantId) {
-            abort(403, 'Tenant path access denied.');
+        if (! $tenant instanceof Tenant || $user->tenant_id !== $tenant->id) {
+            abort(403, 'Tenant access denied.');
         }
+
+        app()->instance(Tenant::class, $tenant);
+        $request->attributes->set('tenant', $tenant);
 
         return $next($request);
     }

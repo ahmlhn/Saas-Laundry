@@ -213,7 +213,7 @@
 <section class="panel-section">
     <div class="section-head">
         <h3>Pesanan Terbaru</h3>
-        <a href="{{ route('tenant.orders.index', ['tenant' => $tenant]) }}" class="btn btn-ghost">Lihat Semua</a>
+        <a href="{{ route('tenant.orders.index') }}" class="btn btn-ghost">Lihat Semua</a>
     </div>
 
     <div class="table-wrap">

@@ -86,8 +86,8 @@
             <p class="muted-line">Informasi inti order dan status saat ini.</p>
         </div>
         <div class="filter-actions">
-            <a href="{{ route('tenant.orders.receipt', ['tenant' => $tenant, 'order' => $orderRow->id]) }}" class="btn btn-muted" target="_blank" rel="noopener">Cetak Ringkas</a>
-            <a href="{{ route('tenant.orders.index', ['tenant' => $tenant]) }}" class="btn btn-ghost">Kembali</a>
+            <a href="{{ route('tenant.orders.receipt', ['order' => $orderRow->id]) }}" class="btn btn-muted" target="_blank" rel="noopener">Cetak Ringkas</a>
+            <a href="{{ route('tenant.orders.index') }}" class="btn btn-ghost">Kembali</a>
         </div>
     </div>
 
@@ -177,7 +177,7 @@
             </div>
         </div>
 
-        <form method="POST" action="{{ route('tenant.orders.status.laundry', ['tenant' => $tenant, 'order' => $orderRow->id]) }}" class="filters-grid">
+        <form method="POST" action="{{ route('tenant.orders.status.laundry', ['order' => $orderRow->id]) }}" class="filters-grid">
             @csrf
             <div>
                 <label for="laundry_status_target">Status Laundry</label>
@@ -202,7 +202,7 @@
         @if(! $orderRow->is_pickup_delivery)
             <p class="muted-line" style="margin-top: 12px;">Order ini tidak memakai pickup-delivery.</p>
         @else
-            <form method="POST" action="{{ route('tenant.orders.status.courier', ['tenant' => $tenant, 'order' => $orderRow->id]) }}" class="filters-grid" style="margin-top: 12px;">
+            <form method="POST" action="{{ route('tenant.orders.status.courier', ['order' => $orderRow->id]) }}" class="filters-grid" style="margin-top: 12px;">
                 @csrf
                 <div>
                     <label for="courier_status_target">Status Kurir</label>
@@ -224,7 +224,7 @@
                 </div>
             </form>
 
-            <form method="POST" action="{{ route('tenant.orders.assign-courier', ['tenant' => $tenant, 'order' => $orderRow->id]) }}" class="filters-grid" style="margin-top: 12px;">
+            <form method="POST" action="{{ route('tenant.orders.assign-courier', ['order' => $orderRow->id]) }}" class="filters-grid" style="margin-top: 12px;">
                 @csrf
                 <div>
                     <label for="courier_user_id">Tugaskan Kurir</label>
@@ -294,7 +294,7 @@
             <span class="status-badge {{ $paymentStatusClass }}">{{ $paymentStatusLabel }}</span>
         </div>
 
-        <form method="POST" action="{{ route('tenant.orders.payments.store', ['tenant' => $tenant, 'order' => $orderRow->id]) }}" class="filters-grid">
+        <form method="POST" action="{{ route('tenant.orders.payments.store', ['order' => $orderRow->id]) }}" class="filters-grid">
             @csrf
             <div>
                 <label for="payment_amount">Jumlah Pembayaran</label>

@@ -206,7 +206,7 @@
 </head>
 <body>
     <div class="toolbar">
-        <a href="{{ route('tenant.orders.show', ['tenant' => $tenant, 'order' => $orderRow->id]) }}" class="btn">Kembali ke Detail</a>
+        <a href="{{ route('tenant.orders.show', ['order' => $orderRow->id]) }}" class="btn">Kembali ke Detail</a>
         <div class="toolbar-actions">
             <button type="button" class="btn btn-primary" onclick="window.print()">Cetak</button>
         </div>

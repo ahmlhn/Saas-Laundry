@@ -148,7 +148,7 @@ class ManagementController extends Controller
         );
 
         return redirect()
-            ->route('tenant.users.index', ['tenant' => $tenant])
+            ->route('tenant.users.index')
             ->with('status', 'User baru berhasil dibuat.');
     }
 
@@ -227,7 +227,7 @@ class ManagementController extends Controller
         );
 
         return redirect()
-            ->route('tenant.users.index', ['tenant' => $tenant])
+            ->route('tenant.users.index')
             ->with('status', 'Assignment user berhasil diperbarui.');
     }
 
@@ -482,7 +482,7 @@ class ManagementController extends Controller
         );
 
         return redirect()
-            ->route('tenant.outlet-services.index', ['tenant' => $tenant])
+            ->route('tenant.outlet-services.index')
             ->with('status', 'Outlet service override berhasil disimpan.');
     }
 
@@ -553,7 +553,7 @@ class ManagementController extends Controller
         );
 
         return redirect()
-            ->route('tenant.outlet-services.index', ['tenant' => $tenant])
+            ->route('tenant.outlet-services.index')
             ->with('status', 'Outlet service override berhasil diperbarui.');
     }
 
@@ -678,7 +678,7 @@ class ManagementController extends Controller
         );
 
         return redirect()
-            ->route('tenant.shipping-zones.index', ['tenant' => $tenant])
+            ->route('tenant.shipping-zones.index')
             ->with('status', 'Shipping zone berhasil dibuat.');
     }
 
@@ -751,7 +751,7 @@ class ManagementController extends Controller
         );
 
         return redirect()
-            ->route('tenant.shipping-zones.index', ['tenant' => $tenant])
+            ->route('tenant.shipping-zones.index')
             ->with('status', 'Shipping zone berhasil diperbarui.');
     }
 
@@ -788,7 +788,7 @@ class ManagementController extends Controller
         );
 
         return redirect()
-            ->route('tenant.shipping-zones.index', ['tenant' => $tenant])
+            ->route('tenant.shipping-zones.index')
             ->with('status', 'Shipping zone berhasil dinonaktifkan.');
     }
 
@@ -825,7 +825,7 @@ class ManagementController extends Controller
         );
 
         return redirect()
-            ->route('tenant.shipping-zones.index', ['tenant' => $tenant])
+            ->route('tenant.shipping-zones.index')
             ->with('status', 'Shipping zone berhasil diaktifkan.');
     }
 
@@ -880,7 +880,7 @@ class ManagementController extends Controller
         );
 
         return redirect()
-            ->route('tenant.users.index', ['tenant' => $tenant])
+            ->route('tenant.users.index')
             ->with('status', 'User berhasil diarsipkan.');
     }
 
@@ -921,7 +921,7 @@ class ManagementController extends Controller
         );
 
         return redirect()
-            ->route('tenant.users.index', ['tenant' => $tenant])
+            ->route('tenant.users.index')
             ->with('status', 'User berhasil dipulihkan.');
     }
 
@@ -957,7 +957,7 @@ class ManagementController extends Controller
         );
 
         return redirect()
-            ->route('tenant.customers.index', ['tenant' => $tenant])
+            ->route('tenant.customers.index')
             ->with('status', 'Customer berhasil diarsipkan.');
     }
 
@@ -997,7 +997,7 @@ class ManagementController extends Controller
         );
 
         return redirect()
-            ->route('tenant.customers.index', ['tenant' => $tenant])
+            ->route('tenant.customers.index')
             ->with('status', 'Customer berhasil dipulihkan.');
     }
 
@@ -1033,7 +1033,7 @@ class ManagementController extends Controller
         );
 
         return redirect()
-            ->route('tenant.services.index', ['tenant' => $tenant])
+            ->route('tenant.services.index')
             ->with('status', 'Service berhasil diarsipkan.');
     }
 
@@ -1073,7 +1073,7 @@ class ManagementController extends Controller
         );
 
         return redirect()
-            ->route('tenant.services.index', ['tenant' => $tenant])
+            ->route('tenant.services.index')
             ->with('status', 'Service berhasil dipulihkan.');
     }
 
@@ -1118,7 +1118,7 @@ class ManagementController extends Controller
         );
 
         return redirect()
-            ->route('tenant.outlets.index', ['tenant' => $tenant])
+            ->route('tenant.outlets.index')
             ->with('status', 'Outlet berhasil diarsipkan.');
     }
 
@@ -1159,7 +1159,7 @@ class ManagementController extends Controller
         );
 
         return redirect()
-            ->route('tenant.outlets.index', ['tenant' => $tenant])
+            ->route('tenant.outlets.index')
             ->with('status', 'Outlet berhasil dipulihkan.');
     }
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Masuk {{ $tenant->name }}</title>
+    <title>Masuk Panel Operasional</title>
     @include('partials.vite-assets')
     <script>
         (() => {
@@ -18,8 +18,8 @@
         <aside class="auth-side">
             <div class="auth-side-copy">
                 <p class="panel-kicker">Panel Operasional Cuci</p>
-                <h1>{{ $tenant->name }}</h1>
-                <p>Masuk untuk mengelola alur pesanan, data master, dan komunikasi pelanggan dalam satu panel operasional modern.</p>
+                <h1>Masuk ke Panel Tenant</h1>
+                <p>Gunakan email owner atau admin untuk masuk. Tenant akan dipilih otomatis dari akun yang Anda gunakan.</p>
             </div>
 
             <div class="auth-badge-grid">
@@ -28,14 +28,14 @@
                     <strong>Owner / Admin</strong>
                 </article>
                 <article class="auth-badge">
-                    <p class="auth-badge-label">Tenant Path</p>
-                    <strong>/t/{{ $tenant->slug }}</strong>
+                    <p class="auth-badge-label">URL Panel</p>
+                    <strong>/login</strong>
                 </article>
             </div>
 
             <ul class="auth-points">
                 <li>Dasbor ringkas untuk pesanan, kuota, pendapatan, dan performa WhatsApp.</li>
-                <li>Kontrol akses berbasis tenant path untuk pemilik dan admin.</li>
+                <li>Tenant web panel di-resolve langsung dari akun yang login.</li>
                 <li>Siklus data master aman dengan aksi arsip dan pulihkan.</li>
             </ul>
 
@@ -60,7 +60,7 @@
                 <div class="notice notice-error">{{ $errors->first() }}</div>
             @endif
 
-            <form method="POST" action="{{ route('tenant.login.store', ['tenant' => $tenant]) }}" class="stack-form auth-form">
+            <form method="POST" action="{{ route('tenant.login.store') }}" class="stack-form auth-form">
                 @csrf
 
                 <div class="field-stack">

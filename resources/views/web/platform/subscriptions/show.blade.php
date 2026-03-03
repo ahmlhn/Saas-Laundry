@@ -35,11 +35,11 @@
         </table>
     </div>
     <div class="filter-actions" style="margin-top: 12px;">
-        <form method="POST" action="{{ route('platform.subscriptions.tenants.suspend', ['tenant' => $tenant->id]) }}">
+        <form method="POST" action="{{ route('platform.subscriptions.tenants.suspend', ['tenant' => $tenant]) }}">
             @csrf
             <button class="btn btn-muted" type="submit">Suspend Tenant</button>
         </form>
-        <form method="POST" action="{{ route('platform.subscriptions.tenants.activate', ['tenant' => $tenant->id]) }}">
+        <form method="POST" action="{{ route('platform.subscriptions.tenants.activate', ['tenant' => $tenant]) }}">
             @csrf
             <button class="btn btn-primary" type="submit">Activate Tenant</button>
         </form>

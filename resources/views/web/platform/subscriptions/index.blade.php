@@ -64,7 +64,7 @@
                         @endif
                     </td>
                     <td>
-                        <a class="btn btn-muted" href="{{ route('platform.subscriptions.show', ['tenant' => $tenant->id]) }}">Buka</a>
+                        <a class="btn btn-muted" href="{{ route('platform.subscriptions.show', ['tenant' => $tenant]) }}">Buka</a>
                     </td>
                 </tr>
             @empty

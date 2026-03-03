@@ -83,7 +83,7 @@
                     <td>{{ number_format($outlet->orders_this_month_count) }}</td>
                     <td>
                         @if($ownerMode)
-                            <form method="POST" action="{{ route('tenant.outlets.archive', ['tenant' => $tenant, 'outlet' => $outlet->id]) }}" class="inline-form">
+                            <form method="POST" action="{{ route('tenant.outlets.archive', ['outlet' => $outlet->id]) }}" class="inline-form">
                                 @csrf
                                 <button type="submit" class="btn btn-danger btn-sm">Arsipkan</button>
                             </form>
@@ -128,7 +128,7 @@
                     <td>{{ $outlet->timezone }}</td>
                     <td>{{ optional($outlet->deleted_at)->format('d M Y H:i') }}</td>
                     <td>
-                        <form method="POST" action="{{ route('tenant.outlets.restore', ['tenant' => $tenant, 'outlet' => $outlet->id]) }}" class="inline-form">
+                        <form method="POST" action="{{ route('tenant.outlets.restore', ['outlet' => $outlet->id]) }}" class="inline-form">
                             @csrf
                             <button type="submit" class="btn btn-muted btn-sm">Pulihkan</button>
                         </form>

@@ -77,7 +77,7 @@
                     <td>{{ $row->phone_normalized }}</td>
                     <td>{{ $row->notes ?: '-' }}</td>
                     <td>
-                        <form method="POST" action="{{ route('tenant.customers.archive', ['tenant' => $tenant, 'customer' => $row->id]) }}" class="inline-form">
+                        <form method="POST" action="{{ route('tenant.customers.archive', ['customer' => $row->id]) }}" class="inline-form">
                             @csrf
                             <button type="submit" class="btn btn-danger btn-sm">Arsipkan</button>
                         </form>
@@ -116,7 +116,7 @@
                     <td>{{ $row->phone_normalized }}</td>
                     <td>{{ optional($row->deleted_at)->format('d M Y H:i') }}</td>
                     <td>
-                        <form method="POST" action="{{ route('tenant.customers.restore', ['tenant' => $tenant, 'customer' => $row->id]) }}" class="inline-form">
+                        <form method="POST" action="{{ route('tenant.customers.restore', ['customer' => $row->id]) }}" class="inline-form">
                             @csrf
                             <button type="submit" class="btn btn-muted btn-sm">Pulihkan</button>
                         </form>

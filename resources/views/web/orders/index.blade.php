@@ -104,8 +104,8 @@
             <p class="muted-line">Saring data operasional per outlet dan status.</p>
         </div>
         <div class="filter-actions">
-            <a href="{{ route('tenant.orders.export', ['tenant' => $tenant] + $exportParams) }}" class="btn btn-muted">Export CSV</a>
-            <a href="{{ route('tenant.orders.create', ['tenant' => $tenant]) }}" class="btn btn-primary">Buat Transaksi</a>
+            <a href="{{ route('tenant.orders.export', $exportParams) }}" class="btn btn-muted">Export CSV</a>
+            <a href="{{ route('tenant.orders.create') }}" class="btn btn-primary">Buat Transaksi</a>
         </div>
     </div>
 
@@ -148,18 +148,18 @@
 
         <div class="filter-actions">
             <button class="btn btn-primary" type="submit">Filter</button>
-            <a class="btn btn-ghost" href="{{ route('tenant.orders.index', ['tenant' => $tenant]) }}">Atur Ulang</a>
+            <a class="btn btn-ghost" href="{{ route('tenant.orders.index') }}">Atur Ulang</a>
         </div>
     </form>
 
     <div class="chip-filter-row">
         <a class="chip-filter-link {{ empty($filters['laundry_status']) ? 'is-active' : '' }}"
-           href="{{ route('tenant.orders.index', ['tenant' => $tenant, 'outlet_id' => $filters['outlet_id'] ?? null, 'courier_status' => $filters['courier_status'] ?? null, 'search' => $filters['search'] ?? null, 'limit' => $filters['limit'] ?? null]) }}">
+           href="{{ route('tenant.orders.index', ['outlet_id' => $filters['outlet_id'] ?? null, 'courier_status' => $filters['courier_status'] ?? null, 'search' => $filters['search'] ?? null, 'limit' => $filters['limit'] ?? null]) }}">
             semua status
         </a>
         @foreach($quickLaundryStatuses as $quickStatus)
             <a class="chip-filter-link {{ ($filters['laundry_status'] ?? '') === $quickStatus ? 'is-active' : '' }}"
-               href="{{ route('tenant.orders.index', ['tenant' => $tenant, 'outlet_id' => $filters['outlet_id'] ?? null, 'laundry_status' => $quickStatus, 'courier_status' => $filters['courier_status'] ?? null, 'search' => $filters['search'] ?? null, 'limit' => $filters['limit'] ?? null]) }}">
+               href="{{ route('tenant.orders.index', ['outlet_id' => $filters['outlet_id'] ?? null, 'laundry_status' => $quickStatus, 'courier_status' => $filters['courier_status'] ?? null, 'search' => $filters['search'] ?? null, 'limit' => $filters['limit'] ?? null]) }}">
                 {{ $statusLabel($quickStatus) }}
             </a>
         @endforeach
@@ -173,7 +173,7 @@
     </div>
 
     <form method="POST"
-          action="{{ route('tenant.orders.bulk-update', ['tenant' => $tenant]) }}"
+          action="{{ route('tenant.orders.bulk-update') }}"
           class="bulk-shell"
           @submit.prevent="submitBulk($event)">
         @csrf
@@ -302,7 +302,7 @@
                     </td>
                     <td>
                         <p class="row-title">
-                            <a class="table-link" href="{{ route('tenant.orders.show', ['tenant' => $tenant, 'order' => $order->id]) }}">
+                            <a class="table-link" href="{{ route('tenant.orders.show', ['order' => $order->id]) }}">
                                 {{ $order->invoice_no ?: $order->order_code }}
                             </a>
                         </p>
@@ -336,44 +336,44 @@
                         <div class="table-actions" x-data="{ open: false }">
                             <button type="button" class="btn btn-ghost btn-sm" @click="open = !open">Aksi</button>
                             <div class="table-actions-menu" x-cloak x-show="open" @click.outside="open = false">
-                                <a href="{{ route('tenant.orders.show', ['tenant' => $tenant, 'order' => $order->id]) }}">Lihat detail</a>
+                                <a href="{{ route('tenant.orders.show', ['order' => $order->id]) }}">Lihat detail</a>
                                 <button type="button" @click="copyRef(@js($order->invoice_no ?: $order->order_code)); open = false">Salin referensi</button>
                                 @if($order->customer?->phone_normalized)
-                                    <a href="{{ route('tenant.orders.index', ['tenant' => $tenant, 'search' => $order->customer->phone_normalized]) }}">Cari pelanggan</a>
+                                    <a href="{{ route('tenant.orders.index', ['search' => $order->customer->phone_normalized]) }}">Cari pelanggan</a>
                                 @endif
-                                <form method="POST" action="{{ route('tenant.orders.bulk-update', ['tenant' => $tenant]) }}">
+                                <form method="POST" action="{{ route('tenant.orders.bulk-update') }}">
                                     @csrf
                                     <input type="hidden" name="selected_ids" value="{{ $order->id }}">
                                     <input type="hidden" name="action" value="mark-ready">
                                     <button type="submit">Tandai siap</button>
                                 </form>
-                                <form method="POST" action="{{ route('tenant.orders.bulk-update', ['tenant' => $tenant]) }}">
+                                <form method="POST" action="{{ route('tenant.orders.bulk-update') }}">
                                     @csrf
                                     <input type="hidden" name="selected_ids" value="{{ $order->id }}">
                                     <input type="hidden" name="action" value="mark-completed">
                                     <button type="submit">Tandai selesai</button>
                                 </form>
                                 @if($order->is_pickup_delivery)
-                                    <form method="POST" action="{{ route('tenant.orders.bulk-update', ['tenant' => $tenant]) }}">
+                                    <form method="POST" action="{{ route('tenant.orders.bulk-update') }}">
                                         @csrf
                                         <input type="hidden" name="selected_ids" value="{{ $order->id }}">
                                         <input type="hidden" name="action" value="courier-delivery-pending">
                                         <button type="submit">Kurir: menunggu antar</button>
                                     </form>
-                                    <form method="POST" action="{{ route('tenant.orders.bulk-update', ['tenant' => $tenant]) }}">
+                                    <form method="POST" action="{{ route('tenant.orders.bulk-update') }}">
                                         @csrf
                                         <input type="hidden" name="selected_ids" value="{{ $order->id }}">
                                         <input type="hidden" name="action" value="courier-delivery-otw">
                                         <button type="submit">Kurir: menuju antar</button>
                                     </form>
-                                    <form method="POST" action="{{ route('tenant.orders.bulk-update', ['tenant' => $tenant]) }}">
+                                    <form method="POST" action="{{ route('tenant.orders.bulk-update') }}">
                                         @csrf
                                         <input type="hidden" name="selected_ids" value="{{ $order->id }}">
                                         <input type="hidden" name="action" value="courier-delivered">
                                         <button type="submit">Kurir: terkirim</button>
                                     </form>
                                     @foreach($couriers as $courierOption)
-                                        <form method="POST" action="{{ route('tenant.orders.bulk-update', ['tenant' => $tenant]) }}">
+                                        <form method="POST" action="{{ route('tenant.orders.bulk-update') }}">
                                             @csrf
                                             <input type="hidden" name="selected_ids" value="{{ $order->id }}">
                                             <input type="hidden" name="action" value="assign-courier">

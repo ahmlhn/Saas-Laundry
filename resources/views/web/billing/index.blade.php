@@ -54,12 +54,12 @@
     <div class="section-head">
         <h3>Filter Billing</h3>
         <div class="filter-actions">
-            <a href="{{ route('tenant.billing.export', ['tenant' => $tenant] + $billingParams + ['dataset' => 'outlets']) }}" class="btn btn-muted">Export Outlet CSV</a>
-            <a href="{{ route('tenant.billing.export', ['tenant' => $tenant] + $billingParams + ['dataset' => 'usage']) }}" class="btn btn-muted">Export Riwayat CSV</a>
-            <a href="{{ route('tenant.billing.export', ['tenant' => $tenant] + $billingParams + ['dataset' => 'orders']) }}" class="btn btn-muted">Export Detail CSV</a>
-            <a href="{{ route('tenant.billing.export', ['tenant' => $tenant] + $billingParams + ['dataset' => 'aging']) }}" class="btn btn-muted">Export Aging CSV</a>
-            <a href="{{ route('tenant.billing.export', ['tenant' => $tenant] + $billingParams + ['dataset' => 'aging_details']) }}" class="btn btn-muted">Export Aging Detail CSV</a>
-            <a href="{{ route('tenant.billing.export', ['tenant' => $tenant] + $billingParams + ['dataset' => 'cash_daily']) }}" class="btn btn-muted">Export Rekonsiliasi Harian</a>
+            <a href="{{ route('tenant.billing.export', $billingParams + ['dataset' => 'outlets']) }}" class="btn btn-muted">Export Outlet CSV</a>
+            <a href="{{ route('tenant.billing.export', $billingParams + ['dataset' => 'usage']) }}" class="btn btn-muted">Export Riwayat CSV</a>
+            <a href="{{ route('tenant.billing.export', $billingParams + ['dataset' => 'orders']) }}" class="btn btn-muted">Export Detail CSV</a>
+            <a href="{{ route('tenant.billing.export', $billingParams + ['dataset' => 'aging']) }}" class="btn btn-muted">Export Aging CSV</a>
+            <a href="{{ route('tenant.billing.export', $billingParams + ['dataset' => 'aging_details']) }}" class="btn btn-muted">Export Aging Detail CSV</a>
+            <a href="{{ route('tenant.billing.export', $billingParams + ['dataset' => 'cash_daily']) }}" class="btn btn-muted">Export Rekonsiliasi Harian</a>
         </div>
     </div>
     <form method="GET" class="filters-grid">
@@ -352,7 +352,7 @@
                         <p class="row-subtitle">Next: {{ $row['collection_next_follow_up_at'] }}</p>
                     </td>
                     <td>
-                        <form method="POST" action="{{ route('tenant.billing.collection.update', ['tenant' => $tenant, 'order' => $row['order_id']]) }}" class="table-form-stack">
+                        <form method="POST" action="{{ route('tenant.billing.collection.update', ['order' => $row['order_id']]) }}" class="table-form-stack">
                             @csrf
                             <select name="collection_status">
                                 <option value="pending" @selected($row['collection_status'] === 'pending')>Belum Ditindaklanjuti</option>

@@ -20,21 +20,19 @@ class AuthController extends Controller
     ) {
     }
 
-    public function create(Request $request, Tenant $tenant): View|RedirectResponse
+    public function create(Request $request): View|RedirectResponse
     {
         /** @var User|null $user */
         $user = $request->user();
 
-        if ($user && $user->tenant_id === $tenant->id && $user->hasAnyRole(['owner', 'admin'])) {
-            return redirect()->route('tenant.dashboard', ['tenant' => $tenant]);
+        if ($user && $user->tenant_id && $user->hasAnyRole(['owner', 'admin'])) {
+            return redirect()->route('tenant.dashboard');
         }
 
-        return view('web.auth.login', [
-            'tenant' => $tenant,
-        ]);
+        return view('web.auth.login');
     }
 
-    public function store(Request $request, Tenant $tenant): RedirectResponse
+    public function store(Request $request): RedirectResponse
     {
         $validated = $request->validate([
             'email' => ['required', 'email'],
@@ -43,16 +41,18 @@ class AuthController extends Controller
         ]);
 
         $user = User::query()
-            ->where('tenant_id', $tenant->id)
             ->where('email', $validated['email'])
+            ->whereNotNull('tenant_id')
             ->where('status', 'active')
             ->first();
+
+        $tenant = $user?->tenant;
 
         if (! $user || ! Hash::check($validated['password'], $user->password)) {
             $this->auditTrail->record(
                 eventKey: AuditEventKeys::AUTH_LOGIN_FAILED,
                 actor: $user,
-                tenantId: $tenant->id,
+                tenantId: $tenant?->id,
                 metadata: [
                     'email' => strtolower($validated['email']),
                     'reason' => 'invalid_credentials',
@@ -99,7 +99,7 @@ class AuthController extends Controller
         );
 
         return redirect()
-            ->route('tenant.dashboard', ['tenant' => $tenant])
+            ->route('tenant.dashboard')
             ->with('status', 'Login success.');
     }
 
@@ -126,6 +126,6 @@ class AuthController extends Controller
             );
         }
 
-        return redirect()->route('tenant.login', ['tenant' => $tenant]);
+        return redirect()->route('login');
     }
 }
