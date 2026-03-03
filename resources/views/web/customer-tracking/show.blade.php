@@ -7,14 +7,15 @@
     @include('partials.vite-assets')
     <style>
         :root{color-scheme:light;--bg:#ecf3fb;--card:#ffffffea;--line:#d9e3ee;--text:#0f172a;--muted:#566579;--soft:#7a889d;--brand:#0f766e;--brand-soft:#e7f6f3;--blue:#0f5da8;--blue-soft:#ebf4ff;--warn:#915700;--warn-soft:#fff5e6;--shadow:0 24px 60px rgba(15,23,42,.1);--r-xl:28px;--r-lg:22px;--r-md:18px;--r-sm:14px}
-        *{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:"Manrope","Segoe UI",sans-serif;line-height:1.55;color:var(--text);background:radial-gradient(circle at top left,rgba(15,118,110,.14),transparent 28%),radial-gradient(circle at 85% 20%,rgba(37,99,235,.12),transparent 30%),linear-gradient(180deg,#f6faff 0%,var(--bg) 38%,#e8f0f9 100%)}
+        *{box-sizing:border-box}body{margin:0;min-height:100vh;overflow-x:hidden;font-family:"Manrope","Segoe UI",sans-serif;line-height:1.55;color:var(--text);background:radial-gradient(circle at top left,rgba(15,118,110,.14),transparent 28%),radial-gradient(circle at 85% 20%,rgba(37,99,235,.12),transparent 30%),linear-gradient(180deg,#f6faff 0%,var(--bg) 38%,#e8f0f9 100%)}
         .shell{width:min(1120px,calc(100vw - 28px));margin:0 auto;padding:24px 0 40px}
-        .topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px;color:var(--muted);font-size:13px}
+        .topbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px;color:var(--muted);font-size:13px}
         .topbar-pills{display:flex;flex-wrap:wrap;gap:8px}.pill,.copy-btn,.unit-pill,.chip{display:inline-flex;align-items:center;border-radius:999px;font-weight:800}
         .pill{padding:7px 11px;border:1px solid #d8e2ee;background:#ffffffc7}
-        .copy-btn{gap:8px;padding:9px 13px;border:1px solid #b6d8d2;background:var(--brand-soft);color:var(--brand);font:inherit;cursor:pointer}
+        .copy-btn{gap:8px;justify-content:center;padding:9px 13px;border:1px solid #b6d8d2;background:var(--brand-soft);color:var(--brand);font:inherit;cursor:pointer}
         .card{background:var(--card);border:1px solid #dbe4ef;border-radius:var(--r-xl);box-shadow:var(--shadow);backdrop-filter:blur(12px)}
         .hero{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr);gap:18px;margin-bottom:18px}
+        .hero-main,.hero-side,.section,.side-box,.meta,.address-card,.cta-box{min-width:0}
         .hero-main{position:relative;overflow:hidden;padding:30px;background:radial-gradient(circle at right top,rgba(37,99,235,.14),transparent 34%),radial-gradient(circle at left bottom,rgba(15,118,110,.12),transparent 30%),#fff}
         .hero-main:after{content:"";position:absolute;right:-22px;top:-18px;width:170px;height:170px;border-radius:40px;background:linear-gradient(145deg,rgba(15,118,110,.12),rgba(37,99,235,.08));transform:rotate(18deg)}
         .kicker,.section-kicker{margin:0;text-transform:uppercase;letter-spacing:.1em;font-size:12px;font-weight:800}
@@ -27,7 +28,7 @@
         .hero-side{display:grid;gap:14px;padding:22px;background:radial-gradient(circle at top,rgba(45,212,191,.16),transparent 34%),linear-gradient(170deg,#091626,#0f1e34);color:#e2e8f0}
         .side-box{padding:16px;border:1px solid rgba(191,219,254,.14);border-radius:var(--r-lg);background:rgba(148,163,184,.08)}
         .side-box span,.label{display:block;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
-        .side-box span{color:#b8c6d9}.side-box strong{display:block;margin-top:6px;font-size:22px;line-height:1.1;letter-spacing:-.04em;color:#fff}.side-box p,.section-copy,.meta small,.note,.footer-note,.address-card p{margin:7px 0 0;color:#d8e2ee;font-size:13px}
+        .side-box span{color:#b8c6d9}.side-box strong{display:block;margin-top:6px;font-size:22px;line-height:1.1;letter-spacing:-.04em;color:#fff;overflow-wrap:anywhere}.side-box p,.section-copy,.meta small,.note,.footer-note,.address-card p{margin:7px 0 0;color:#d8e2ee;font-size:13px}
         .main-grid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,.7fr);gap:18px}
         .stack{display:grid;gap:18px}.section{padding:24px}.section-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:18px}
         .section-head h2,.cta-box h3{margin:0;letter-spacing:-.03em}.section-head h2{font-size:1.2rem}.section-copy{color:var(--muted);font-size:14px}
@@ -41,15 +42,46 @@
         .summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.meta,.address-card,.cta-box{padding:16px;border:1px solid var(--line);border-radius:var(--r-md);background:linear-gradient(180deg,#fff,#fbfdff)}
         .meta strong,.address-card strong{display:block;margin-top:6px;font-size:17px;line-height:1.2;color:var(--text)}.meta small,.address-card p{color:var(--muted)}
         .note{padding:15px 16px;border-radius:var(--r-md);border:1px solid #c6e6e0;background:linear-gradient(180deg,#edf8f6,#f8fcfb);color:#154441}.note.warn{border-color:#efd7ad;background:linear-gradient(180deg,#fff7ea,#fffdfa);color:#7a4200}.note strong{font-weight:800}
-        .address-grid,.cta-stack{display:grid;gap:12px}.table-wrap{overflow:hidden;border:1px solid var(--line);border-radius:var(--r-lg);background:#fff}
-        table{width:100%;border-collapse:collapse}th,td{padding:13px 14px;border-bottom:1px solid #e6edf5;text-align:left;vertical-align:top;font-size:14px}th{background:#f8fbff;color:var(--soft);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}tr:last-child td{border-bottom:0}
+        .address-grid,.cta-stack{display:grid;gap:12px}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:var(--r-lg);background:#fff;-webkit-overflow-scrolling:touch}
+        table{width:100%;min-width:640px;border-collapse:collapse}th,td{padding:13px 14px;border-bottom:1px solid #e6edf5;text-align:left;vertical-align:top;font-size:14px}th{background:#f8fbff;color:var(--soft);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}tr:last-child td{border-bottom:0}
         .service-name{font-weight:800}.unit-pill{min-height:28px;padding:0 10px;background:#eef4fb;border:1px solid #d7e2ef;color:#44556c;font-size:12px}
         .total-row{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px;padding:15px 16px;border-radius:var(--r-md);border:1px solid #c6e6e0;background:linear-gradient(180deg,#edf8f6,#f7fbfd)}
-        .total-row span{color:var(--muted);font-size:13px;font-weight:700}.total-row strong{font-size:20px;letter-spacing:-.03em}
-        .link-box{margin-top:10px;padding:12px 13px;border-radius:var(--r-sm);background:#f7fbff;border:1px dashed #c9d8e8;font-size:13px;font-weight:700;word-break:break-all}
+        .total-row span{color:var(--muted);font-size:13px;font-weight:700}.total-row strong{font-size:20px;letter-spacing:-.03em;overflow-wrap:anywhere}
+        .link-box{margin-top:10px;padding:12px 13px;border-radius:var(--r-sm);background:#f7fbff;border:1px dashed #c9d8e8;font-size:13px;font-weight:700;overflow-wrap:anywhere}
         @media (max-width:1024px){.hero,.main-grid{grid-template-columns:1fr}}
+        @media (max-width:900px){.summary-grid{grid-template-columns:1fr}}
         @media (max-width:820px){.progress{grid-template-columns:1fr;gap:14px}.progress:before{left:20px;top:24px;bottom:24px;right:auto;width:2px;height:auto;background:linear-gradient(180deg,rgba(15,118,110,.18),rgba(37,99,235,.1))}.step{grid-template-columns:42px 1fr;justify-items:start;align-items:center;text-align:left}.step-copy{display:grid;gap:2px}}
-        @media (max-width:720px){.shell{width:min(100vw - 18px,100%);padding:16px 0 28px}.topbar,.section-head,.total-row{flex-direction:column;align-items:flex-start}.hero-main,.hero-side,.section{padding:18px}.summary-grid{grid-template-columns:1fr}}
+        @media (max-width:720px){.shell{width:calc(100vw - 18px);padding:16px 0 28px}.topbar,.section-head,.total-row{flex-direction:column;align-items:flex-start}.topbar-pills{width:100%}.copy-btn{width:100%}.hero-main,.hero-side,.section{padding:18px}.title{max-width:none}.chip-row{display:grid;grid-template-columns:1fr}.chip{width:100%;justify-content:flex-start}}
+        @media (max-width:640px){
+            .shell{width:calc(100vw - 12px);padding:12px 0 24px}
+            .card{border-radius:22px}
+            .hero-main,.hero-side,.section{padding:16px}
+            .title{font-size:clamp(1.85rem,9vw,2.4rem);line-height:1.02}
+            .lead,.section-copy,.meta small,.address-card p,.note,.link-box{font-size:13px}
+            .side-box strong{font-size:19px}
+            .progress-shell{padding:14px}
+            .table-wrap{overflow:visible;border:0;background:transparent}
+            table,tbody,tr,td{display:block;width:100%}
+            table{min-width:0}
+            thead{display:none}
+            tbody{display:grid;gap:12px}
+            tr{display:grid;gap:10px;padding:14px;border:1px solid var(--line);border-radius:var(--r-md);background:#fff}
+            td{display:flex;justify-content:space-between;gap:12px;padding:0;border:0;font-size:13px}
+            td::before{content:attr(data-label);flex:0 0 78px;color:var(--soft);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+            td .service-name{display:block;max-width:100%;text-align:right}
+            td .unit-pill{margin-left:auto}
+            .total-row{padding:14px}
+            .total-row strong{font-size:18px}
+        }
+        @media (max-width:420px){
+            .pill{font-size:12px}
+            .topbar-pills{gap:6px}
+            .progress-shell{padding:12px}
+            .step strong{font-size:12px}
+            td{flex-direction:column;align-items:flex-start}
+            td::before{flex:none}
+            td .service-name,td .unit-pill{text-align:left}
+        }
     </style>
 </head>
 <body>
@@ -199,11 +231,11 @@
                             <tbody>
                                 @forelse($order->items as $item)
                                     <tr>
-                                        <td><span class="service-name">{{ $item->service_name_snapshot }}</span></td>
-                                        <td><span class="unit-pill">{{ $item->unit_type_snapshot }}</span></td>
-                                        <td>{{ number_format((float) ($item->qty ?? 0), 2) }}</td>
-                                        <td>{{ $item->weight_kg !== null ? number_format((float) $item->weight_kg, 2).' kg' : '-' }}</td>
-                                        <td>Rp{{ number_format((int) $item->subtotal_amount) }}</td>
+                                        <td data-label="Layanan"><span class="service-name">{{ $item->service_name_snapshot }}</span></td>
+                                        <td data-label="Unit"><span class="unit-pill">{{ $item->unit_type_snapshot }}</span></td>
+                                        <td data-label="Qty">{{ number_format((float) ($item->qty ?? 0), 2) }}</td>
+                                        <td data-label="Berat">{{ $item->weight_kg !== null ? number_format((float) $item->weight_kg, 2).' kg' : '-' }}</td>
+                                        <td data-label="Subtotal">Rp{{ number_format((int) $item->subtotal_amount) }}</td>
                                     </tr>
                                 @empty
                                     <tr>
