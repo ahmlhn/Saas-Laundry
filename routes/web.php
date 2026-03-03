@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Web\AuthController as WebAuthController;
 use App\Http\Controllers\Web\BillingController;
+use App\Http\Controllers\Web\CustomerTrackingController;
 use App\Http\Controllers\Web\DashboardController;
 use App\Http\Controllers\Web\ManagementController;
 use App\Http\Controllers\Web\MobileReleaseController as WebMobileReleaseController;
@@ -24,6 +25,7 @@ Route::get('/', function () {
 });
 
 Route::get('/mobile/latest', [WebMobileReleaseController::class, 'latest'])->name('mobile.latest');
+Route::get('/pelanggan/track/{token}', [CustomerTrackingController::class, 'show'])->name('customer.track');
 
 Route::middleware('guest')->group(function (): void {
     Route::get('/login', [WebAuthController::class, 'create'])->name('login');

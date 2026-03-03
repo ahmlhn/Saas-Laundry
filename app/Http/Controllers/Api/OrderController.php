@@ -1186,6 +1186,8 @@ class OrderController extends Controller
         $payload['estimated_completion_duration_days'] = $maxDurationMinutes !== null ? intdiv((int) $maxDurationMinutes, 24 * 60) : null;
         $payload['estimated_completion_duration_hours'] = $maxDurationMinutes !== null ? intdiv(((int) $maxDurationMinutes) % (24 * 60), 60) : 0;
         $payload['estimated_completion_is_late'] = $isLate;
+        $payload['tracking_token'] = $loadedOrder->tracking_token;
+        $payload['tracking_url'] = route('customer.track', ['token' => $loadedOrder->tracking_token]);
 
         return $payload;
     }

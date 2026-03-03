@@ -226,6 +226,7 @@
                 <p class="muted"><strong>Tanggal:</strong> {{ $orderRow->created_at?->format('d M Y H:i') }}</p>
                 <p class="muted"><strong>Pelanggan:</strong> {{ $orderRow->customer?->name ?: '-' }}</p>
                 <p class="muted"><strong>Telepon:</strong> {{ $orderRow->customer?->phone_normalized ?: '-' }}</p>
+                <p class="muted"><strong>Tracking:</strong> {{ route('customer.track', ['token' => $orderRow->tracking_token]) }}</p>
             </div>
         </section>
 

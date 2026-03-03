@@ -55,6 +55,7 @@
         'delivered' => 'Terkirim',
     ];
     $invoiceLabel = $orderRow->invoice_no ?: $orderRow->order_code;
+    $trackingUrl = route('customer.track', ['token' => $orderRow->tracking_token]);
     $paymentStatusClass = $orderRow->due_amount > 0 ? 'status-warning' : 'status-success';
     $paymentStatusLabel = $orderRow->due_amount > 0 ? 'Belum Lunas' : 'Lunas';
     $lastPayment = $orderRow->payments->first();
@@ -86,6 +87,7 @@
             <p class="muted-line">Informasi inti order dan status saat ini.</p>
         </div>
         <div class="filter-actions">
+            <a href="{{ $trackingUrl }}" class="btn btn-muted" target="_blank" rel="noopener">Link Pelanggan</a>
             <a href="{{ route('tenant.orders.receipt', ['order' => $orderRow->id]) }}" class="btn btn-muted" target="_blank" rel="noopener">Cetak Ringkas</a>
             <a href="{{ route('tenant.orders.index') }}" class="btn btn-ghost">Kembali</a>
         </div>
@@ -116,6 +118,11 @@
             <p class="muted-line">Dibuat</p>
             <p class="row-title">{{ $orderRow->created_at?->format('d M Y H:i') ?: '-' }}</p>
             <p class="row-subtitle">Update {{ $orderRow->updated_at?->format('d M Y H:i') ?: '-' }}</p>
+        </div>
+        <div>
+            <p class="muted-line">Tracking Pelanggan</p>
+            <p class="row-title"><a href="{{ $trackingUrl }}" target="_blank" rel="noopener">{{ $trackingUrl }}</a></p>
+            <p class="row-subtitle">Tautan publik tanpa login</p>
         </div>
         <div>
             <p class="muted-line">Pembayaran</p>

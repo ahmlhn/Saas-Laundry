@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
 class Order extends Model
 {
@@ -22,6 +23,7 @@ class Order extends Model
         'customer_id',
         'invoice_no',
         'order_code',
+        'tracking_token',
         'is_pickup_delivery',
         'laundry_status',
         'courier_status',
@@ -82,5 +84,23 @@ class Order extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);
+    }
+
+    protected static function booted(): void
+    {
+        static::creating(function (self $order): void {
+            if (! filled($order->tracking_token)) {
+                $order->tracking_token = self::generateTrackingToken();
+            }
+        });
+    }
+
+    public static function generateTrackingToken(): string
+    {
+        do {
+            $token = Str::lower(Str::random(24));
+        } while (self::query()->where('tracking_token', $token)->exists());
+
+        return $token;
     }
 }
