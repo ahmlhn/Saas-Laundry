@@ -2,9 +2,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useMemo, useState } from "react";
-import { Linking, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Alert, Linking, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
+import { checkAndroidAppUpdate, resolveAndroidUpdateUrl } from "../../features/appUpdate/updateChecker";
 import { AppPanel } from "../../components/ui/AppPanel";
+import { getApiErrorMessage } from "../../lib/httpClient";
 import { clearQueryCache } from "../../lib/queryCache";
 import type { AccountStackParamList } from "../../navigation/types";
 import type { AppTheme } from "../../theme/useAppTheme";
@@ -22,7 +24,7 @@ interface HelpItem {
 const HELP_ITEMS: HelpItem[] = [
   { key: "reset", title: "Reset Data", description: "Reset cache sinkronisasi lokal perangkat." },
   { key: "clear-cache", title: "Hapus Cache", description: "Bersihkan data cache untuk muat ulang API." },
-  { key: "check-update", title: "Cek Update", description: "Periksa versi app terbaru untuk tenant kamu.", link: "https://saas.daratlaut.com/mobile/latest" },
+  { key: "check-update", title: "Cek Update", description: "Periksa versi app terbaru untuk tenant kamu." },
   { key: "latest", title: "Terbaru di Cuci", description: "Lihat fitur baru dan catatan rilis terbaru.", link: "https://saas.daratlaut.com/changelog" },
   { key: "trial", title: "Perpanjang Masa Trial", description: "Hubungi tim sales untuk perpanjangan trial.", link: "https://saas.daratlaut.com/pricing" },
 ];
@@ -80,6 +82,23 @@ export function HelpInfoScreen() {
   const styles = useMemo(() => createStyles(theme, isTablet, isCompactLandscape), [theme, isTablet, isCompactLandscape]);
   const navigation = useNavigation<Navigation>();
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+
+  async function openExternalUrl(url: string, itemTitle: string): Promise<boolean> {
+    try {
+      const canOpen = await Linking.canOpenURL(url);
+      if (!canOpen) {
+        setActionMessage(`Tidak bisa membuka ${itemTitle} dari perangkat ini.`);
+        return false;
+      }
+
+      await Linking.openURL(url);
+      return true;
+    } catch {
+      setActionMessage(`Gagal membuka ${itemTitle}.`);
+      return false;
+    }
+  }
 
   async function openLink(item: HelpItem): Promise<void> {
     if (!item.link) {
@@ -87,17 +106,65 @@ export function HelpInfoScreen() {
       return;
     }
 
+    const opened = await openExternalUrl(item.link, item.title);
+    if (opened) {
+      setActionMessage(`${item.title} dibuka di browser/aplikasi terkait.`);
+    }
+  }
+
+  async function handleCheckUpdate(): Promise<void> {
+    if (checkingUpdate) {
+      return;
+    }
+
+    if (Platform.OS !== "android") {
+      setActionMessage("Update langsung dari server saat ini hanya dipakai untuk Android. iPhone tetap perlu App Store atau TestFlight.");
+      return;
+    }
+
+    setCheckingUpdate(true);
+    setActionMessage("Memeriksa versi aplikasi terbaru dari server...");
+
     try {
-      const canOpen = await Linking.canOpenURL(item.link);
-      if (!canOpen) {
-        setActionMessage(`Tidak bisa membuka ${item.title} dari perangkat ini.`);
+      const result = await checkAndroidAppUpdate();
+      const latestVersion = result.latestVersion;
+      const updateRequired = result.status === "required";
+
+      if (result.status === "current") {
+        setActionMessage(`Aplikasi sudah versi terbaru (${result.currentVersion}).`);
         return;
       }
 
-      await Linking.openURL(item.link);
-      setActionMessage(`${item.title} dibuka di browser/aplikasi terkait.`);
-    } catch {
-      setActionMessage(`Gagal membuka ${item.title}.`);
+      const primaryUrl = resolveAndroidUpdateUrl(result.release);
+      const releaseNote = result.release.notes[0] ?? null;
+
+      if (!primaryUrl) {
+        setActionMessage(`Versi ${latestVersion} tersedia, tetapi link APK belum dikonfigurasi di server.`);
+        return;
+      }
+
+      const dialogTitle = updateRequired ? "Update wajib tersedia" : "Update tersedia";
+      const dialogMessage = updateRequired
+        ? `Versi ${latestVersion} tersedia. Minimal versi ${result.minimumSupportedVersion} diperlukan untuk lanjut memakai aplikasi.${releaseNote ? `\n\nCatatan: ${releaseNote}` : ""}`
+        : `Versi ${latestVersion} tersedia untuk diunduh.${releaseNote ? `\n\nCatatan: ${releaseNote}` : ""}`;
+
+      Alert.alert(dialogTitle, dialogMessage, [
+        { text: "Nanti", style: "cancel" },
+        {
+          text: result.release.download_url ? "Unduh APK" : "Buka Halaman",
+          onPress: () => {
+            void openExternalUrl(primaryUrl, "Update aplikasi").then((opened) => {
+              if (opened) {
+                setActionMessage(`Versi ${latestVersion} dibuka. Lanjutkan instalasi APK dari browser perangkat.`);
+              }
+            });
+          },
+        },
+      ]);
+    } catch (error) {
+      setActionMessage(getApiErrorMessage(error));
+    } finally {
+      setCheckingUpdate(false);
     }
   }
 
@@ -105,6 +172,11 @@ export function HelpInfoScreen() {
     if (item.key === "reset" || item.key === "clear-cache") {
       clearQueryCache();
       setActionMessage("Cache lokal berhasil dibersihkan. Silakan refresh data pada halaman operasional.");
+      return;
+    }
+
+    if (item.key === "check-update") {
+      await handleCheckUpdate();
       return;
     }
 
@@ -135,7 +207,12 @@ export function HelpInfoScreen() {
         </View>
         <View style={styles.listWrap}>
           {HELP_ITEMS.map((item) => (
-            <Pressable key={item.key} onPress={() => void handlePress(item)} style={({ pressed }) => [styles.itemRow, pressed ? styles.itemRowPressed : null]}>
+            <Pressable
+              key={item.key}
+              disabled={checkingUpdate && item.key === "check-update"}
+              onPress={() => void handlePress(item)}
+              style={({ pressed }) => [styles.itemRow, pressed ? styles.itemRowPressed : null, checkingUpdate && item.key === "check-update" ? styles.itemRowDisabled : null]}
+            >
               <View style={styles.iconChip}>
                 <Ionicons color={theme.colors.info} name={resolveHelpIcon(item.key)} size={15} />
               </View>
@@ -143,7 +220,11 @@ export function HelpInfoScreen() {
                 <Text style={styles.itemTitle}>{item.title}</Text>
                 <Text style={styles.itemDescription}>{item.description}</Text>
               </View>
-              <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={16} />
+              {checkingUpdate && item.key === "check-update" ? (
+                <ActivityIndicator color={theme.colors.info} size="small" />
+              ) : (
+                <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={16} />
+              )}
             </Pressable>
           ))}
         </View>
@@ -276,6 +357,9 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
     itemRowPressed: {
       opacity: 0.8,
+    },
+    itemRowDisabled: {
+      opacity: 0.72,
     },
     iconChip: {
       width: 30,

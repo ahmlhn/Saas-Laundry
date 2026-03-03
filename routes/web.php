@@ -4,6 +4,7 @@ use App\Http\Controllers\Web\AuthController as WebAuthController;
 use App\Http\Controllers\Web\BillingController;
 use App\Http\Controllers\Web\DashboardController;
 use App\Http\Controllers\Web\ManagementController;
+use App\Http\Controllers\Web\MobileReleaseController as WebMobileReleaseController;
 use App\Http\Controllers\Web\OrderBoardController;
 use App\Http\Controllers\Web\SubscriptionController;
 use App\Http\Controllers\Web\Platform\AuthController as PlatformAuthController;
@@ -20,6 +21,8 @@ Route::get('/', function () {
 
     return redirect()->route('login');
 });
+
+Route::get('/mobile/latest', [WebMobileReleaseController::class, 'latest'])->name('mobile.latest');
 
 Route::middleware('guest')->group(function (): void {
     Route::get('/login', [WebAuthController::class, 'create'])->name('login');

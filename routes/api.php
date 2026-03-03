@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\BillingController;
 use App\Http\Controllers\Api\BriPaymentWebhookController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\InvoiceRangeController;
+use App\Http\Controllers\Api\MobileReleaseController;
 use App\Http\Controllers\Api\OutletManagementController;
 use App\Http\Controllers\Api\OutletContextController;
 use App\Http\Controllers\Api\OutletServiceController;
@@ -27,6 +28,8 @@ Route::get('/health', static fn () => response()->json([
     'ok' => true,
     'time' => now()->toIso8601String(),
 ]));
+
+Route::get('/mobile/releases/android/latest', [MobileReleaseController::class, 'latestAndroid']);
 
 Route::prefix('auth')->group(function (): void {
     Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:auth-register');

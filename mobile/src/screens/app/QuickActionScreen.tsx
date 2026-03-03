@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { FlashList } from "@shopify/flash-list";
 import type { NavigationProp, RouteProp } from "@react-navigation/native";
 import { useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -24,6 +25,7 @@ import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { listCustomers, listCustomersPage } from "../../features/customers/customerApi";
+import { readCustomerDeviceCache, writeCustomerDeviceCache } from "../../features/customers/customerDeviceCache";
 import { formatCustomerPhoneDisplay } from "../../features/customers/customerPhone";
 import { parseCustomerProfileMeta } from "../../features/customers/customerProfileNote";
 import { createOrder, getOrderDetail, listOrders, updateOrder } from "../../features/orders/orderApi";
@@ -486,6 +488,7 @@ export function QuickActionScreen() {
   const route = useRoute<RouteProp<AppTabParamList, "QuickActionTab">>();
   const isFocused = useIsFocused();
   const { session, selectedOutlet, refreshSession } = useSession();
+  const tenantId = session?.user.tenant_id ?? null;
 
   const roles = session?.roles ?? [];
   const canCreateOrder = hasAnyRole(roles, ["owner", "admin", "cashier"]);
@@ -559,6 +562,7 @@ export function QuickActionScreen() {
   const [hasSavedDraft, setHasSavedDraft] = useState(() => quickActionDraftCache !== null);
   const [exitDraftModalVisible, setExitDraftModalVisible] = useState(false);
   const customerRequestSeqRef = useRef(0);
+  const customerCacheTenantRef = useRef<string | null>(null);
   const contentScrollRef = useRef<ScrollView | null>(null);
   const serviceInputRefs = useRef<Record<string, TextInput | null>>({});
   const serviceSearchInputRef = useRef<TextInput | null>(null);
@@ -581,6 +585,20 @@ export function QuickActionScreen() {
   useEffect(() => {
     selectedPerfumeServiceIdRef.current = selectedPerfumeServiceId;
   }, [selectedPerfumeServiceId]);
+
+  useEffect(() => {
+    if (customerCacheTenantRef.current === tenantId) {
+      return;
+    }
+
+    customerCacheTenantRef.current = tenantId;
+    customerRequestSeqRef.current += 1;
+    customerListClientCache = [];
+    customerListAutoLoadedOnce = false;
+    setCustomers([]);
+    setLoadingCustomers(false);
+    setLoadingMoreCustomers(false);
+  }, [tenantId]);
 
   useEffect(() => {
     if (!selectedOutlet || !canCreateOrder) {
@@ -704,6 +722,7 @@ export function QuickActionScreen() {
     const timeoutId = setTimeout(() => {
       void loadCustomers(true, {
         fetchAll: true,
+        hydrateDeviceCache: true,
         keyword: "",
       });
     }, CUSTOMER_SEARCH_DEBOUNCE_MS);
@@ -768,6 +787,7 @@ export function QuickActionScreen() {
     options?: {
       keyword?: string;
       fetchAll?: boolean;
+      hydrateDeviceCache?: boolean;
     },
   ): Promise<void> {
     const keyword = options?.keyword?.trim() ?? "";
@@ -782,6 +802,26 @@ export function QuickActionScreen() {
 
     try {
       const fetchAll = options?.fetchAll === true;
+      const canHydrateDeviceCache =
+        fetchAll &&
+        keyword === "" &&
+        options?.hydrateDeviceCache !== false &&
+        typeof tenantId === "string" &&
+        tenantId.length > 0 &&
+        customerListClientCache.length === 0;
+
+      if (canHydrateDeviceCache) {
+        const cachedCustomers = await readCustomerDeviceCache(tenantId);
+        if (requestSeq !== customerRequestSeqRef.current) {
+          return;
+        }
+
+        if (cachedCustomers && cachedCustomers.length > 0) {
+          applyCustomerState(cachedCustomers);
+          setLoadingCustomers(false);
+          setLoadingMoreCustomers(true);
+        }
+      }
 
       if (fetchAll) {
         const data = await listCustomers({
@@ -794,6 +834,9 @@ export function QuickActionScreen() {
           return;
         }
         applyCustomerState(data);
+        if (keyword === "" && typeof tenantId === "string" && tenantId.length > 0) {
+          void writeCustomerDeviceCache(tenantId, data);
+        }
         customerListAutoLoadedOnce = true;
         return;
       }
@@ -3047,9 +3090,15 @@ export function QuickActionScreen() {
                       {loadingCustomers ? (
                         <ActivityIndicator color={theme.colors.info} size="small" />
                       ) : customerListEntries.length > 0 ? (
-                        <ScrollView contentContainerStyle={styles.customerListContent} keyboardShouldPersistTaps="handled" nestedScrollEnabled style={styles.customerList}>
-                          {customerListEntries.map((entry) => (
-                            <Pressable key={entry.customer.id} onPress={() => handleSelectCustomer(entry.customer)} style={({ pressed }) => [styles.customerItem, pressed ? styles.pressed : null]}>
+                        <FlashList
+                          contentContainerStyle={styles.customerListContent}
+                          data={customerListEntries}
+                          drawDistance={280}
+                          keyboardShouldPersistTaps="handled"
+                          keyExtractor={(entry) => entry.customer.id}
+                          nestedScrollEnabled
+                          renderItem={({ item: entry }) => (
+                            <Pressable onPress={() => handleSelectCustomer(entry.customer)} style={({ pressed }) => [styles.customerItem, pressed ? styles.pressed : null]}>
                               <View style={styles.customerItemMain}>
                                 <Text numberOfLines={1} style={styles.customerItemName}>
                                   {entry.customer.name}
@@ -3063,8 +3112,11 @@ export function QuickActionScreen() {
                               </View>
                               <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={16} />
                             </Pressable>
-                          ))}
-                        </ScrollView>
+                          )}
+                          ItemSeparatorComponent={() => <View style={styles.customerListSeparator} />}
+                          showsVerticalScrollIndicator={false}
+                          style={styles.customerList}
+                        />
                       ) : (
                         <Text style={styles.infoText}>Data konsumen tidak ditemukan.</Text>
                       )}
@@ -4309,8 +4361,10 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       maxHeight: isTablet ? 470 : 420,
     },
     customerListContent: {
-      gap: 5,
       paddingBottom: 2,
+    },
+    customerListSeparator: {
+      height: 5,
     },
     customerItem: {
       borderWidth: 1,
