@@ -6,7 +6,7 @@ use App\Models\MobileReleaseSetting;
 use App\Models\Role;
 use App\Models\User;
 use Database\Seeders\RolesAndPlansSeeder;
-use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -14,7 +14,7 @@ use Tests\TestCase;
 
 class PlatformMobileReleaseWebTest extends TestCase
 {
-    use DatabaseTransactions;
+    use RefreshDatabase;
 
     private User $platformOwner;
 

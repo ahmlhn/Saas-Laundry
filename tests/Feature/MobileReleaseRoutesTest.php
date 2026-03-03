@@ -3,13 +3,13 @@
 namespace Tests\Feature;
 
 use App\Models\MobileReleaseSetting;
-use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Config;
 use Tests\TestCase;
 
 class MobileReleaseRoutesTest extends TestCase
 {
-    use DatabaseTransactions;
+    use RefreshDatabase;
 
     public function test_android_release_api_returns_public_release_metadata(): void
     {
