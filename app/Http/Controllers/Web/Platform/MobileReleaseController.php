@@ -88,9 +88,12 @@ class MobileReleaseController extends Controller
             $setting->uploaded_file_disk = 'public';
             $setting->uploaded_file_path = $newUploadedPath;
             $setting->uploaded_original_name = $uploadedApk->getClientOriginalName();
-            $downloadUrl = Storage::disk('public')->url($newUploadedPath);
+            $downloadUrl = $this->normalizePublicUrl(
+                (string) Storage::disk('public')->url($newUploadedPath),
+                $request
+            );
         } else {
-            $currentManagedUrl = $this->resolveManagedUploadUrl($setting);
+            $currentManagedUrl = $this->resolveManagedUploadUrl($setting, $request);
 
             if ($currentManagedUrl !== null && $downloadUrl !== $currentManagedUrl) {
                 $this->deleteManagedUploadIfPresent($setting);
@@ -169,7 +172,7 @@ class MobileReleaseController extends Controller
         }
     }
 
-    private function resolveManagedUploadUrl(MobileReleaseSetting $setting): ?string
+    private function resolveManagedUploadUrl(MobileReleaseSetting $setting, Request $request): ?string
     {
         $disk = $setting->uploaded_file_disk ?: 'public';
 
@@ -177,6 +180,34 @@ class MobileReleaseController extends Controller
             return null;
         }
 
-        return Storage::disk($disk)->url($setting->uploaded_file_path);
+        return $this->normalizePublicUrl(
+            (string) Storage::disk($disk)->url($setting->uploaded_file_path),
+            $request
+        );
+    }
+
+    private function normalizePublicUrl(string $url, Request $request): string
+    {
+        $normalized = trim($url);
+
+        if ($normalized === '') {
+            return $normalized;
+        }
+
+        if (Str::startsWith($normalized, ['http://', 'https://'])) {
+            return $normalized;
+        }
+
+        $base = rtrim($request->getSchemeAndHttpHost(), '/');
+
+        if (Str::startsWith($normalized, '//')) {
+            return $request->getScheme().':'.$normalized;
+        }
+
+        if (Str::startsWith($normalized, '/')) {
+            return $base.$normalized;
+        }
+
+        return $base.'/'.ltrim($normalized, '/');
     }
 }

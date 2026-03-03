@@ -38,7 +38,7 @@
       ],
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize",
-      "package": "com.anonymous.saaslaundrymobile"
+      "package": "com.daratlaut.cuci"
     },
     "web": {
       "favicon": "./assets/favicon.png"
