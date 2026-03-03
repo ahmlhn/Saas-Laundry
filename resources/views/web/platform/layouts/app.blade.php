@@ -26,6 +26,9 @@
                 <a href="{{ route('platform.subscriptions.index') }}" class="panel-link {{ request()->routeIs('platform.subscriptions.*') ? 'is-active' : '' }}">
                     <span class="panel-link-text">Tenant Subscriptions</span>
                 </a>
+                <a href="{{ route('platform.mobile-release.edit') }}" class="panel-link {{ request()->routeIs('platform.mobile-release.*') ? 'is-active' : '' }}">
+                    <span class="panel-link-text">Mobile Release</span>
+                </a>
             </nav>
 
             <div class="panel-sidebar-foot">

@@ -2,6 +2,8 @@
 
 namespace App\Domain\Mobile;
 
+use App\Models\MobileReleaseSetting;
+
 class MobileReleaseCatalog
 {
     /**
@@ -19,6 +21,24 @@ class MobileReleaseCatalog
      */
     public function android(): array
     {
+        $setting = MobileReleaseSetting::query()
+            ->where('platform', 'android')
+            ->first();
+
+        if ($setting) {
+            return [
+                'platform' => 'android',
+                'version' => $setting->version,
+                'build' => max(1, (int) $setting->build),
+                'download_url' => $this->normalizeOptionalString($setting->download_url),
+                'minimum_supported_version' => $this->normalizeOptionalString($setting->minimum_supported_version),
+                'published_at' => $setting->published_at?->toIso8601String(),
+                'checksum_sha256' => $this->normalizeOptionalString($setting->checksum_sha256),
+                'file_size_bytes' => $setting->file_size_bytes !== null && $setting->file_size_bytes > 0 ? (int) $setting->file_size_bytes : null,
+                'notes' => $this->normalizeNotes($setting->release_notes ?? []),
+            ];
+        }
+
         /** @var array<string, mixed> $config */
         $config = (array) config('mobile_release.android', []);
 

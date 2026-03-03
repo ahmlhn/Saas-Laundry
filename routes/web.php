@@ -8,6 +8,7 @@ use App\Http\Controllers\Web\MobileReleaseController as WebMobileReleaseControll
 use App\Http\Controllers\Web\OrderBoardController;
 use App\Http\Controllers\Web\SubscriptionController;
 use App\Http\Controllers\Web\Platform\AuthController as PlatformAuthController;
+use App\Http\Controllers\Web\Platform\MobileReleaseController as PlatformMobileReleaseController;
 use App\Http\Controllers\Web\Platform\SubscriptionController as PlatformSubscriptionController;
 use App\Http\Controllers\Web\WaSettingsController;
 use Illuminate\Support\Facades\Route;
@@ -93,5 +94,7 @@ Route::prefix('platform')->group(function (): void {
         Route::post('/subscriptions/invoices/{invoiceId}/verify', [PlatformSubscriptionController::class, 'verifyInvoice'])->name('platform.subscriptions.invoices.verify');
         Route::post('/subscriptions/tenants/{tenant}/suspend', [PlatformSubscriptionController::class, 'suspendTenant'])->name('platform.subscriptions.tenants.suspend');
         Route::post('/subscriptions/tenants/{tenant}/activate', [PlatformSubscriptionController::class, 'activateTenant'])->name('platform.subscriptions.tenants.activate');
+        Route::get('/mobile-release', [PlatformMobileReleaseController::class, 'edit'])->name('platform.mobile-release.edit');
+        Route::post('/mobile-release', [PlatformMobileReleaseController::class, 'update'])->name('platform.mobile-release.update');
     });
 });
