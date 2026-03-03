@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -151,6 +152,7 @@ export function OrderPaymentScreen() {
   const resultTitle = isReceiptResult ? "Pesanan Berhasil Disimpan" : (result?.remainingAmount ?? 0) > 0 ? "Pembayaran Tercatat" : "Pembayaran Berhasil";
   const receiptShareWidth = receiptPaperWidth === "80mm" ? 420 : 300;
   const customerPhoneDigits = useMemo(() => normalizeWhatsAppPhone(detail?.customer?.phone_normalized), [detail?.customer?.phone_normalized]);
+  const customerTrackingUrl = detail?.tracking_url?.trim() ?? "";
   const customerReceiptShareText = useMemo(
     () =>
       detail
@@ -453,6 +455,21 @@ export function OrderPaymentScreen() {
     }
   }
 
+  async function handleCopyTrackingLink(): Promise<void> {
+    if (!customerTrackingUrl) {
+      setErrorMessage("Link tracking pelanggan belum tersedia.");
+      return;
+    }
+
+    try {
+      await Clipboard.setStringAsync(customerTrackingUrl);
+      setErrorMessage(null);
+      setNoticeMessage("Link pelanggan berhasil disalin.");
+    } catch {
+      setErrorMessage("Gagal menyalin link pelanggan.");
+    }
+  }
+
   function appendDigits(value: string): void {
     setPaymentDigits((current) => normalizeMoneyInput(`${current}${value}`));
     setErrorMessage(null);
@@ -539,6 +556,12 @@ export function OrderPaymentScreen() {
                   </Text>
                 </View>
               </View>
+              {customerTrackingUrl ? (
+                <Pressable onPress={() => void handleCopyTrackingLink()} style={({ pressed }) => [styles.inlineActionButton, pressed ? styles.pressed : null]}>
+                  <Ionicons color={theme.colors.info} name="copy-outline" size={16} />
+                  <Text style={styles.inlineActionButtonText}>Salin Link Pelanggan</Text>
+                </Pressable>
+              ) : null}
               <View style={styles.amountDisplayWrap}>
                 <Text style={styles.inputAmountCaption}>Nominal Diterima</Text>
                 <Text style={styles.bigAmount}>{formatMoney(tenderedAmount)}</Text>
@@ -641,6 +664,12 @@ export function OrderPaymentScreen() {
                 <View style={styles.actionCopy}><Text style={styles.actionTitle}>Kirim ke WhatsApp</Text><Text style={styles.actionHint}>{isReceiptResult ? "Kirim ringkasan pesanan dan tagihan ke pelanggan" : "Kirim status dan ringkasan pembayaran ke pelanggan"}</Text></View>
                 <Ionicons color={theme.colors.success} name="logo-whatsapp" size={17} />
               </Pressable>
+              {customerTrackingUrl ? (
+                <Pressable onPress={() => void handleCopyTrackingLink()} style={({ pressed }) => [styles.actionRow, pressed ? styles.pressed : null]}>
+                  <View style={styles.actionCopy}><Text style={styles.actionTitle}>Salin Link Pelanggan</Text><Text style={styles.actionHint}>Bagikan halaman status order publik ke pelanggan</Text></View>
+                  <Ionicons color={theme.colors.info} name="copy-outline" size={17} />
+                </Pressable>
+              ) : null}
               <Pressable onPress={openOrderDetail} style={({ pressed }) => [styles.actionRow, pressed ? styles.pressed : null]}>
                 <View style={styles.actionCopy}><Text style={styles.actionTitle}>Buka Detail Order</Text><Text style={styles.actionHint}>Lanjut cek status dan ringkasan pesanan</Text></View>
                 <Ionicons color={theme.colors.info} name="receipt-outline" size={17} />
@@ -702,6 +731,24 @@ const createStyles = (
     },
     amountHeroTopRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: isVeryCompactHeight ? 8 : 10 },
     amountTopBlock: { flex: 1, gap: 2 },
+    inlineActionButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      minHeight: isVeryCompactHeight ? 34 : isCompactHeight ? 36 : 40,
+      paddingHorizontal: 12,
+      borderWidth: 1,
+      borderColor: theme.colors.info,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.primarySoft,
+      alignSelf: "flex-start",
+    },
+    inlineActionButtonText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.semibold,
+      fontSize: isTablet ? 13 : isVeryCompactHeight ? 10.5 : 12,
+    },
     amountDisplayWrap: { alignItems: "center", gap: 4 },
     amountHeroHint: { color: theme.colors.textSecondary, fontFamily: theme.fonts.medium, fontSize: isTablet ? 13 : 11.5, textAlign: "center" },
     customerChip: {

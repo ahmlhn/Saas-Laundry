@@ -50,6 +50,8 @@ export interface OrderSummary {
   courier_user_id: string | null;
   invoice_no: string | null;
   order_code: string;
+  tracking_token?: string;
+  tracking_url?: string;
   is_pickup_delivery: boolean;
   laundry_status: string;
   courier_status: string | null;
@@ -66,6 +68,8 @@ export interface OrderDetail extends OrderSummary {
   shipping_fee_amount?: number;
   discount_amount?: number;
   notes?: string | null;
+  tracking_token?: string;
+  tracking_url?: string;
   estimated_completion_at?: string | null;
   estimated_completion_duration_days?: number | null;
   estimated_completion_duration_hours?: number | null;

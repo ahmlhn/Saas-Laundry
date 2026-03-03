@@ -88,6 +88,7 @@
         </div>
         <div class="filter-actions">
             <a href="{{ $trackingUrl }}" class="btn btn-muted" target="_blank" rel="noopener">Link Pelanggan</a>
+            <button type="button" class="btn btn-ghost" onclick="const trackingUrl = @js($trackingUrl); navigator.clipboard.writeText(trackingUrl).then(() => { this.textContent = 'Tersalin'; setTimeout(() => this.textContent = 'Salin Link', 1500); });">Salin Link</button>
             <a href="{{ route('tenant.orders.receipt', ['order' => $orderRow->id]) }}" class="btn btn-muted" target="_blank" rel="noopener">Cetak Ringkas</a>
             <a href="{{ route('tenant.orders.index') }}" class="btn btn-ghost">Kembali</a>
         </div>
@@ -122,7 +123,7 @@
         <div>
             <p class="muted-line">Tracking Pelanggan</p>
             <p class="row-title"><a href="{{ $trackingUrl }}" target="_blank" rel="noopener">{{ $trackingUrl }}</a></p>
-            <p class="row-subtitle">Tautan publik tanpa login</p>
+            <p class="row-subtitle">Tautan publik tanpa login. Gunakan tombol Salin Link di atas untuk membagikannya.</p>
         </div>
         <div>
             <p class="muted-line">Pembayaran</p>
