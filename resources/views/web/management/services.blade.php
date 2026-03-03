@@ -83,7 +83,7 @@
                         <span class="status-badge {{ $row->active ? 'status-success' : 'status-neutral' }}">{{ $row->active ? 'aktif' : 'nonaktif' }}</span>
                     </td>
                     <td>
-                        <form method="POST" action="{{ route('tenant.services.archive', ['tenant' => $tenant->id, 'service' => $row->id]) }}" class="inline-form">
+                        <form method="POST" action="{{ route('tenant.services.archive', ['tenant' => $tenant, 'service' => $row->id]) }}" class="inline-form">
                             @csrf
                             <button type="submit" class="btn btn-danger btn-sm">Arsipkan</button>
                         </form>
@@ -124,7 +124,7 @@
                     <td>Rp {{ number_format($row->base_price_amount) }}</td>
                     <td>{{ optional($row->deleted_at)->format('d M Y H:i') }}</td>
                     <td>
-                        <form method="POST" action="{{ route('tenant.services.restore', ['tenant' => $tenant->id, 'service' => $row->id]) }}" class="inline-form">
+                        <form method="POST" action="{{ route('tenant.services.restore', ['tenant' => $tenant, 'service' => $row->id]) }}" class="inline-form">
                             @csrf
                             <button type="submit" class="btn btn-muted btn-sm">Pulihkan</button>
                         </form>

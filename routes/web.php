@@ -22,7 +22,7 @@ Route::get('/', function () {
     }
 
     if ($tenant) {
-        return redirect()->route('tenant.login', ['tenant' => $tenant->id]);
+        return redirect()->route('tenant.login', ['tenant' => $tenant]);
     }
 
     return view('welcome');
@@ -41,7 +41,7 @@ Route::get('/login', function () {
         abort(404, 'No tenant available.');
     }
 
-    return redirect()->route('tenant.login', ['tenant' => $tenant->id]);
+    return redirect()->route('tenant.login', ['tenant' => $tenant]);
 })->name('login');
 
 Route::prefix('t/{tenant}')->group(function (): void {

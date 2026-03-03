@@ -86,7 +86,7 @@
         <p class="muted-line">Provider aktif menentukan jalur pengiriman WA tenant.</p>
     </div>
 
-    <form method="POST" action="{{ route('tenant.wa.provider-config', ['tenant' => $tenant->id]) }}" class="filters-grid">
+    <form method="POST" action="{{ route('tenant.wa.provider-config', ['tenant' => $tenant]) }}" class="filters-grid">
         @csrf
 
         <div>

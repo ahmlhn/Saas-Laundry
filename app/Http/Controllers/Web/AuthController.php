@@ -26,7 +26,7 @@ class AuthController extends Controller
         $user = $request->user();
 
         if ($user && $user->tenant_id === $tenant->id && $user->hasAnyRole(['owner', 'admin'])) {
-            return redirect()->route('tenant.dashboard', ['tenant' => $tenant->id]);
+            return redirect()->route('tenant.dashboard', ['tenant' => $tenant]);
         }
 
         return view('web.auth.login', [
@@ -99,7 +99,7 @@ class AuthController extends Controller
         );
 
         return redirect()
-            ->route('tenant.dashboard', ['tenant' => $tenant->id])
+            ->route('tenant.dashboard', ['tenant' => $tenant])
             ->with('status', 'Login success.');
     }
 
@@ -126,6 +126,6 @@ class AuthController extends Controller
             );
         }
 
-        return redirect()->route('tenant.login', ['tenant' => $tenant->id]);
+        return redirect()->route('tenant.login', ['tenant' => $tenant]);
     }
 }

@@ -39,12 +39,12 @@
             <h3>Form Transaksi</h3>
             <p class="muted-line">Lengkapi data berikut. Hitungan final akan divalidasi ulang di server.</p>
         </div>
-        <a href="{{ route('tenant.orders.index', ['tenant' => $tenant->id]) }}" class="btn btn-ghost">Kembali ke Papan Pesanan</a>
+        <a href="{{ route('tenant.orders.index', ['tenant' => $tenant]) }}" class="btn btn-ghost">Kembali ke Papan Pesanan</a>
     </div>
 
     <form
         method="POST"
-        action="{{ route('tenant.orders.store', ['tenant' => $tenant->id]) }}"
+        action="{{ route('tenant.orders.store', ['tenant' => $tenant]) }}"
         class="page-shell"
         x-data="webOrderFormBuilder({
             services: @js($services->map(fn ($service) => [
@@ -277,7 +277,7 @@
             <textarea id="notes" name="notes" rows="3" placeholder="opsional catatan order">{{ old('notes') }}</textarea>
             <div class="filter-actions" style="margin-top: 10px;">
                 <button type="submit" class="btn btn-primary">Simpan Transaksi</button>
-                <a href="{{ route('tenant.orders.index', ['tenant' => $tenant->id]) }}" class="btn btn-ghost">Batal</a>
+                <a href="{{ route('tenant.orders.index', ['tenant' => $tenant]) }}" class="btn btn-ghost">Batal</a>
             </div>
         </article>
     </form>

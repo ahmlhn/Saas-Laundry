@@ -62,7 +62,7 @@
         <p class="muted-line">Buat pengguna baru, pilih peran, dan tetapkan outlet sekaligus.</p>
     </div>
 
-    <form method="POST" action="{{ route('tenant.users.store', ['tenant' => $tenant->id]) }}" class="filters-grid">
+    <form method="POST" action="{{ route('tenant.users.store', ['tenant' => $tenant]) }}" class="filters-grid">
         @csrf
         <div>
             <label for="invite_name">Nama</label>
@@ -163,7 +163,7 @@
                     </td>
                     <td>
                         @if($canManage)
-                            <form method="POST" action="{{ route('tenant.users.assignment', ['tenant' => $tenant->id, 'managedUser' => $row->id]) }}" class="filters-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
+                            <form method="POST" action="{{ route('tenant.users.assignment', ['tenant' => $tenant, 'managedUser' => $row->id]) }}" class="filters-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
                                 @csrf
                                 <div>
                                     <label>Peran</label>
@@ -208,7 +208,7 @@
                     </td>
                     <td>
                         @if($ownerMode && $row->id !== $user->id)
-                            <form method="POST" action="{{ route('tenant.users.archive', ['tenant' => $tenant->id, 'managedUser' => $row->id]) }}" class="inline-form">
+                            <form method="POST" action="{{ route('tenant.users.archive', ['tenant' => $tenant, 'managedUser' => $row->id]) }}" class="inline-form">
                                 @csrf
                                 <button type="submit" class="btn btn-danger btn-sm">Arsipkan</button>
                             </form>
@@ -261,7 +261,7 @@
                     </td>
                     <td>{{ optional($row->deleted_at)->format('d M Y H:i') }}</td>
                     <td>
-                        <form method="POST" action="{{ route('tenant.users.restore', ['tenant' => $tenant->id, 'managedUser' => $row->id]) }}" class="inline-form">
+                        <form method="POST" action="{{ route('tenant.users.restore', ['tenant' => $tenant, 'managedUser' => $row->id]) }}" class="inline-form">
                             @csrf
                             <button type="submit" class="btn btn-muted btn-sm">Pulihkan</button>
                         </form>

@@ -207,27 +207,29 @@ class WebPanelTest extends TestCase
 
     public function test_admin_can_login_and_open_web_panel_pages(): void
     {
-        $login = $this->post('/t/'.$this->tenantA->id.'/login', [
+        $tenantPath = $this->tenantA->slug;
+
+        $login = $this->post('/t/'.$tenantPath.'/login', [
             'email' => 'admin@panel.local',
             'password' => 'password',
         ]);
 
-        $login->assertRedirect(route('tenant.dashboard', ['tenant' => $this->tenantA->id]));
+        $login->assertRedirect(route('tenant.dashboard', ['tenant' => $this->tenantA]));
 
         $this->followRedirects($login)
             ->assertOk()
             ->assertSeeText('Dasbor');
 
-        $this->get('/t/'.$this->tenantA->id.'/orders')->assertOk()->assertSeeText('Papan Pesanan');
-        $this->get('/t/'.$this->tenantA->id.'/orders/create')->assertOk()->assertSeeText('Buat Transaksi');
-        $this->get('/t/'.$this->tenantA->id.'/orders/'.$this->orderA->id)->assertOk()->assertSeeText('Ringkasan Pesanan');
-        $this->get('/t/'.$this->tenantA->id.'/users')->assertOk()->assertSeeText('Pengguna');
-        $this->get('/t/'.$this->tenantA->id.'/customers')->assertOk()->assertSeeText('Pelanggan');
-        $this->get('/t/'.$this->tenantA->id.'/services')->assertOk()->assertSeeText('Layanan');
-        $this->get('/t/'.$this->tenantA->id.'/billing')->assertOk()->assertSeeText('Billing & Kuota');
-        $this->get('/t/'.$this->tenantA->id.'/outlet-services')->assertOk()->assertSeeText('Layanan Outlet');
-        $this->get('/t/'.$this->tenantA->id.'/outlets')->assertOk()->assertSeeText('Outlet');
-        $this->get('/t/'.$this->tenantA->id.'/shipping-zones')->assertOk()->assertSeeText('Zona Pengantaran');
+        $this->get('/t/'.$tenantPath.'/orders')->assertOk()->assertSeeText('Papan Pesanan');
+        $this->get('/t/'.$tenantPath.'/orders/create')->assertOk()->assertSeeText('Buat Transaksi');
+        $this->get('/t/'.$tenantPath.'/orders/'.$this->orderA->id)->assertOk()->assertSeeText('Detail Pesanan');
+        $this->get('/t/'.$tenantPath.'/users')->assertOk()->assertSeeText('Pengguna');
+        $this->get('/t/'.$tenantPath.'/customers')->assertOk()->assertSeeText('Pelanggan');
+        $this->get('/t/'.$tenantPath.'/services')->assertOk()->assertSeeText('Layanan');
+        $this->get('/t/'.$tenantPath.'/billing')->assertOk()->assertSeeText('Billing & Kuota');
+        $this->get('/t/'.$tenantPath.'/outlet-services')->assertOk()->assertSeeText('Layanan Outlet');
+        $this->get('/t/'.$tenantPath.'/outlets')->assertOk()->assertSeeText('Outlet');
+        $this->get('/t/'.$tenantPath.'/shipping-zones')->assertOk()->assertSeeText('Zona Pengantaran');
 
         $this->assertDatabaseHas('audit_events', [
             'tenant_id' => $this->tenantA->id,
@@ -300,14 +302,14 @@ class WebPanelTest extends TestCase
         $this->actingAs($this->admin, 'web')
             ->get('/t/'.$tenant.'/orders/'.$this->orderA->id)
             ->assertOk()
-            ->assertSeeText('Selesai (tidak valid saat ini)')
-            ->assertDontSeeText('Siap (tidak valid saat ini)');
+            ->assertSeeText('Selesai (tidak valid)')
+            ->assertDontSeeText('Siap (tidak valid)');
 
         $this->actingAs($this->admin, 'web')
             ->get('/t/'.$tenant.'/orders/'.$this->courierOrderBlocked->id)
             ->assertOk()
-            ->assertSeeText('Antar Tertunda (tidak valid saat ini)')
-            ->assertDontSeeText('Di Outlet (tidak valid saat ini)');
+            ->assertSeeText('Antar Tertunda (tidak valid)')
+            ->assertDontSeeText('Di Outlet (tidak valid)');
     }
 
     public function test_admin_can_export_order_board_csv_with_filters_and_scope(): void
@@ -1084,7 +1086,7 @@ class WebPanelTest extends TestCase
             ->where('order_code', 'ORD-WEB-TX-001')
             ->firstOrFail();
 
-        $response->assertRedirect(route('tenant.orders.show', ['tenant' => $tenant, 'order' => $order->id]));
+        $response->assertRedirect(route('tenant.orders.show', ['tenant' => $this->tenantA, 'order' => $order->id]));
 
         $this->assertDatabaseHas('customers', [
             'tenant_id' => $tenant,
@@ -1153,7 +1155,7 @@ class WebPanelTest extends TestCase
             ->where('order_code', 'ORD-WEB-TX-UPSERT')
             ->firstOrFail();
 
-        $response->assertRedirect(route('tenant.orders.show', ['tenant' => $tenant, 'order' => $order->id]));
+        $response->assertRedirect(route('tenant.orders.show', ['tenant' => $this->tenantA, 'order' => $order->id]));
 
         $tenantCountAfter = Customer::query()
             ->where('tenant_id', $tenant)
@@ -1253,7 +1255,7 @@ class WebPanelTest extends TestCase
             ->where('order_code', 'ORD-WEB-TX-MULTI')
             ->firstOrFail();
 
-        $response->assertRedirect(route('tenant.orders.show', ['tenant' => $tenant, 'order' => $order->id]));
+        $response->assertRedirect(route('tenant.orders.show', ['tenant' => $this->tenantA, 'order' => $order->id]));
 
         $this->assertDatabaseHas('orders', [
             'id' => $order->id,
@@ -1291,7 +1293,7 @@ class WebPanelTest extends TestCase
                 'notes' => 'DP tahap 2',
             ]);
 
-        $response->assertRedirect(route('tenant.orders.show', ['tenant' => $tenant, 'order' => $this->walkInOrder->id]));
+        $response->assertRedirect(route('tenant.orders.show', ['tenant' => $this->tenantA, 'order' => $this->walkInOrder->id]));
 
         $payment = Payment::query()
             ->where('order_id', $this->walkInOrder->id)
@@ -1338,7 +1340,7 @@ class WebPanelTest extends TestCase
                 'quick_action' => 'full',
             ]);
 
-        $response->assertRedirect(route('tenant.orders.show', ['tenant' => $tenant, 'order' => $this->walkInOrder->id]));
+        $response->assertRedirect(route('tenant.orders.show', ['tenant' => $this->tenantA, 'order' => $this->walkInOrder->id]));
 
         $payment = Payment::query()
             ->where('order_id', $this->walkInOrder->id)
@@ -1422,7 +1424,7 @@ class WebPanelTest extends TestCase
             ->post('/t/'.$tenant.'/orders/'.$this->orderA->id.'/status/laundry', [
                 'laundry_status' => 'ready',
             ])
-            ->assertRedirect(route('tenant.orders.show', ['tenant' => $tenant, 'order' => $this->orderA->id]));
+            ->assertRedirect(route('tenant.orders.show', ['tenant' => $this->tenantA, 'order' => $this->orderA->id]));
 
         $this->assertDatabaseHas('orders', [
             'id' => $this->orderA->id,
@@ -1468,7 +1470,7 @@ class WebPanelTest extends TestCase
             ->post('/t/'.$tenant.'/orders/'.$this->courierOrderReady->id.'/status/courier', [
                 'courier_status' => 'delivery_pending',
             ])
-            ->assertRedirect(route('tenant.orders.show', ['tenant' => $tenant, 'order' => $this->courierOrderReady->id]));
+            ->assertRedirect(route('tenant.orders.show', ['tenant' => $this->tenantA, 'order' => $this->courierOrderReady->id]));
 
         $this->assertDatabaseHas('orders', [
             'id' => $this->courierOrderReady->id,
@@ -1514,7 +1516,7 @@ class WebPanelTest extends TestCase
             ->post('/t/'.$tenant.'/orders/'.$this->orderA->id.'/assign-courier', [
                 'courier_user_id' => $this->courier->id,
             ])
-            ->assertRedirect(route('tenant.orders.show', ['tenant' => $tenant, 'order' => $this->orderA->id]));
+            ->assertRedirect(route('tenant.orders.show', ['tenant' => $this->tenantA, 'order' => $this->orderA->id]));
 
         $this->assertDatabaseHas('orders', [
             'id' => $this->orderA->id,
@@ -1553,7 +1555,7 @@ class WebPanelTest extends TestCase
                 'action' => 'mark-ready',
                 'selected_ids' => $this->orderA->id,
             ])
-            ->assertRedirect(route('tenant.orders.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.orders.index', ['tenant' => $this->tenantA]));
 
         $this->assertDatabaseHas('orders', [
             'id' => $this->orderA->id,
@@ -1562,12 +1564,17 @@ class WebPanelTest extends TestCase
             'source_channel' => 'web',
         ]);
 
+        $this->orderA->forceFill([
+            'paid_amount' => $this->orderA->total_amount,
+            'due_amount' => 0,
+        ])->save();
+
         $this->actingAs($this->admin, 'web')
             ->post('/t/'.$tenant.'/orders/bulk-update', [
                 'action' => 'mark-completed',
                 'selected_ids' => $this->orderA->id,
             ])
-            ->assertRedirect(route('tenant.orders.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.orders.index', ['tenant' => $this->tenantA]));
 
         $this->assertDatabaseHas('orders', [
             'id' => $this->orderA->id,
@@ -1600,7 +1607,7 @@ class WebPanelTest extends TestCase
                 'action' => 'mark-ready',
                 'selected_ids' => $this->orderA->id.','.$this->foreignOrderId,
             ])
-            ->assertRedirect(route('tenant.orders.index', ['tenant' => $tenant]))
+            ->assertRedirect(route('tenant.orders.index', ['tenant' => $this->tenantA]))
             ->assertSessionHas('bulk_report', function ($report): bool {
                 if (! is_array($report)) {
                     return false;
@@ -1635,7 +1642,7 @@ class WebPanelTest extends TestCase
                 'selected_ids' => $this->orderA->id,
                 'courier_user_id' => $this->courier->id,
             ])
-            ->assertRedirect(route('tenant.orders.index', ['tenant' => $tenant]))
+            ->assertRedirect(route('tenant.orders.index', ['tenant' => $this->tenantA]))
             ->assertSessionHas('bulk_report', function ($report): bool {
                 if (! is_array($report)) {
                     return false;
@@ -1681,7 +1688,7 @@ class WebPanelTest extends TestCase
                 'selected_ids' => $this->walkInOrder->id.','.$this->orderA->id,
                 'courier_user_id' => $this->courier->id,
             ])
-            ->assertRedirect(route('tenant.orders.index', ['tenant' => $tenant]))
+            ->assertRedirect(route('tenant.orders.index', ['tenant' => $this->tenantA]))
             ->assertSessionHas('bulk_report', function ($report): bool {
                 if (! is_array($report)) {
                     return false;
@@ -1738,7 +1745,7 @@ class WebPanelTest extends TestCase
                 'action' => 'courier-delivery-pending',
                 'selected_ids' => $this->courierOrderReady->id,
             ])
-            ->assertRedirect(route('tenant.orders.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.orders.index', ['tenant' => $this->tenantA]));
 
         $this->assertDatabaseHas('orders', [
             'id' => $this->courierOrderReady->id,
@@ -1752,7 +1759,7 @@ class WebPanelTest extends TestCase
                 'action' => 'courier-delivery-otw',
                 'selected_ids' => $this->courierOrderReady->id,
             ])
-            ->assertRedirect(route('tenant.orders.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.orders.index', ['tenant' => $this->tenantA]));
 
         $this->assertDatabaseHas('orders', [
             'id' => $this->courierOrderReady->id,
@@ -1761,12 +1768,17 @@ class WebPanelTest extends TestCase
             'source_channel' => 'web',
         ]);
 
+        $this->courierOrderReady->forceFill([
+            'paid_amount' => $this->courierOrderReady->total_amount,
+            'due_amount' => 0,
+        ])->save();
+
         $this->actingAs($this->admin, 'web')
             ->post('/t/'.$tenant.'/orders/bulk-update', [
                 'action' => 'courier-delivered',
                 'selected_ids' => $this->courierOrderReady->id,
             ])
-            ->assertRedirect(route('tenant.orders.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.orders.index', ['tenant' => $this->tenantA]));
 
         $this->assertDatabaseHas('orders', [
             'id' => $this->courierOrderReady->id,
@@ -1794,7 +1806,7 @@ class WebPanelTest extends TestCase
                 'action' => 'courier-delivery-pending',
                 'selected_ids' => $this->courierOrderBlocked->id,
             ])
-            ->assertRedirect(route('tenant.orders.index', ['tenant' => $tenant]))
+            ->assertRedirect(route('tenant.orders.index', ['tenant' => $this->tenantA]))
             ->assertSessionHas('bulk_report', function ($report): bool {
                 if (! is_array($report)) {
                     return false;
@@ -1837,7 +1849,7 @@ class WebPanelTest extends TestCase
 
         $this->actingAs($this->owner, 'web')
             ->post('/t/'.$tenant.'/users/'.$this->admin->id.'/archive')
-            ->assertRedirect(route('tenant.users.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.users.index', ['tenant' => $this->tenantA]));
 
         $this->assertSoftDeleted('users', [
             'id' => $this->admin->id,
@@ -1846,7 +1858,7 @@ class WebPanelTest extends TestCase
 
         $this->actingAs($this->owner, 'web')
             ->post('/t/'.$tenant.'/users/'.$this->admin->id.'/restore')
-            ->assertRedirect(route('tenant.users.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.users.index', ['tenant' => $this->tenantA]));
 
         $this->assertDatabaseHas('users', [
             'id' => $this->admin->id,
@@ -1889,7 +1901,7 @@ class WebPanelTest extends TestCase
                 'role_key' => 'cashier',
                 'outlet_ids' => [$this->outletA->id],
             ])
-            ->assertRedirect(route('tenant.users.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.users.index', ['tenant' => $this->tenantA]));
 
         $invited = User::query()
             ->where('tenant_id', $tenant)
@@ -1912,7 +1924,7 @@ class WebPanelTest extends TestCase
                 'role_key' => 'courier',
                 'outlet_ids' => [$this->outletA->id, $this->outletB->id],
             ])
-            ->assertRedirect(route('tenant.users.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.users.index', ['tenant' => $this->tenantA]));
 
         $this->assertDatabaseHas('users', [
             'id' => $invited->id,
@@ -1973,7 +1985,7 @@ class WebPanelTest extends TestCase
                 'role_key' => 'worker',
                 'outlet_ids' => [$this->outletA->id],
             ])
-            ->assertRedirect(route('tenant.users.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.users.index', ['tenant' => $this->tenantA]));
 
         $invited = User::query()
             ->where('tenant_id', $tenant)
@@ -2043,7 +2055,7 @@ class WebPanelTest extends TestCase
 
         $this->actingAs($this->owner, 'web')
             ->post('/t/'.$tenant.'/outlets/'.$this->outletB->id.'/archive')
-            ->assertRedirect(route('tenant.outlets.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.outlets.index', ['tenant' => $this->tenantA]));
 
         $this->assertSoftDeleted('outlets', [
             'id' => $this->outletB->id,
@@ -2052,7 +2064,7 @@ class WebPanelTest extends TestCase
 
         $this->actingAs($this->owner, 'web')
             ->post('/t/'.$tenant.'/outlets/'.$this->outletB->id.'/restore')
-            ->assertRedirect(route('tenant.outlets.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.outlets.index', ['tenant' => $this->tenantA]));
 
         $this->assertDatabaseHas('outlets', [
             'id' => $this->outletB->id,
@@ -2091,7 +2103,7 @@ class WebPanelTest extends TestCase
 
         $this->actingAs($this->owner, 'web')
             ->post('/t/'.$tenant.'/outlets/'.$this->outletB->id.'/archive')
-            ->assertRedirect(route('tenant.outlets.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.outlets.index', ['tenant' => $this->tenantA]));
 
         $this->actingAs($this->owner, 'web')
             ->from('/t/'.$tenant.'/outlets')
@@ -2119,7 +2131,7 @@ class WebPanelTest extends TestCase
 
         $this->actingAs($this->admin, 'web')
             ->post('/t/'.$tenant.'/customers/'.$this->customer->id.'/archive')
-            ->assertRedirect(route('tenant.customers.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.customers.index', ['tenant' => $this->tenantA]));
 
         $this->assertSoftDeleted('customers', [
             'id' => $this->customer->id,
@@ -2128,7 +2140,7 @@ class WebPanelTest extends TestCase
 
         $this->actingAs($this->admin, 'web')
             ->post('/t/'.$tenant.'/customers/'.$this->customer->id.'/restore')
-            ->assertRedirect(route('tenant.customers.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.customers.index', ['tenant' => $this->tenantA]));
 
         $this->assertDatabaseHas('customers', [
             'id' => $this->customer->id,
@@ -2138,7 +2150,7 @@ class WebPanelTest extends TestCase
 
         $this->actingAs($this->admin, 'web')
             ->post('/t/'.$tenant.'/services/'.$this->service->id.'/archive')
-            ->assertRedirect(route('tenant.services.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.services.index', ['tenant' => $this->tenantA]));
 
         $this->assertSoftDeleted('services', [
             'id' => $this->service->id,
@@ -2147,7 +2159,7 @@ class WebPanelTest extends TestCase
 
         $this->actingAs($this->admin, 'web')
             ->post('/t/'.$tenant.'/services/'.$this->service->id.'/restore')
-            ->assertRedirect(route('tenant.services.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.services.index', ['tenant' => $this->tenantA]));
 
         $this->assertDatabaseHas('services', [
             'id' => $this->service->id,
@@ -2193,7 +2205,7 @@ class WebPanelTest extends TestCase
                 'eta_minutes' => 25,
                 'active' => '1',
             ])
-            ->assertRedirect(route('tenant.shipping-zones.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.shipping-zones.index', ['tenant' => $this->tenantA]));
 
         $zone = ShippingZone::query()
             ->where('tenant_id', $tenant)
@@ -2216,7 +2228,7 @@ class WebPanelTest extends TestCase
                 'eta_minutes' => 35,
                 'notes' => 'updated via web panel',
             ])
-            ->assertRedirect(route('tenant.shipping-zones.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.shipping-zones.index', ['tenant' => $this->tenantA]));
 
         $this->assertDatabaseHas('shipping_zones', [
             'id' => $zone->id,
@@ -2229,7 +2241,7 @@ class WebPanelTest extends TestCase
 
         $this->actingAs($this->admin, 'web')
             ->post('/t/'.$tenant.'/shipping-zones/'.$zone->id.'/deactivate')
-            ->assertRedirect(route('tenant.shipping-zones.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.shipping-zones.index', ['tenant' => $this->tenantA]));
 
         $this->assertDatabaseHas('shipping_zones', [
             'id' => $zone->id,
@@ -2239,7 +2251,7 @@ class WebPanelTest extends TestCase
 
         $this->actingAs($this->admin, 'web')
             ->post('/t/'.$tenant.'/shipping-zones/'.$zone->id.'/activate')
-            ->assertRedirect(route('tenant.shipping-zones.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.shipping-zones.index', ['tenant' => $this->tenantA]));
 
         $this->assertDatabaseHas('shipping_zones', [
             'id' => $zone->id,
@@ -2322,7 +2334,7 @@ class WebPanelTest extends TestCase
                 'price_override_amount' => 9700,
                 'sla_override' => '24 jam',
             ])
-            ->assertRedirect(route('tenant.outlet-services.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.outlet-services.index', ['tenant' => $this->tenantA]));
 
         $override = OutletService::query()
             ->where('outlet_id', $this->outletA->id)
@@ -2344,7 +2356,7 @@ class WebPanelTest extends TestCase
                 'price_override_amount' => 9900,
                 'sla_override' => '36 jam',
             ])
-            ->assertRedirect(route('tenant.outlet-services.index', ['tenant' => $tenant]));
+            ->assertRedirect(route('tenant.outlet-services.index', ['tenant' => $this->tenantA]));
 
         $this->assertDatabaseHas('outlet_services', [
             'id' => $override->id,
@@ -2455,3 +2467,4 @@ class WebPanelTest extends TestCase
         return $user;
     }
 }
+

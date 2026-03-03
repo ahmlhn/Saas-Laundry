@@ -29,7 +29,7 @@
                 </article>
                 <article class="auth-badge">
                     <p class="auth-badge-label">Tenant Path</p>
-                    <strong>/t/{{ $tenant->id }}</strong>
+                    <strong>/t/{{ $tenant->slug }}</strong>
                 </article>
             </div>
 
@@ -60,7 +60,7 @@
                 <div class="notice notice-error">{{ $errors->first() }}</div>
             @endif
 
-            <form method="POST" action="{{ route('tenant.login.store', ['tenant' => $tenant->id]) }}" class="stack-form auth-form">
+            <form method="POST" action="{{ route('tenant.login.store', ['tenant' => $tenant]) }}" class="stack-form auth-form">
                 @csrf
 
                 <div class="field-stack">

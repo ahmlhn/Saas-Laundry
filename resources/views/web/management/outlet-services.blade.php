@@ -104,7 +104,7 @@
         </div>
         <div class="filter-actions">
             <button class="btn btn-primary" type="submit">Filter</button>
-            <a class="btn btn-ghost" href="{{ route('tenant.outlet-services.index', ['tenant' => $tenant->id]) }}">Atur Ulang</a>
+            <a class="btn btn-ghost" href="{{ route('tenant.outlet-services.index', ['tenant' => $tenant]) }}">Atur Ulang</a>
         </div>
     </form>
 </section>
@@ -115,7 +115,7 @@
         <p class="muted-line">Jika layanan outlet sudah ada, data akan diperbarui.</p>
     </div>
 
-    <form method="POST" action="{{ route('tenant.outlet-services.upsert', ['tenant' => $tenant->id]) }}" class="filters-grid">
+    <form method="POST" action="{{ route('tenant.outlet-services.upsert', ['tenant' => $tenant]) }}" class="filters-grid">
         @csrf
         <div>
             <label for="form_outlet_id">Outlet</label>
@@ -202,7 +202,7 @@
                         </span>
                     </td>
                     <td>
-                        <form method="POST" action="{{ route('tenant.outlet-services.update', ['tenant' => $tenant->id, 'outletService' => $row->id]) }}" class="filters-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
+                        <form method="POST" action="{{ route('tenant.outlet-services.update', ['tenant' => $tenant, 'outletService' => $row->id]) }}" class="filters-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
                             @csrf
                             <div>
                                 <label>Status</label>

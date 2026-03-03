@@ -107,7 +107,7 @@
         </div>
         <div class="filter-actions">
             <button class="btn btn-primary" type="submit">Filter</button>
-            <a class="btn btn-ghost" href="{{ route('tenant.shipping-zones.index', ['tenant' => $tenant->id]) }}">Atur Ulang</a>
+            <a class="btn btn-ghost" href="{{ route('tenant.shipping-zones.index', ['tenant' => $tenant]) }}">Atur Ulang</a>
         </div>
     </form>
 </section>
@@ -118,7 +118,7 @@
         <p class="muted-line">Buat tarif antar-jemput per outlet.</p>
     </div>
 
-    <form method="POST" action="{{ route('tenant.shipping-zones.store', ['tenant' => $tenant->id]) }}" class="filters-grid">
+    <form method="POST" action="{{ route('tenant.shipping-zones.store', ['tenant' => $tenant]) }}" class="filters-grid">
         @csrf
         <div>
             <label for="outlet_id">Outlet</label>
@@ -198,7 +198,7 @@
                         <span class="status-badge {{ $zone->active ? 'status-success' : 'status-neutral' }}">{{ $zone->active ? 'aktif' : 'nonaktif' }}</span>
                     </td>
                     <td>
-                        <form method="POST" action="{{ route('tenant.shipping-zones.update', ['tenant' => $tenant->id, 'zone' => $zone->id]) }}" class="filters-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
+                        <form method="POST" action="{{ route('tenant.shipping-zones.update', ['tenant' => $tenant, 'zone' => $zone->id]) }}" class="filters-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
                             @csrf
                             <div>
                                 <label>Nama</label>
@@ -272,7 +272,7 @@
                     <td>{{ $zone->eta_minutes ? number_format((int) $zone->eta_minutes).' min' : '-' }}</td>
                     <td><span class="status-badge status-success">aktif</span></td>
                     <td>
-                        <form method="POST" action="{{ route('tenant.shipping-zones.deactivate', ['tenant' => $tenant->id, 'zone' => $zone->id]) }}" class="inline-form">
+                        <form method="POST" action="{{ route('tenant.shipping-zones.deactivate', ['tenant' => $tenant, 'zone' => $zone->id]) }}" class="inline-form">
                             @csrf
                             <button type="submit" class="btn btn-danger btn-sm">Nonaktifkan</button>
                         </form>
@@ -320,7 +320,7 @@
                     <td>{{ $zone->eta_minutes ? number_format((int) $zone->eta_minutes).' min' : '-' }}</td>
                     <td><span class="status-badge status-neutral">nonaktif</span></td>
                     <td>
-                        <form method="POST" action="{{ route('tenant.shipping-zones.activate', ['tenant' => $tenant->id, 'zone' => $zone->id]) }}" class="inline-form">
+                        <form method="POST" action="{{ route('tenant.shipping-zones.activate', ['tenant' => $tenant, 'zone' => $zone->id]) }}" class="inline-form">
                             @csrf
                             <button type="submit" class="btn btn-muted btn-sm">Aktifkan</button>
                         </form>

@@ -152,7 +152,7 @@ class SubscriptionController extends Controller
         );
 
         return redirect()
-            ->route('tenant.subscription.index', ['tenant' => $tenant->id])
+            ->route('tenant.subscription.index', ['tenant' => $tenant])
             ->with('status', 'Request perubahan paket berhasil dibuat.');
     }
 
@@ -194,7 +194,7 @@ class SubscriptionController extends Controller
         );
 
         return redirect()
-            ->route('tenant.subscription.index', ['tenant' => $tenant->id])
+            ->route('tenant.subscription.index', ['tenant' => $tenant])
             ->with('status', 'Request perubahan paket dibatalkan.');
     }
 
@@ -231,7 +231,7 @@ class SubscriptionController extends Controller
         }
 
         return redirect()
-            ->route('tenant.subscription.index', ['tenant' => $tenant->id])
+            ->route('tenant.subscription.index', ['tenant' => $tenant])
             ->with('status', 'QRIS intent berhasil dibuat.');
     }
 
@@ -316,7 +316,7 @@ class SubscriptionController extends Controller
         );
 
         return redirect()
-            ->route('tenant.subscription.index', ['tenant' => $tenant->id])
+            ->route('tenant.subscription.index', ['tenant' => $tenant])
             ->with('status', 'Bukti bayar berhasil diunggah, menunggu verifikasi platform.');
     }
 
