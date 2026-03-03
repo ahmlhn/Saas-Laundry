@@ -4,6 +4,13 @@ import type { OrderDetail, OrderSummary } from "../../types/order";
 
 interface OrdersResponse {
   data: OrderSummary[];
+  meta?: {
+    page: number;
+    per_page: number;
+    last_page: number;
+    total: number;
+    has_more: boolean;
+  };
 }
 
 interface OrderDetailResponse {
@@ -97,6 +104,8 @@ interface OrderQrisPaymentStatusResponse {
 interface ListOrdersParams {
   outletId: string;
   limit?: number;
+  page?: number;
+  fetchAll?: boolean;
   query?: string;
   date?: string;
   dateFrom?: string;
@@ -139,6 +148,13 @@ interface AddOrderPaymentPayload {
   notes?: string;
 }
 
+export interface OrderListPage {
+  items: OrderSummary[];
+  page: number;
+  hasMore: boolean;
+  total: number | null;
+}
+
 function buildOrderRequestBody(payload: SaveOrderPayload): Record<string, unknown> {
   return {
     outlet_id: payload.outletId,
@@ -161,18 +177,19 @@ function buildOrderRequestBody(payload: SaveOrderPayload): Record<string, unknow
   };
 }
 
-export async function listOrders(params: ListOrdersParams): Promise<OrderSummary[]> {
-  const limit = params.limit ?? 30;
+export async function listOrdersPage(params: Omit<ListOrdersParams, "fetchAll">): Promise<OrderListPage> {
+  const limit = Math.min(params.limit ?? 30, 100);
+  const page = Math.max(params.page ?? 1, 1);
   const query = params.query?.trim() ?? "";
   const date = params.date?.trim() ?? "";
   const dateFrom = params.dateFrom?.trim() ?? "";
   const dateTo = params.dateTo?.trim() ?? "";
   const timezone = params.timezone?.trim() ?? "";
   const statusScope = params.statusScope ?? "all";
-  const cacheKey = `orders:list:${params.outletId}:${limit}:${query}:${statusScope}:${date}:${dateFrom}:${dateTo}:${timezone}`;
+  const cacheKey = `orders:list:page:${params.outletId}:${limit}:${page}:${query}:${statusScope}:${date}:${dateFrom}:${dateTo}:${timezone}`;
 
   if (!params.forceRefresh) {
-    const cached = getCachedValue<OrderSummary[]>(cacheKey);
+    const cached = getCachedValue<OrderListPage>(cacheKey);
     if (cached) {
       return cached;
     }
@@ -182,6 +199,7 @@ export async function listOrders(params: ListOrdersParams): Promise<OrderSummary
     params: {
       outlet_id: params.outletId,
       limit,
+      page,
       q: query || undefined,
       status_scope: statusScope,
       date: date || undefined,
@@ -191,8 +209,80 @@ export async function listOrders(params: ListOrdersParams): Promise<OrderSummary
     },
   });
 
-  setCachedValue(cacheKey, response.data.data, 20_000);
-  return response.data.data;
+  const responseHasMore = response.data.meta?.has_more;
+  const fallbackHasMore = response.data.data.length >= limit;
+  const result: OrderListPage = {
+    items: response.data.data,
+    page,
+    hasMore: typeof responseHasMore === "boolean" ? responseHasMore : fallbackHasMore,
+    total: response.data.meta?.total ?? null,
+  };
+
+  setCachedValue(cacheKey, result, 20_000);
+  return result;
+}
+
+export async function listOrders(params: ListOrdersParams): Promise<OrderSummary[]> {
+  const limit = Math.min(params.limit ?? 30, 100);
+  const page = Math.max(params.page ?? 1, 1);
+  const fetchAll = params.fetchAll === true;
+  const query = params.query?.trim() ?? "";
+  const date = params.date?.trim() ?? "";
+  const dateFrom = params.dateFrom?.trim() ?? "";
+  const dateTo = params.dateTo?.trim() ?? "";
+  const timezone = params.timezone?.trim() ?? "";
+  const statusScope = params.statusScope ?? "all";
+  const cacheKey = `orders:list:${params.outletId}:${limit}:${query}:${statusScope}:${date}:${dateFrom}:${dateTo}:${timezone}:${fetchAll ? "all" : `page-${page}`}`;
+
+  if (!params.forceRefresh) {
+    const cached = getCachedValue<OrderSummary[]>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+  }
+
+  if (!fetchAll) {
+    const pageResult = await listOrdersPage({
+      ...params,
+      limit,
+      page,
+    });
+    setCachedValue(cacheKey, pageResult.items, 20_000);
+    return pageResult.items;
+  }
+
+  const merged: OrderSummary[] = [];
+  const seen = new Set<string>();
+  let nextPage = 1;
+  let hasMore = true;
+  let guard = 0;
+
+  while (hasMore && guard < 100) {
+    guard += 1;
+    let addedInPage = 0;
+
+    const pageResult = await listOrdersPage({
+      ...params,
+      limit,
+      page: nextPage,
+    });
+
+    for (const order of pageResult.items) {
+      if (seen.has(order.id)) {
+        continue;
+      }
+
+      seen.add(order.id);
+      merged.push(order);
+      addedInPage += 1;
+    }
+
+    hasMore = pageResult.hasMore && addedInPage > 0;
+    nextPage += 1;
+  }
+
+  setCachedValue(cacheKey, merged, 20_000);
+  return merged;
 }
 
 export async function getOrderDetail(orderId: string): Promise<OrderDetail> {

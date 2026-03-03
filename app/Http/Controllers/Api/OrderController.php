@@ -46,6 +46,7 @@ class OrderController extends Controller
         $validated = $request->validate([
             'outlet_id' => ['required', 'uuid'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'page' => ['nullable', 'integer', 'min:1'],
             'q' => ['nullable', 'string', 'max:100'],
             'status_scope' => ['nullable', 'string', 'in:all,open,completed'],
             'date' => ['nullable', 'date_format:Y-m-d'],
@@ -145,9 +146,18 @@ class OrderController extends Controller
         }
 
         $limit = $validated['limit'] ?? 30;
+        $page = (int) ($validated['page'] ?? 1);
+        $result = $query->paginate($limit, ['*'], 'page', $page);
 
         return response()->json([
-            'data' => $query->limit($limit)->get(),
+            'data' => $result->items(),
+            'meta' => [
+                'page' => $result->currentPage(),
+                'per_page' => $result->perPage(),
+                'last_page' => $result->lastPage(),
+                'total' => $result->total(),
+                'has_more' => $result->hasMorePages(),
+            ],
         ]);
     }
 

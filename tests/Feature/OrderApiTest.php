@@ -410,6 +410,41 @@ class OrderApiTest extends TestCase
         $this->assertNotContains('ORD-DATE-B', $codes);
     }
 
+    public function test_order_index_supports_pagination_meta(): void
+    {
+        $orderA = $this->createOrder('ORD-PAGE-A');
+        $orderB = $this->createOrder('ORD-PAGE-B');
+        $orderC = $this->createOrder('ORD-PAGE-C');
+
+        $orderA->forceFill([
+            'created_at' => CarbonImmutable::parse('2026-02-23 01:00:00', 'UTC'),
+            'updated_at' => CarbonImmutable::parse('2026-02-23 01:00:00', 'UTC'),
+        ])->save();
+
+        $orderB->forceFill([
+            'created_at' => CarbonImmutable::parse('2026-02-23 02:00:00', 'UTC'),
+            'updated_at' => CarbonImmutable::parse('2026-02-23 02:00:00', 'UTC'),
+        ])->save();
+
+        $orderC->forceFill([
+            'created_at' => CarbonImmutable::parse('2026-02-23 03:00:00', 'UTC'),
+            'updated_at' => CarbonImmutable::parse('2026-02-23 03:00:00', 'UTC'),
+        ])->save();
+
+        $response = $this->apiAs($this->cashier)
+            ->getJson('/api/orders?outlet_id='.$this->outlet->id.'&limit=2&page=2')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('meta.page', 2)
+            ->assertJsonPath('meta.per_page', 2)
+            ->assertJsonPath('meta.last_page', 2)
+            ->assertJsonPath('meta.total', 3)
+            ->assertJsonPath('meta.has_more', false)
+            ->assertJsonPath('data.0.order_code', 'ORD-PAGE-A');
+
+        $this->assertSame(['ORD-PAGE-A'], collect($response->json('data'))->pluck('order_code')->all());
+    }
+
     private function createOrder(string $orderCode, bool $pickupDelivery = false): Order
     {
         $response = $this->apiAs($this->cashier)->postJson('/api/orders', [
