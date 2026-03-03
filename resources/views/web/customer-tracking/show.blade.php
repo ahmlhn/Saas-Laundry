@@ -28,25 +28,32 @@
         .stat span{display:block;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
         .stat strong{display:block;margin-top:6px;font-size:15px;line-height:1.35;overflow-wrap:anywhere}
         .section{margin-top:12px;padding:18px}
+        .section-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
         .section-title{font-size:1rem;letter-spacing:-.02em}
         .section-copy{margin-top:4px;font-size:14px;color:var(--muted)}
+        .section-pill{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:0 12px;border-radius:999px;background:#f0f7ff;border:1px solid #d6e3f4;font-size:12px;font-weight:800;color:#355070;white-space:nowrap}
         .items{display:grid;gap:10px;margin-top:14px}
-        .item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:14px;border:1px solid var(--line);border-radius:14px;background:#fbfcff}
+        .item{padding:14px;border:1px solid var(--line);border-radius:14px;background:#fbfcff}
+        .item-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
         .item strong{display:block;font-size:15px;line-height:1.35}
-        .item small{display:block;margin-top:4px;font-size:13px;color:var(--muted)}
-        .price{align-self:center;font-size:15px;font-weight:800;text-align:right}
-        .total{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-top:12px;padding:14px;border-radius:14px;background:#f8fafc;border:1px solid var(--line)}
-        .total span{font-size:13px;color:var(--muted);line-height:1.6}
-        .total strong{font-size:1.15rem;letter-spacing:-.03em}
+        .item-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+        .meta-chip{display:inline-flex;align-items:center;min-height:28px;padding:0 10px;border-radius:999px;background:#fff;border:1px solid var(--line);font-size:12px;font-weight:700;color:var(--muted)}
+        .price{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:0 12px;border-radius:999px;background:#edf7f5;border:1px solid #cfe7e2;font-size:14px;font-weight:800;color:var(--brand);white-space:nowrap}
+        .total{margin-top:12px;padding:14px;border-radius:14px;background:#f8fafc;border:1px solid var(--line)}
+        .total-lines{display:grid;gap:8px}
+        .total-line,.grand-total{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+        .total-line span,.grand-total span{font-size:13px;color:var(--muted);line-height:1.6}
+        .total-line strong{font-size:14px}
+        .grand-total{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+        .grand-total span{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+        .grand-total strong{font-size:1.15rem;letter-spacing:-.03em}
         .footer{margin-top:12px;padding:16px 18px;font-size:14px;line-height:1.7;color:var(--muted)}
         .footer strong{color:var(--text)}
         @media (max-width:560px){
             .shell{width:calc(100vw - 14px);padding:10px 0 20px}
             .hero,.section,.footer{padding:16px}
             .stats{grid-template-columns:1fr}
-            .item{grid-template-columns:1fr}
-            .price{text-align:left}
-            .total{flex-direction:column}
+            .section-head,.item-top,.total-line,.grand-total{flex-direction:column;align-items:flex-start}
         }
     </style>
 </head>
@@ -58,6 +65,7 @@
             ? 'Masih ada sisa pembayaran.'
             : 'Pembayaran sudah lengkap.';
         $itemSubtotal = (int) $order->items->sum(fn ($item) => (int) $item->subtotal_amount);
+        $itemCount = (int) $order->items->count();
     @endphp
 
     <main class="shell">
@@ -101,26 +109,31 @@
         </section>
 
         <section class="card section">
-            <h2 class="section-title">Item Pesanan</h2>
-            <p class="section-copy">Daftar layanan pada order ini.</p>
+            <div class="section-head">
+                <div>
+                    <h2 class="section-title">Item Pesanan</h2>
+                    <p class="section-copy">Daftar layanan pada order ini.</p>
+                </div>
+                <span class="section-pill">{{ $itemCount }} item</span>
+            </div>
             <div class="items">
                 @forelse($order->items as $item)
                     <div class="item">
-                        <div>
+                        <div class="item-top">
                             <strong>{{ $item->service_name_snapshot }}</strong>
-                            <small>
-                                {{ $item->unit_type_snapshot }}
-                                · Qty {{ number_format((float) ($item->qty ?? 0), 2) }}
-                                @if($item->weight_kg !== null)
-                                    · {{ number_format((float) $item->weight_kg, 2) }} kg
-                                @endif
-                            </small>
+                            <div class="price">Rp{{ number_format((int) $item->subtotal_amount) }}</div>
                         </div>
-                        <div class="price">Rp{{ number_format((int) $item->subtotal_amount) }}</div>
+                        <div class="item-meta">
+                            <span class="meta-chip">Unit {{ $item->unit_type_snapshot }}</span>
+                            <span class="meta-chip">Qty {{ number_format((float) ($item->qty ?? 0), 2) }}</span>
+                            @if($item->weight_kg !== null)
+                                <span class="meta-chip">{{ number_format((float) $item->weight_kg, 2) }} kg</span>
+                            @endif
+                        </div>
                     </div>
                 @empty
                     <div class="item">
-                        <div>
+                        <div class="item-top">
                             <strong>Belum ada item layanan tercatat.</strong>
                         </div>
                     </div>
@@ -128,15 +141,30 @@
             </div>
 
             <div class="total">
-                <span>
-                    Subtotal Rp{{ number_format($itemSubtotal) }}
-                    · Antar Rp{{ number_format((int) $order->shipping_fee_amount) }}
-                    · Diskon Rp{{ number_format((int) $order->discount_amount) }}
+                <div class="total-lines">
+                    <div class="total-line">
+                        <span>Subtotal layanan</span>
+                        <strong>Rp{{ number_format($itemSubtotal) }}</strong>
+                    </div>
+                    <div class="total-line">
+                        <span>Biaya antar</span>
+                        <strong>Rp{{ number_format((int) $order->shipping_fee_amount) }}</strong>
+                    </div>
+                    <div class="total-line">
+                        <span>Diskon</span>
+                        <strong>Rp{{ number_format((int) $order->discount_amount) }}</strong>
+                    </div>
                     @if($lastPayment?->paid_at)
-                        · Bayar terakhir {{ $lastPayment->paid_at->format('d M Y H:i') }}
+                        <div class="total-line">
+                            <span>Pembayaran terakhir</span>
+                            <strong>{{ $lastPayment->paid_at->format('d M Y H:i') }}</strong>
+                        </div>
                     @endif
-                </span>
-                <strong>Rp{{ number_format((int) $order->total_amount) }}</strong>
+                </div>
+                <div class="grand-total">
+                    <span>Total Tagihan</span>
+                    <strong>Rp{{ number_format((int) $order->total_amount) }}</strong>
+                </div>
             </div>
         </section>
 
