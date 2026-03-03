@@ -6,167 +6,146 @@
     <title>{{ $title }} {{ $invoiceLabel }}</title>
     @include('partials.vite-assets')
     <style>
-        :root{color-scheme:light;--bg:#f4f7fb;--card:#fff;--line:#dbe3ee;--text:#172033;--muted:#64748b;--brand:#0f766e;--brand-soft:#e8f5f3;--warn:#9a5c00;--warn-soft:#fff5e7;--shadow:0 16px 40px rgba(15,23,42,.08);--radius:20px}
+        :root{color-scheme:light;--bg:#f3f6fb;--card:#fff;--line:#dbe3ef;--text:#182235;--muted:#66758c;--brand:#0f766e;--brand-soft:#e9f7f4;--warn:#9a5c00;--warn-soft:#fff4e5;--shadow:0 12px 30px rgba(15,23,42,.08);--radius:18px}
         *{box-sizing:border-box}
         body{margin:0;min-height:100vh;background:linear-gradient(180deg,#f8fbff 0%,var(--bg) 100%);font-family:"Manrope","Segoe UI",sans-serif;color:var(--text)}
-        .shell{width:min(760px,calc(100vw - 24px));margin:0 auto;padding:20px 0 32px}
+        h1,h2,p{margin:0}
+        .shell{width:min(680px,calc(100vw - 20px));margin:0 auto;padding:14px 0 24px}
         .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
-        .header{padding:24px}
-        .eyebrow{margin:0 0 8px;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--brand)}
-        h1,h2,h3,p{margin:0}
-        .title-row{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
-        .title{font-size:clamp(1.7rem,5vw,2.4rem);line-height:1.02;letter-spacing:-.04em}
-        .status-badge{display:inline-flex;align-items:center;justify-content:center;min-height:38px;padding:0 14px;border-radius:999px;font:inherit;font-weight:800}
-        .status-badge{background:var(--brand-soft);color:var(--brand);border:1px solid #c8e3de}
-        .subtitle{margin-top:14px;color:var(--muted);font-size:14px;line-height:1.6}
-        .note{margin-top:16px;padding:14px 16px;border-radius:16px;border:1px solid #c8e3de;background:#f6fbfa;font-size:14px;line-height:1.6}
-        .note.warn{border-color:#efd5a8;background:var(--warn-soft);color:var(--warn)}
-        .stack{display:grid;gap:16px;margin-top:16px}
-        .section{padding:20px}
-        .section-title{font-size:1.05rem;letter-spacing:-.02em}
-        .section-copy{margin-top:4px;color:var(--muted);font-size:14px}
-        .summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px}
-        .summary-item{padding:14px;border:1px solid var(--line);border-radius:16px;background:#fbfcff;min-width:0}
-        .summary-item span{display:block;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
-        .summary-item strong{display:block;margin-top:6px;font-size:16px;line-height:1.3;overflow-wrap:anywhere}
-        .item-list{display:grid;gap:10px;margin-top:16px}
-        .item-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:14px;border:1px solid var(--line);border-radius:16px;background:#fbfcff}
-        .item-row strong{display:block;font-size:15px;line-height:1.35}
-        .item-meta{margin-top:4px;color:var(--muted);font-size:13px}
-        .item-price{font-size:15px;font-weight:800;text-align:right;align-self:center}
-        .total-box{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-top:14px;padding:14px 16px;border-radius:16px;background:#f6fbfa;border:1px solid #c8e3de}
-        .total-box span{color:var(--muted);font-size:13px}
-        .total-box strong{font-size:20px;letter-spacing:-.03em}
-        .link-box{margin-top:14px;padding:12px 14px;border-radius:14px;background:#f8fafc;border:1px dashed #cbd5e1;font-size:13px;font-weight:700;overflow-wrap:anywhere}
-        @media (max-width:640px){
-            .shell{width:calc(100vw - 16px);padding:12px 0 24px}
-            .header,.section{padding:16px}
-            .title-row,.total-box{flex-direction:column;align-items:flex-start}
-            .summary-grid{grid-template-columns:1fr}
-            .item-row{grid-template-columns:1fr}
-            .item-price{text-align:left}
+        .hero{padding:20px}
+        .eyebrow{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--brand)}
+        .invoice{margin-top:8px;font-size:clamp(1.7rem,5vw,2.2rem);line-height:1.02;letter-spacing:-.04em}
+        .headline{margin-top:10px;font-size:15px;line-height:1.6;color:var(--muted)}
+        .status-box{margin-top:16px;padding:16px;border-radius:16px;background:var(--brand-soft);border:1px solid #c8e4de}
+        .status-box.warn{background:var(--warn-soft);border-color:#efd3a2;color:var(--warn)}
+        .status-label{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+        .status-value{margin-top:6px;font-size:1.35rem;font-weight:800;letter-spacing:-.03em}
+        .status-note{margin-top:6px;font-size:14px;line-height:1.6}
+        .stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}
+        .stat{padding:14px;border:1px solid var(--line);border-radius:14px;background:#fbfcff;min-width:0}
+        .stat span{display:block;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+        .stat strong{display:block;margin-top:6px;font-size:15px;line-height:1.35;overflow-wrap:anywhere}
+        .section{margin-top:12px;padding:18px}
+        .section-title{font-size:1rem;letter-spacing:-.02em}
+        .section-copy{margin-top:4px;font-size:14px;color:var(--muted)}
+        .items{display:grid;gap:10px;margin-top:14px}
+        .item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:14px;border:1px solid var(--line);border-radius:14px;background:#fbfcff}
+        .item strong{display:block;font-size:15px;line-height:1.35}
+        .item small{display:block;margin-top:4px;font-size:13px;color:var(--muted)}
+        .price{align-self:center;font-size:15px;font-weight:800;text-align:right}
+        .total{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-top:12px;padding:14px;border-radius:14px;background:#f8fafc;border:1px solid var(--line)}
+        .total span{font-size:13px;color:var(--muted);line-height:1.6}
+        .total strong{font-size:1.15rem;letter-spacing:-.03em}
+        .footer{margin-top:12px;padding:16px 18px;font-size:14px;line-height:1.7;color:var(--muted)}
+        .footer strong{color:var(--text)}
+        @media (max-width:560px){
+            .shell{width:calc(100vw - 14px);padding:10px 0 20px}
+            .hero,.section,.footer{padding:16px}
+            .stats{grid-template-columns:1fr}
+            .item{grid-template-columns:1fr}
+            .price{text-align:left}
+            .total{flex-direction:column}
         }
     </style>
 </head>
 <body>
     @php
         $lastPayment = $order->payments->sortByDesc('paid_at')->first();
-        $itemSubtotal = (int) $order->items->sum(fn ($item) => (int) $item->subtotal_amount);
         $progressLabel = $statusLabel($order->laundry_status);
         $paymentNote = $order->due_amount > 0
-            ? 'Masih ada sisa pembayaran yang bisa dilunasi ke outlet.'
+            ? 'Masih ada sisa pembayaran.'
             : 'Pembayaran sudah lengkap.';
+        $itemSubtotal = (int) $order->items->sum(fn ($item) => (int) $item->subtotal_amount);
     @endphp
 
     <main class="shell">
-        <section class="card header">
+        <section class="card hero">
             <p class="eyebrow">Lacak Pesanan</p>
-            <div class="title-row">
-                <div>
-                    <h1 class="title">{{ $invoiceLabel }}</h1>
-                    <p class="subtitle">
-                        Halo {{ $order->customer?->name ?: 'Pelanggan' }}, status pesanan Anda saat ini
-                        <strong>{{ $progressLabel }}</strong>.
-                    </p>
-                </div>
-                <span class="status-badge">{{ $paymentStatusLabel }}</span>
+            <h1 class="invoice">{{ $invoiceLabel }}</h1>
+            <p class="headline">
+                Halo {{ $order->customer?->name ?: 'Pelanggan' }}, pesanan Anda saat ini
+                <strong>{{ $progressLabel }}</strong>.
+            </p>
+
+            <div class="status-box {{ $order->due_amount > 0 ? 'warn' : '' }}">
+                <div class="status-label">Status Saat Ini</div>
+                <div class="status-value">{{ $progressLabel }}</div>
+                <p class="status-note">{{ $paymentStatusLabel }}. {{ $paymentNote }}</p>
             </div>
-            <div class="note {{ $order->due_amount > 0 ? 'warn' : '' }}">
-                <strong>Status laundry:</strong> {{ $statusLabel($order->laundry_status) }}.
-                {{ $paymentNote }}
+
+            <div class="stats">
+                <div class="stat">
+                    <span>Total Tagihan</span>
+                    <strong>Rp{{ number_format((int) $order->total_amount) }}</strong>
+                </div>
+                <div class="stat">
+                    <span>Sisa Pembayaran</span>
+                    <strong>Rp{{ number_format((int) $order->due_amount) }}</strong>
+                </div>
+                <div class="stat">
+                    <span>Outlet</span>
+                    <strong>{{ $order->outlet?->name ?: '-' }}</strong>
+                </div>
+                <div class="stat">
+                    <span>Dibuat</span>
+                    <strong>{{ $order->created_at?->format('d M Y H:i') ?: '-' }}</strong>
+                </div>
             </div>
         </section>
 
-        <div class="stack">
-            <section class="card section">
-                <h2 class="section-title">Ringkasan Pesanan</h2>
-                <p class="section-copy">Informasi inti order yang sedang diproses.</p>
-                <div class="summary-grid">
-                    <div class="summary-item">
-                        <span>Pelanggan</span>
-                        <strong>{{ $order->customer?->name ?: '-' }}</strong>
-                    </div>
-                    <div class="summary-item">
-                        <span>Outlet</span>
-                        <strong>{{ $order->outlet?->name ?: '-' }}</strong>
-                    </div>
-                    <div class="summary-item">
-                        <span>Dibuat</span>
-                        <strong>{{ $order->created_at?->format('d M Y H:i') ?: '-' }}</strong>
-                    </div>
-                    <div class="summary-item">
-                        <span>Pembayaran</span>
-                        <strong>{{ $paymentStatusLabel }}</strong>
-                    </div>
-                    @if($order->is_pickup_delivery)
-                        <div class="summary-item">
-                            <span>Jemput</span>
-                            <strong>{{ data_get($order->pickup, 'address_short') ?: data_get($order->pickup, 'address') ?: '-' }}</strong>
+        <section class="card section">
+            <h2 class="section-title">Item Pesanan</h2>
+            <p class="section-copy">Daftar layanan pada order ini.</p>
+            <div class="items">
+                @forelse($order->items as $item)
+                    <div class="item">
+                        <div>
+                            <strong>{{ $item->service_name_snapshot }}</strong>
+                            <small>
+                                {{ $item->unit_type_snapshot }}
+                                · Qty {{ number_format((float) ($item->qty ?? 0), 2) }}
+                                @if($item->weight_kg !== null)
+                                    · {{ number_format((float) $item->weight_kg, 2) }} kg
+                                @endif
+                            </small>
                         </div>
-                        <div class="summary-item">
-                            <span>Antar</span>
-                            <strong>{{ data_get($order->delivery, 'address_short') ?: data_get($order->delivery, 'address') ?: '-' }}</strong>
-                        </div>
-                    @endif
-                </div>
-                @if(filled($order->notes))
-                    <div class="note">
-                        <strong>Catatan:</strong> {{ $order->notes }}
+                        <div class="price">Rp{{ number_format((int) $item->subtotal_amount) }}</div>
                     </div>
-                @endif
-            </section>
+                @empty
+                    <div class="item">
+                        <div>
+                            <strong>Belum ada item layanan tercatat.</strong>
+                        </div>
+                    </div>
+                @endforelse
+            </div>
 
-            <section class="card section">
-                <h2 class="section-title">Item Pesanan</h2>
-                <p class="section-copy">Daftar layanan yang tercatat pada order ini.</p>
-                <div class="item-list">
-                    @forelse($order->items as $item)
-                        <div class="item-row">
-                            <div>
-                                <strong>{{ $item->service_name_snapshot }}</strong>
-                                <p class="item-meta">
-                                    {{ $item->unit_type_snapshot }}
-                                    · Qty {{ number_format((float) ($item->qty ?? 0), 2) }}
-                                    @if($item->weight_kg !== null)
-                                        · {{ number_format((float) $item->weight_kg, 2) }} kg
-                                    @endif
-                                </p>
-                            </div>
-                            <div class="item-price">Rp{{ number_format((int) $item->subtotal_amount) }}</div>
-                        </div>
-                    @empty
-                        <div class="item-row">
-                            <div>
-                                <strong>Belum ada item layanan tercatat.</strong>
-                            </div>
-                        </div>
-                    @endforelse
-                </div>
-                <div class="total-box">
-                    <span>
-                        Subtotal Rp{{ number_format($itemSubtotal) }} · Antar Rp{{ number_format((int) $order->shipping_fee_amount) }}
-                        · Diskon Rp{{ number_format((int) $order->discount_amount) }}
-                        @if($lastPayment?->paid_at)
-                            · Pembayaran terakhir {{ $lastPayment->paid_at->format('d M Y H:i') }}
-                        @endif
-                    </span>
-                    <strong>Rp{{ number_format((int) $order->total_amount) }}</strong>
-                </div>
-            </section>
-
-            <section class="card section">
-                <h2 class="section-title">Butuh Bantuan?</h2>
-                <p class="section-copy">
-                    Hubungi outlet <strong>{{ $order->outlet?->name ?: '-' }}</strong>
-                    @if(filled($order->outlet?->address))
-                        di {{ $order->outlet?->address }}
+            <div class="total">
+                <span>
+                    Subtotal Rp{{ number_format($itemSubtotal) }}
+                    · Antar Rp{{ number_format((int) $order->shipping_fee_amount) }}
+                    · Diskon Rp{{ number_format((int) $order->discount_amount) }}
+                    @if($lastPayment?->paid_at)
+                        · Bayar terakhir {{ $lastPayment->paid_at->format('d M Y H:i') }}
                     @endif
-                    dan sebutkan referensi <strong>{{ $invoiceLabel }}</strong>.
-                </p>
-                <div class="link-box">{{ $trackingUrl }}</div>
-            </section>
-        </div>
+                </span>
+                <strong>Rp{{ number_format((int) $order->total_amount) }}</strong>
+            </div>
+        </section>
+
+        <section class="card footer">
+            <strong>{{ $order->outlet?->name ?: 'Outlet' }}</strong>
+            @if(filled($order->outlet?->address))
+                · {{ $order->outlet->address }}
+            @endif
+            · Referensi {{ $invoiceLabel }}
+            @if(filled($order->notes))
+                <br>Catatan: {{ $order->notes }}
+            @endif
+            @if($order->is_pickup_delivery)
+                <br>Pickup & delivery aktif untuk order ini.
+            @endif
+        </section>
     </main>
-
 </body>
 </html>
