@@ -59,6 +59,8 @@ Route::middleware(['auth', 'tenant.path'])->group(function (): void {
     Route::post('/users/{managedUser}/archive', [ManagementController::class, 'archiveUser'])->name('tenant.users.archive');
     Route::post('/users/{managedUser}/restore', [ManagementController::class, 'restoreUser'])->name('tenant.users.restore');
     Route::get('/customers', [ManagementController::class, 'customers'])->name('tenant.customers.index');
+    Route::post('/customers', [ManagementController::class, 'storeCustomer'])->name('tenant.customers.store');
+    Route::post('/customers/{customer}/update', [ManagementController::class, 'updateCustomer'])->name('tenant.customers.update');
     Route::post('/customers/{customer}/archive', [ManagementController::class, 'archiveCustomer'])->name('tenant.customers.archive');
     Route::post('/customers/{customer}/restore', [ManagementController::class, 'restoreCustomer'])->name('tenant.customers.restore');
     Route::get('/services', [ManagementController::class, 'services'])->name('tenant.services.index');

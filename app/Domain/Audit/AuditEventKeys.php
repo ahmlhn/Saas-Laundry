@@ -38,6 +38,10 @@ class AuditEventKeys
 
     public const WA_TEMPLATE_UPDATED = 'WA_TEMPLATE_UPDATED';
 
+    public const CUSTOMER_CREATED = 'CUSTOMER_CREATED';
+
+    public const CUSTOMER_UPDATED = 'CUSTOMER_UPDATED';
+
     public const CUSTOMER_ARCHIVED = 'CUSTOMER_ARCHIVED';
 
     public const CUSTOMER_RESTORED = 'CUSTOMER_RESTORED';

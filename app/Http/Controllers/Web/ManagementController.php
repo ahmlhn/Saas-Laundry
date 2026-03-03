@@ -231,29 +231,209 @@ class ManagementController extends Controller
             ->with('status', 'Assignment user berhasil diperbarui.');
     }
 
-    public function customers(Tenant $tenant): View
+    public function customers(Request $request, Tenant $tenant): View
     {
         /** @var User $user */
         $user = auth()->user();
         $this->ensurePanelAccess($user, $tenant);
 
+        $validated = $request->validate([
+            'search' => ['nullable', 'string', 'max:100'],
+            'limit' => ['nullable', 'integer', 'min:10', 'max:100'],
+        ]);
+
+        $search = trim((string) ($validated['search'] ?? ''));
+        $limit = (int) ($validated['limit'] ?? 20);
+
         $rows = Customer::query()
             ->where('tenant_id', $tenant->id)
-            ->orderBy('name')
-            ->get();
+            ->withCount('orders')
+            ->withMax('orders', 'created_at')
+            ->orderByDesc('updated_at')
+            ->orderBy('name');
 
         $archivedRows = Customer::withTrashed()
             ->onlyTrashed()
             ->where('tenant_id', $tenant->id)
+            ->withCount('orders')
+            ->withMax('orders', 'created_at')
             ->orderByDesc('deleted_at')
-            ->get();
+            ->orderBy('name');
+
+        if ($search !== '') {
+            $this->applyCustomerSearch($rows, $search);
+            $this->applyCustomerSearch($archivedRows, $search);
+        }
+
+        $summary = [
+            'active_total' => Customer::query()
+                ->where('tenant_id', $tenant->id)
+                ->count(),
+            'archived_total' => Customer::withTrashed()
+                ->onlyTrashed()
+                ->where('tenant_id', $tenant->id)
+                ->count(),
+            'with_notes_total' => Customer::query()
+                ->where('tenant_id', $tenant->id)
+                ->whereNotNull('notes')
+                ->where('notes', '!=', '')
+                ->count(),
+            'unique_phone_total' => Customer::query()
+                ->where('tenant_id', $tenant->id)
+                ->whereNotNull('phone_normalized')
+                ->distinct()
+                ->count('phone_normalized'),
+        ];
 
         return view('web.management.customers', [
             'tenant' => $tenant,
             'user' => $user,
-            'rows' => $rows,
-            'archivedRows' => $archivedRows,
+            'rows' => $rows->paginate($limit, ['*'], 'active_page')->withQueryString(),
+            'archivedRows' => $archivedRows->paginate($limit, ['*'], 'archived_page')->withQueryString(),
+            'filters' => [
+                'search' => $search,
+                'limit' => $limit,
+            ],
+            'summary' => $summary,
         ]);
+    }
+
+    public function storeCustomer(Request $request, Tenant $tenant): RedirectResponse
+    {
+        /** @var User $actor */
+        $actor = $request->user();
+        $this->ensurePanelAccess($actor, $tenant);
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:150'],
+            'phone' => ['required', 'string', 'max:30'],
+            'notes' => ['nullable', 'string'],
+        ]);
+
+        $phone = $this->normalizePhone((string) $validated['phone']);
+
+        if (! $phone) {
+            throw ValidationException::withMessages([
+                'customer_form' => ['Format nomor telepon tidak valid.'],
+            ]);
+        }
+
+        $target = Customer::withTrashed()
+            ->where('tenant_id', $tenant->id)
+            ->where('phone_normalized', $phone)
+            ->first();
+
+        $statusMessage = 'Customer berhasil ditambahkan.';
+        $eventKey = AuditEventKeys::CUSTOMER_CREATED;
+
+        if ($target) {
+            $wasArchived = $target->trashed();
+
+            if ($wasArchived) {
+                $target->restore();
+            }
+
+            $target->fill([
+                'name' => (string) $validated['name'],
+                'notes' => $validated['notes'] ?? null,
+            ])->save();
+
+            $statusMessage = $wasArchived
+                ? 'Customer lama berhasil dipulihkan dan diperbarui.'
+                : 'Customer dengan nomor tersebut sudah ada, data berhasil diperbarui.';
+            $eventKey = AuditEventKeys::CUSTOMER_UPDATED;
+        } else {
+            $target = Customer::query()->create([
+                'tenant_id' => $tenant->id,
+                'name' => (string) $validated['name'],
+                'phone_normalized' => $phone,
+                'notes' => $validated['notes'] ?? null,
+            ]);
+        }
+
+        $this->auditTrail->record(
+            eventKey: $eventKey,
+            actor: $actor,
+            tenantId: $tenant->id,
+            entityType: 'customer',
+            entityId: (string) $target->id,
+            metadata: [
+                'name' => $target->name,
+                'phone_normalized' => $target->phone_normalized,
+            ],
+            channel: 'web',
+            request: $request,
+        );
+
+        return redirect()
+            ->route('tenant.customers.index', $this->customerFilterParams($request))
+            ->with('status', $statusMessage);
+    }
+
+    public function updateCustomer(Request $request, Tenant $tenant, string $customer): RedirectResponse
+    {
+        /** @var User $actor */
+        $actor = $request->user();
+        $this->ensurePanelAccess($actor, $tenant);
+
+        $target = Customer::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('id', $customer)
+            ->first();
+
+        if (! $target) {
+            abort(404, 'Customer not found in tenant scope.');
+        }
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:150'],
+            'phone' => ['required', 'string', 'max:30'],
+            'notes' => ['nullable', 'string'],
+        ]);
+
+        $phone = $this->normalizePhone((string) $validated['phone']);
+
+        if (! $phone) {
+            throw ValidationException::withMessages([
+                'customer_form' => ['Format nomor telepon tidak valid.'],
+            ]);
+        }
+
+        $phoneUsedByAnotherCustomer = Customer::withTrashed()
+            ->where('tenant_id', $tenant->id)
+            ->where('phone_normalized', $phone)
+            ->where('id', '!=', $target->id)
+            ->exists();
+
+        if ($phoneUsedByAnotherCustomer) {
+            throw ValidationException::withMessages([
+                'customer_form' => ['Nomor telepon sudah dipakai pelanggan lain.'],
+            ]);
+        }
+
+        $target->fill([
+            'name' => (string) $validated['name'],
+            'phone_normalized' => $phone,
+            'notes' => $validated['notes'] ?? null,
+        ])->save();
+
+        $this->auditTrail->record(
+            eventKey: AuditEventKeys::CUSTOMER_UPDATED,
+            actor: $actor,
+            tenantId: $tenant->id,
+            entityType: 'customer',
+            entityId: (string) $target->id,
+            metadata: [
+                'name' => $target->name,
+                'phone_normalized' => $target->phone_normalized,
+            ],
+            channel: 'web',
+            request: $request,
+        );
+
+        return redirect()
+            ->route('tenant.customers.index', $this->customerFilterParams($request))
+            ->with('status', 'Customer berhasil diperbarui.');
     }
 
     public function services(Tenant $tenant): View
@@ -1292,6 +1472,72 @@ class ManagementController extends Controller
         if (! $this->isOwner($user)) {
             abort(403, 'Only owner can manage archive/restore action.');
         }
+    }
+
+    /**
+     * @param \Illuminate\Database\Eloquent\Builder<Customer> $query
+     */
+    private function applyCustomerSearch($query, string $search): void
+    {
+        $query->where(function ($customerQuery) use ($search): void {
+            $customerQuery->where('name', 'like', "%{$search}%")
+                ->orWhere('phone_normalized', 'like', "%{$search}%")
+                ->orWhere('notes', 'like', "%{$search}%");
+        });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function customerFilterParams(Request $request): array
+    {
+        return array_filter([
+            'search' => $request->query('search'),
+            'limit' => $request->query('limit'),
+        ], fn ($value): bool => filled($value));
+    }
+
+    private function normalizePhone(string $phone): ?string
+    {
+        $trimmed = trim($phone);
+        $digits = preg_replace('/\D+/', '', $trimmed) ?? '';
+
+        if ($digits === '') {
+            return null;
+        }
+
+        if (str_starts_with($trimmed, '+')) {
+            return $this->isValidInternationalPhone($digits) ? $digits : null;
+        }
+
+        if (str_starts_with($digits, '00')) {
+            $international = substr($digits, 2);
+
+            return $this->isValidInternationalPhone($international) ? $international : null;
+        }
+
+        if (str_starts_with($digits, '0')) {
+            $digits = '62'.ltrim(substr($digits, 1), '0');
+        } elseif (str_starts_with($digits, '8')) {
+            $digits = '62'.$digits;
+        }
+
+        return $this->isValidInternationalPhone($digits) ? $digits : null;
+    }
+
+    private function isValidInternationalPhone(string $digits): bool
+    {
+        if (! preg_match('/^\d+$/', $digits)) {
+            return false;
+        }
+
+        if (str_starts_with($digits, '0')) {
+            return false;
+        }
+
+        $length = strlen($digits);
+
+        return $length >= 8 && $length <= 16;
     }
 
     private function failValidation(string $message): never

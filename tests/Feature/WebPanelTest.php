@@ -2184,6 +2184,91 @@ class WebPanelTest extends TestCase
         ]);
     }
 
+    public function test_admin_can_create_customer_from_web_management(): void
+    {
+        $tenant = $this->tenantA->id;
+
+        $this->actingAs($this->admin, 'web')
+            ->post('/customers', [
+                'name' => 'Customer Baru Web',
+                'phone' => '0812-5555-6666',
+                'notes' => 'preferensi lembut',
+            ])
+            ->assertRedirect(route('tenant.customers.index'));
+
+        $this->assertDatabaseHas('customers', [
+            'tenant_id' => $tenant,
+            'name' => 'Customer Baru Web',
+            'phone_normalized' => '6281255556666',
+            'notes' => 'preferensi lembut',
+            'deleted_at' => null,
+        ]);
+
+        $this->assertDatabaseHas('audit_events', [
+            'tenant_id' => $tenant,
+            'user_id' => $this->admin->id,
+            'event_key' => 'CUSTOMER_CREATED',
+            'channel' => 'web',
+            'entity_type' => 'customer',
+        ]);
+    }
+
+    public function test_admin_can_update_customer_from_web_management(): void
+    {
+        $tenant = $this->tenantA->id;
+
+        $this->actingAs($this->admin, 'web')
+            ->post('/customers/'.$this->customer->id.'/update', [
+                'name' => 'Customer Panel Update',
+                'phone' => '+62 811-2222-3333',
+                'notes' => 'updated via management',
+            ])
+            ->assertRedirect(route('tenant.customers.index'));
+
+        $this->assertDatabaseHas('customers', [
+            'id' => $this->customer->id,
+            'tenant_id' => $tenant,
+            'name' => 'Customer Panel Update',
+            'phone_normalized' => '6281122223333',
+            'notes' => 'updated via management',
+        ]);
+
+        $this->assertDatabaseHas('audit_events', [
+            'tenant_id' => $tenant,
+            'user_id' => $this->admin->id,
+            'event_key' => 'CUSTOMER_UPDATED',
+            'channel' => 'web',
+            'entity_type' => 'customer',
+            'entity_id' => $this->customer->id,
+        ]);
+    }
+
+    public function test_customer_create_form_revives_archived_customer_with_same_phone(): void
+    {
+        $tenant = $this->tenantA->id;
+
+        $this->actingAs($this->admin, 'web')
+            ->post('/customers/'.$this->customer->id.'/archive')
+            ->assertRedirect(route('tenant.customers.index'));
+
+        $this->actingAs($this->admin, 'web')
+            ->post('/customers', [
+                'name' => 'Customer Revive Web',
+                'phone' => '0811-1111-111',
+                'notes' => 'revived via form',
+            ])
+            ->assertRedirect(route('tenant.customers.index'));
+
+        $this->assertDatabaseHas('customers', [
+            'id' => $this->customer->id,
+            'tenant_id' => $tenant,
+            'name' => 'Customer Revive Web',
+            'phone_normalized' => '628111111111',
+            'notes' => 'revived via form',
+            'deleted_at' => null,
+        ]);
+    }
+
     public function test_admin_can_create_and_toggle_shipping_zone_from_web_panel(): void
     {
         $tenant = $this->tenantA->id;
