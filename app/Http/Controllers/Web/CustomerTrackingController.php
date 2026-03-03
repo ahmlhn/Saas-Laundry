@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Models\PrinterNoteSetting;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
 
 class CustomerTrackingController extends Controller
@@ -29,6 +31,10 @@ class CustomerTrackingController extends Controller
         $invoiceLabel = $order->invoice_no ?: $order->order_code;
         $statusMap = $this->statusMap();
         $currentStep = $this->currentLaundryStep((string) $order->laundry_status);
+        $logoPath = PrinterNoteSetting::query()
+            ->where('tenant_id', $order->tenant_id)
+            ->where('outlet_id', $order->outlet_id)
+            ->value('logo_path');
 
         return view('web.customer-tracking.show', [
             'title' => 'Lacak Pesanan',
@@ -40,6 +46,7 @@ class CustomerTrackingController extends Controller
             'currentStep' => $currentStep,
             'paymentStatusLabel' => $order->due_amount > 0 ? 'Belum Lunas' : 'Lunas',
             'trackingUrl' => route('customer.track', ['token' => $order->tracking_token]),
+            'outletLogoUrl' => $logoPath ? Storage::disk('public')->url($logoPath) : null,
         ]);
     }
 

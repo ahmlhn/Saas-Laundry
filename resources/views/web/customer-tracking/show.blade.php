@@ -13,6 +13,8 @@
         .shell{width:min(680px,calc(100vw - 20px));margin:0 auto;padding:14px 0 24px}
         .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
         .hero{padding:20px}
+        .brand-mark{display:flex;justify-content:center;margin-bottom:14px}
+        .brand-mark img{display:block;max-width:min(180px,48vw);max-height:72px;width:auto;height:auto;object-fit:contain}
         .eyebrow{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--brand)}
         .invoice{margin-top:8px;font-size:clamp(1.7rem,5vw,2.2rem);line-height:1.02;letter-spacing:-.04em}
         .headline{margin-top:10px;font-size:15px;line-height:1.6;color:var(--muted)}
@@ -60,6 +62,11 @@
 
     <main class="shell">
         <section class="card hero">
+            @if($outletLogoUrl)
+                <div class="brand-mark">
+                    <img src="{{ $outletLogoUrl }}" alt="Logo {{ $order->outlet?->name ?: 'outlet' }}">
+                </div>
+            @endif
             <p class="eyebrow">Lacak Pesanan</p>
             <h1 class="invoice">{{ $invoiceLabel }}</h1>
             <p class="headline">
