@@ -299,6 +299,8 @@ class SyncController extends Controller
             'outlet_id' => ['nullable', 'uuid'],
             'order_code' => ['nullable', 'string', 'max:32'],
             'invoice_no' => ['nullable', 'string', 'max:50'],
+            'requires_pickup' => ['nullable', 'boolean'],
+            'requires_delivery' => ['nullable', 'boolean'],
             'is_pickup_delivery' => ['nullable', 'boolean'],
             'shipping_fee_amount' => ['nullable', 'integer', 'min:0'],
             'discount_amount' => ['nullable', 'integer', 'min:0'],
@@ -316,6 +318,9 @@ class SyncController extends Controller
             'items.*.weight_kg' => ['nullable', 'numeric', 'min:0.01'],
         ]);
         $validated = $validator->validate();
+        $requiresPickup = (bool) ($validated['requires_pickup'] ?? ($validated['is_pickup_delivery'] ?? false));
+        $requiresDelivery = (bool) ($validated['requires_delivery'] ?? ($validated['is_pickup_delivery'] ?? false));
+        $isCourierFlow = $requiresPickup || $requiresDelivery;
 
         $outletId = $mutation['outlet_id'] ?? $validated['outlet_id'] ?? null;
 
@@ -337,7 +342,7 @@ class SyncController extends Controller
             }
         }
 
-        $result = DB::transaction(function () use ($validated, $user, $device, $outlet, $orderTime, $sourceChannel): array {
+        $result = DB::transaction(function () use ($validated, $user, $device, $outlet, $orderTime, $sourceChannel, $requiresPickup, $requiresDelivery, $isCourierFlow): array {
             try {
                 $this->quotaService->consumeOrderSlot($user->tenant_id, $orderTime->format('Y-m'));
             } catch (TenantWriteAccessException $e) {
@@ -380,16 +385,18 @@ class SyncController extends Controller
                 'customer_id' => $customer->id,
                 'invoice_no' => $invoiceResult['invoice_no'],
                 'order_code' => $validated['order_code'] ?? $this->generateOrderCode(),
-                'is_pickup_delivery' => (bool) ($validated['is_pickup_delivery'] ?? false),
+                'is_pickup_delivery' => $isCourierFlow,
+                'requires_pickup' => $requiresPickup,
+                'requires_delivery' => $requiresDelivery,
                 'laundry_status' => 'received',
-                'courier_status' => ($validated['is_pickup_delivery'] ?? false) ? 'pickup_pending' : null,
-                'shipping_fee_amount' => (int) ($validated['shipping_fee_amount'] ?? 0),
+                'courier_status' => $requiresPickup ? 'pickup_pending' : ($requiresDelivery ? 'at_outlet' : null),
+                'shipping_fee_amount' => $isCourierFlow ? (int) ($validated['shipping_fee_amount'] ?? 0) : 0,
                 'discount_amount' => (int) ($validated['discount_amount'] ?? 0),
                 'total_amount' => 0,
                 'paid_amount' => 0,
                 'due_amount' => 0,
-                'pickup' => $validated['pickup'] ?? null,
-                'delivery' => $validated['delivery'] ?? null,
+                'pickup' => $requiresPickup ? ($validated['pickup'] ?? null) : null,
+                'delivery' => $requiresDelivery ? ($validated['delivery'] ?? null) : null,
                 'notes' => $validated['notes'] ?? null,
                 'created_by' => $user->id,
                 'updated_by' => $user->id,
@@ -462,7 +469,7 @@ class SyncController extends Controller
                 $lastCursor = (int) $itemChange->cursor;
             }
 
-            $total = max($subTotal + (int) ($validated['shipping_fee_amount'] ?? 0) - (int) ($validated['discount_amount'] ?? 0), 0);
+            $total = max($subTotal + ($isCourierFlow ? (int) ($validated['shipping_fee_amount'] ?? 0) : 0) - (int) ($validated['discount_amount'] ?? 0), 0);
 
             $order->forceFill([
                 'total_amount' => $total,
@@ -509,7 +516,7 @@ class SyncController extends Controller
             return [
                 'server_cursor' => $lastCursor,
                 'order_id' => $order->id,
-                'is_pickup_delivery' => $order->is_pickup_delivery,
+                'requires_pickup' => (bool) $order->requires_pickup,
                 'entity_refs' => [
                     ['entity_type' => 'order', 'entity_id' => $order->id],
                     ['entity_type' => 'customer', 'entity_id' => $customer->id],
@@ -518,7 +525,7 @@ class SyncController extends Controller
             ];
         });
 
-        if (($result['is_pickup_delivery'] ?? false) && ! empty($result['order_id'])) {
+        if (($result['requires_pickup'] ?? false) && ! empty($result['order_id'])) {
             $order = Order::query()->find($result['order_id']);
 
             if ($order) {
@@ -531,7 +538,7 @@ class SyncController extends Controller
             }
         }
 
-        unset($result['order_id'], $result['is_pickup_delivery']);
+        unset($result['order_id'], $result['requires_pickup']);
 
         return $result;
     }
@@ -665,6 +672,13 @@ class SyncController extends Controller
             );
         }
 
+        if ($validated['status'] !== 'received' && ! OrderItem::query()->where('order_id', $order->id)->exists()) {
+            throw new SyncRejectException(
+                reasonCode: 'ITEMS_REQUIRED',
+                message: 'Order items are required before progressing laundry status.',
+            );
+        }
+
         if ($validated['status'] === 'completed' && (int) $order->due_amount > 0) {
             throw new SyncRejectException(
                 'PAYMENT_REQUIRED',
@@ -687,7 +701,7 @@ class SyncController extends Controller
             ]);
         }
 
-        if ($validated['status'] === 'completed' && ! $order->is_pickup_delivery) {
+        if ($validated['status'] === 'completed' && ! $order->requires_delivery) {
             $this->waDispatchService->enqueueOrderEvent($order, 'WA_ORDER_DONE', metadata: [
                 'event' => 'order_done',
                 'source' => 'sync',
@@ -743,10 +757,21 @@ class SyncController extends Controller
         $this->assertOutletAccess($user, $order->outlet_id);
 
         if (! $order->is_pickup_delivery) {
-            throw new SyncRejectException('INVALID_TRANSITION', 'Courier status is only valid for pickup-delivery orders.');
+            throw new SyncRejectException('INVALID_TRANSITION', 'Courier status is only valid for pickup/delivery orders.');
         }
 
-        $current = $order->courier_status ?? 'pickup_pending';
+        $requiresPickup = (bool) ($order->requires_pickup ?? false);
+        $requiresDelivery = (bool) ($order->requires_delivery ?? false);
+        $current = $order->courier_status ?? ($requiresPickup ? 'pickup_pending' : 'at_outlet');
+
+        if (! $requiresPickup && in_array($validated['status'], ['pickup_pending', 'pickup_on_the_way', 'picked_up'], true)) {
+            throw new SyncRejectException('INVALID_TRANSITION', 'Pickup statuses are not available for delivery-only orders.');
+        }
+
+        if (! $requiresDelivery && in_array($validated['status'], ['delivery_pending', 'delivery_on_the_way', 'delivered'], true)) {
+            throw new SyncRejectException('INVALID_TRANSITION', 'Delivery statuses are not available for pickup-only orders.');
+        }
+
         $result = $this->statusValidator->validateCourier($current, $validated['status']);
 
         if (! $result['ok']) {
@@ -853,7 +878,7 @@ class SyncController extends Controller
         $this->assertOutletAccess($user, $order->outlet_id);
 
         if (! $order->is_pickup_delivery) {
-            throw new SyncRejectException('VALIDATION_FAILED', 'Courier assignment is only for pickup-delivery orders.');
+            throw new SyncRejectException('VALIDATION_FAILED', 'Courier assignment is only for pickup/delivery orders.');
         }
 
         $courier = User::query()

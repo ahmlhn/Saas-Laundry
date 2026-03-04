@@ -103,8 +103,8 @@ class OrderApiTest extends TestCase
 
         $response
             ->assertCreated()
-            ->assertJsonPath('data.total_amount', 54800)
-            ->assertJsonPath('data.due_amount', 54800)
+            ->assertJsonPath('data.total_amount', 44800)
+            ->assertJsonPath('data.due_amount', 44800)
             ->assertJsonPath('data.customer.phone_normalized', '6281234567890');
 
         $this->assertDatabaseCount('customers', 1);

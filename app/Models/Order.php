@@ -25,6 +25,8 @@ class Order extends Model
         'order_code',
         'tracking_token',
         'is_pickup_delivery',
+        'requires_pickup',
+        'requires_delivery',
         'laundry_status',
         'courier_status',
         'courier_user_id',
@@ -49,6 +51,8 @@ class Order extends Model
     {
         return [
             'is_pickup_delivery' => 'boolean',
+            'requires_pickup' => 'boolean',
+            'requires_delivery' => 'boolean',
             'pickup' => 'array',
             'delivery' => 'array',
             'collection_last_contacted_at' => 'datetime',
@@ -92,6 +96,23 @@ class Order extends Model
             if (! filled($order->tracking_token)) {
                 $order->tracking_token = self::generateTrackingToken();
             }
+        });
+
+        static::saving(function (self $order): void {
+            $requiresPickup = $order->getAttribute('requires_pickup');
+            $requiresDelivery = $order->getAttribute('requires_delivery');
+
+            if ($order->is_pickup_delivery && $requiresPickup === null && $requiresDelivery === null) {
+                $order->requires_pickup = true;
+                $order->requires_delivery = true;
+            }
+
+            if (! $order->requires_pickup && ! $order->requires_delivery) {
+                $order->is_pickup_delivery = false;
+                return;
+            }
+
+            $order->is_pickup_delivery = true;
         });
     }
 

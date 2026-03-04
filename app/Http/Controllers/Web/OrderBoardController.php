@@ -292,6 +292,18 @@ class OrderBoardController extends Controller
             ->limit(200)
             ->get(['id', 'name', 'phone_normalized', 'notes']);
 
+        $couriersQuery = User::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('status', 'active')
+            ->whereHas('roles', fn ($q) => $q->where('key', 'courier'))
+            ->orderBy('name');
+
+        if (! $ownerMode) {
+            $couriersQuery->whereHas('outlets', fn ($q) => $q->whereIn('outlets.id', $allowedOutletIds));
+        }
+
+        $couriers = $couriersQuery->get(['id', 'name']);
+
         return view('web.orders.create', [
             'tenant' => $tenant,
             'user' => $user,
@@ -300,6 +312,7 @@ class OrderBoardController extends Controller
             'services' => $services,
             'outletServicePriceMap' => $outletServicePriceMap,
             'customerSeeds' => $customerSeeds,
+            'couriers' => $couriers,
             'quota' => $this->quotaService->snapshot($tenant->id),
         ]);
     }
@@ -315,7 +328,10 @@ class OrderBoardController extends Controller
             'outlet_id' => ['required', 'uuid'],
             'order_code' => ['nullable', 'string', 'max:32'],
             'invoice_no' => ['nullable', 'string', 'max:50'],
+            'requires_pickup' => ['nullable', 'boolean'],
+            'requires_delivery' => ['nullable', 'boolean'],
             'is_pickup_delivery' => ['nullable', 'boolean'],
+            'courier_user_id' => ['nullable', 'integer', 'min:1'],
             'shipping_fee_amount' => ['nullable', 'integer', 'min:0'],
             'discount_amount' => ['nullable', 'integer', 'min:0'],
             'notes' => ['nullable', 'string'],
@@ -327,8 +343,8 @@ class OrderBoardController extends Controller
             'customer.name' => ['required', 'string', 'max:150'],
             'customer.phone' => ['required', 'string', 'max:30'],
             'customer.notes' => ['nullable', 'string'],
-            'items' => ['required', 'array', 'min:1'],
-            'items.*.service_id' => ['required', 'uuid'],
+            'items' => ['nullable', 'array'],
+            'items.*.service_id' => ['nullable', 'uuid'],
             'items.*.qty' => ['nullable', 'numeric', 'min:0.01'],
             'items.*.weight_kg' => ['nullable', 'numeric', 'min:0.01'],
         ]);
@@ -357,8 +373,9 @@ class OrderBoardController extends Controller
             ]);
         }
 
-        $isPickup = (bool) ($validated['is_pickup_delivery'] ?? false);
-        $shippingFee = (int) ($validated['shipping_fee_amount'] ?? 0);
+        [$requiresPickup, $requiresDelivery, $isLegacyPickupMode] = $this->resolveCourierModeFlagsFromValidated($validated);
+        $isCourierFlow = $requiresPickup || $requiresDelivery;
+        $shippingFee = $isCourierFlow ? (int) ($validated['shipping_fee_amount'] ?? 0) : 0;
         $discount = (int) ($validated['discount_amount'] ?? 0);
 
         $pickupAddress = trim((string) ($validated['pickup_address'] ?? ''));
@@ -366,22 +383,59 @@ class OrderBoardController extends Controller
         $deliveryAddress = trim((string) ($validated['delivery_address'] ?? ''));
         $deliverySlot = trim((string) ($validated['delivery_slot'] ?? ''));
 
-        $pickup = ($pickupAddress !== '' || $pickupSlot !== '')
-            ? [
-                'address_short' => $pickupAddress !== '' ? $pickupAddress : null,
-                'slot' => $pickupSlot !== '' ? $pickupSlot : null,
-            ]
-            : null;
+        if ($requiresPickup && ! $isLegacyPickupMode && $pickupSlot === '') {
+            throw ValidationException::withMessages([
+                'pickup_slot' => ['Jadwal jemput wajib diisi untuk mode jemput.'],
+            ]);
+        }
 
-        $delivery = ($deliveryAddress !== '' || $deliverySlot !== '')
-            ? [
-                'address_short' => $deliveryAddress !== '' ? $deliveryAddress : null,
-                'slot' => $deliverySlot !== '' ? $deliverySlot : null,
-            ]
-            : null;
+        $pickup = $this->buildLogisticsPoint($requiresPickup, $pickupAddress, $pickupSlot);
+        $delivery = $this->buildLogisticsPoint($requiresDelivery, $deliveryAddress, $deliverySlot);
+
+        $items = $this->normalizeSubmittedItems($validated['items'] ?? []);
+
+        if (! $requiresPickup && count($items) === 0) {
+            throw ValidationException::withMessages([
+                'items' => ['Item layanan wajib diisi untuk pesanan tanpa jemput.'],
+            ]);
+        }
+
+        if ($requiresPickup && ! $isLegacyPickupMode && count($items) > 0) {
+            throw ValidationException::withMessages([
+                'items' => ['Untuk mode jemput, item layanan diinput setelah barang dijemput.'],
+            ]);
+        }
+
+        $selectedCourier = null;
+        $courierUserId = isset($validated['courier_user_id']) ? (int) $validated['courier_user_id'] : null;
+        if ($courierUserId && ! $isCourierFlow) {
+            throw ValidationException::withMessages([
+                'courier_user_id' => ['Kurir hanya bisa ditetapkan untuk pesanan jemput atau antar.'],
+            ]);
+        }
+
+        if ($courierUserId) {
+            $courierQuery = User::query()
+                ->with('roles:id,key')
+                ->where('tenant_id', $tenant->id)
+                ->where('status', 'active')
+                ->where('id', $courierUserId);
+
+            if (! $ownerMode) {
+                $courierQuery->whereHas('outlets', fn ($q) => $q->where('outlets.id', $outletId));
+            }
+
+            $selectedCourier = $courierQuery->first();
+
+            if (! $selectedCourier || ! $selectedCourier->hasRole('courier')) {
+                throw ValidationException::withMessages([
+                    'courier_user_id' => ['Kurir tidak valid atau tidak aktif untuk outlet ini.'],
+                ]);
+            }
+        }
 
         try {
-            $order = DB::transaction(function () use ($validated, $tenant, $user, $isPickup, $shippingFee, $discount, $outletId, $pickup, $delivery): Order {
+            $order = DB::transaction(function () use ($validated, $tenant, $user, $isCourierFlow, $requiresPickup, $requiresDelivery, $shippingFee, $discount, $outletId, $pickup, $delivery, $items, $selectedCourier): Order {
                 $this->quotaService->consumeOrderSlot($tenant->id);
 
                 $phone = $this->normalizePhone((string) $validated['customer']['phone']);
@@ -406,9 +460,12 @@ class OrderBoardController extends Controller
                     'customer_id' => $customer->id,
                     'invoice_no' => filled($validated['invoice_no'] ?? null) ? (string) $validated['invoice_no'] : null,
                     'order_code' => filled($validated['order_code'] ?? null) ? (string) $validated['order_code'] : $this->generateOrderCode(),
-                    'is_pickup_delivery' => $isPickup,
+                    'is_pickup_delivery' => $isCourierFlow,
+                    'requires_pickup' => $requiresPickup,
+                    'requires_delivery' => $requiresDelivery,
                     'laundry_status' => 'received',
-                    'courier_status' => $isPickup ? 'pickup_pending' : null,
+                    'courier_status' => $this->resolveInitialCourierStatus($requiresPickup, $requiresDelivery),
+                    'courier_user_id' => $selectedCourier?->id,
                     'shipping_fee_amount' => $shippingFee,
                     'discount_amount' => $discount,
                     'total_amount' => 0,
@@ -423,8 +480,9 @@ class OrderBoardController extends Controller
                 ]);
 
                 $subTotal = 0;
+                $maxDurationMinutes = 0;
 
-                foreach ($validated['items'] as $index => $item) {
+                foreach ($items as $index => $item) {
                     $serviceId = (string) ($item['service_id'] ?? '');
                     $service = Service::query()
                         ->where('id', $serviceId)
@@ -463,6 +521,7 @@ class OrderBoardController extends Controller
                     $metric = $service->unit_type === 'kg' ? (float) $weight : (float) $qty;
                     $lineSubtotal = (int) round($metric * $unitPrice);
                     $subTotal += $lineSubtotal;
+                    $maxDurationMinutes = max($maxDurationMinutes, $this->resolveServiceDurationMinutes($service));
 
                     OrderItem::query()->create([
                         'order_id' => $order->id,
@@ -476,12 +535,22 @@ class OrderBoardController extends Controller
                     ]);
                 }
 
+                $resolvedDelivery = $delivery;
+                if ($requiresDelivery && count($items) > 0) {
+                    $resolvedDelivery = $this->withAutoDeliverySchedule(
+                        payload: $resolvedDelivery,
+                        longestDurationMinutes: $maxDurationMinutes,
+                        baseTime: now(),
+                    );
+                }
+
                 $total = max($subTotal + $shippingFee - $discount, 0);
 
                 $order->forceFill([
                     'total_amount' => $total,
                     'paid_amount' => 0,
                     'due_amount' => $total,
+                    'delivery' => $resolvedDelivery,
                     'updated_by' => $user->id,
                     'source_channel' => 'web',
                 ])->save();
@@ -499,7 +568,7 @@ class OrderBoardController extends Controller
             ]);
         }
 
-        if ($order->is_pickup_delivery) {
+        if ($order->requires_pickup) {
             $this->waDispatchService->enqueueOrderEvent($order, 'WA_PICKUP_CONFIRM', metadata: [
                 'event' => 'order_created',
                 'source' => 'web',
@@ -520,6 +589,8 @@ class OrderBoardController extends Controller
                 'invoice_no' => $order->invoice_no,
                 'total_amount' => $order->total_amount,
                 'is_pickup_delivery' => $order->is_pickup_delivery,
+                'requires_pickup' => (bool) $order->requires_pickup,
+                'requires_delivery' => (bool) $order->requires_delivery,
             ],
             channel: 'web',
             request: $request,
@@ -565,16 +636,21 @@ class OrderBoardController extends Controller
             $orderRow->laundry_status,
         );
 
+        $requiresPickup = (bool) ($orderRow->requires_pickup ?? false);
+        $requiresDelivery = (bool) ($orderRow->requires_delivery ?? false);
+        $initialCourierStatus = $this->resolveInitialCourierStatus($requiresPickup, $requiresDelivery);
+
         $courierTimeline = $this->buildTimeline(
-            ['pickup_pending', 'pickup_on_the_way', 'picked_up', 'at_outlet', 'delivery_pending', 'delivery_on_the_way', 'delivered'],
+            $this->courierSteps($requiresPickup, $requiresDelivery),
             $orderRow->courier_status,
         );
 
         $allowedLaundryStatuses = $this->allowedLaundryStatusesForCurrent((string) $orderRow->laundry_status);
         $allowedCourierStatuses = $this->allowedCourierStatusesForCurrent(
-            currentStatus: (string) ($orderRow->courier_status ?: 'pickup_pending'),
+            currentStatus: (string) ($orderRow->courier_status ?: $initialCourierStatus),
             laundryStatus: (string) $orderRow->laundry_status,
-            isPickupDelivery: (bool) $orderRow->is_pickup_delivery,
+            requiresPickup: $requiresPickup,
+            requiresDelivery: $requiresDelivery,
         );
 
         $couriers = User::query()
@@ -1016,7 +1092,7 @@ class OrderBoardController extends Controller
                     'from_status' => $actionConfig['type'] === 'laundry'
                         ? (string) $order->laundry_status
                         : ($actionConfig['type'] === 'courier'
-                            ? (string) ($order->courier_status ?: 'pickup_pending')
+                            ? (string) ($order->courier_status ?: $this->resolveInitialCourierStatus((bool) ($order->requires_pickup ?? false), (bool) ($order->requires_delivery ?? false)))
                             : $this->resolveCourierLabel($order->courier, $order->courier_user_id)),
                     'to_status' => $actionConfig['type'] === 'assign_courier'
                         ? $this->resolveCourierLabel($targetCourier, $courierUserId)
@@ -1139,6 +1215,16 @@ class OrderBoardController extends Controller
             ];
         }
 
+        if ($targetStatus !== 'received' && ! OrderItem::query()->where('order_id', $order->id)->exists()) {
+            return [
+                'updated' => false,
+                'reason_code' => 'ITEMS_REQUIRED',
+                'reason_label' => $this->bulkReasonLabel('ITEMS_REQUIRED'),
+                'from' => $currentStatus,
+                'to' => $targetStatus,
+            ];
+        }
+
         if ($targetStatus === 'completed' && (int) $order->due_amount > 0) {
             return [
                 'updated' => false,
@@ -1164,7 +1250,7 @@ class OrderBoardController extends Controller
             ]);
         }
 
-        if ($targetStatus === 'completed' && ! $order->is_pickup_delivery) {
+        if ($targetStatus === 'completed' && ! $order->requires_delivery) {
             $this->waDispatchService->enqueueOrderEvent($order, 'WA_ORDER_DONE', metadata: [
                 'event' => $isBulkAction ? 'order_done_bulk' : 'order_done_single',
                 'source' => 'web',
@@ -1211,13 +1297,35 @@ class OrderBoardController extends Controller
         string $actionKey,
         bool $isBulkAction,
     ): array {
-        $currentStatus = (string) ($order->courier_status ?: 'pickup_pending');
+        $requiresPickup = (bool) ($order->requires_pickup ?? false);
+        $requiresDelivery = (bool) ($order->requires_delivery ?? false);
+        $currentStatus = (string) ($order->courier_status ?: $this->resolveInitialCourierStatus($requiresPickup, $requiresDelivery));
 
         if (! $order->is_pickup_delivery) {
             return [
                 'updated' => false,
                 'reason_code' => 'NOT_PICKUP_DELIVERY',
                 'reason_label' => $this->bulkReasonLabel('NOT_PICKUP_DELIVERY'),
+                'from' => $currentStatus,
+                'to' => $targetStatus,
+            ];
+        }
+
+        if (! $requiresPickup && in_array($targetStatus, ['pickup_pending', 'pickup_on_the_way', 'picked_up'], true)) {
+            return [
+                'updated' => false,
+                'reason_code' => 'INVALID_TRANSITION',
+                'reason_label' => 'Status pickup tidak tersedia untuk mode tanpa jemput.',
+                'from' => $currentStatus,
+                'to' => $targetStatus,
+            ];
+        }
+
+        if (! $requiresDelivery && in_array($targetStatus, ['delivery_pending', 'delivery_on_the_way', 'delivered'], true)) {
+            return [
+                'updated' => false,
+                'reason_code' => 'INVALID_TRANSITION',
+                'reason_label' => 'Status delivery tidak tersedia untuk mode tanpa antar.',
                 'from' => $currentStatus,
                 'to' => $targetStatus,
             ];
@@ -1419,6 +1527,7 @@ class OrderBoardController extends Controller
             'NOT_PICKUP_DELIVERY' => 'Order bukan tipe pickup-delivery.',
             'COURIER_INVALID' => 'Courier target tidak valid atau tidak aktif.',
             'LAUNDRY_NOT_READY' => 'Laundry belum ready/completed untuk masuk delivery pending.',
+            'ITEMS_REQUIRED' => 'Item layanan belum diinput. Lanjutkan setelah timbang/input item.',
             'PAYMENT_REQUIRED' => 'Tagihan pesanan belum lunas. Lunasi dulu sebelum menyelesaikan pesanan.',
             'OUT_OF_SCOPE' => 'Order di luar scope tenant/outlet Anda.',
             'NOT_FOUND' => 'Order tidak ditemukan pada tenant ini.',
@@ -1476,26 +1585,175 @@ class OrderBoardController extends Controller
     /**
      * @return array<int, string>
      */
-    private function allowedCourierStatusesForCurrent(string $currentStatus, string $laundryStatus, bool $isPickupDelivery): array
+    private function allowedCourierStatusesForCurrent(string $currentStatus, string $laundryStatus, bool $requiresPickup, bool $requiresDelivery): array
     {
-        if (! $isPickupDelivery) {
+        if (! $requiresPickup && ! $requiresDelivery) {
             return [];
         }
 
-        if ($currentStatus === 'at_outlet' && ! in_array($laundryStatus, ['ready', 'completed'], true)) {
+        if ($currentStatus === 'at_outlet' && $requiresDelivery && ! in_array($laundryStatus, ['ready', 'completed'], true)) {
             return ['at_outlet'];
         }
 
+        if ($requiresPickup && $requiresDelivery) {
+            return match ($currentStatus) {
+                'pickup_pending' => ['pickup_pending', 'pickup_on_the_way'],
+                'pickup_on_the_way' => ['pickup_on_the_way', 'picked_up'],
+                'picked_up' => ['picked_up', 'at_outlet'],
+                'at_outlet' => ['at_outlet', 'delivery_pending'],
+                'delivery_pending' => ['delivery_pending', 'delivery_on_the_way'],
+                'delivery_on_the_way' => ['delivery_on_the_way', 'delivered'],
+                'delivered' => ['delivered'],
+                default => ['pickup_pending'],
+            };
+        }
+
+        if ($requiresPickup) {
+            return match ($currentStatus) {
+                'pickup_pending' => ['pickup_pending', 'pickup_on_the_way'],
+                'pickup_on_the_way' => ['pickup_on_the_way', 'picked_up'],
+                'picked_up' => ['picked_up', 'at_outlet'],
+                'at_outlet' => ['at_outlet'],
+                default => ['pickup_pending'],
+            };
+        }
+
         return match ($currentStatus) {
-            'pickup_pending' => ['pickup_pending', 'pickup_on_the_way'],
-            'pickup_on_the_way' => ['pickup_on_the_way', 'picked_up'],
-            'picked_up' => ['picked_up', 'at_outlet'],
-            'at_outlet' => ['at_outlet', 'delivery_pending'],
+            'at_outlet' => in_array($laundryStatus, ['ready', 'completed'], true) ? ['at_outlet', 'delivery_pending'] : ['at_outlet'],
             'delivery_pending' => ['delivery_pending', 'delivery_on_the_way'],
             'delivery_on_the_way' => ['delivery_on_the_way', 'delivered'],
             'delivered' => ['delivered'],
-            default => ['pickup_pending'],
+            default => ['at_outlet'],
         };
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array{0: bool, 1: bool, 2: bool}
+     */
+    private function resolveCourierModeFlagsFromValidated(array $validated): array
+    {
+        $explicitPickup = array_key_exists('requires_pickup', $validated);
+        $explicitDelivery = array_key_exists('requires_delivery', $validated);
+        $isLegacy = ! $explicitPickup && ! $explicitDelivery;
+
+        if ($isLegacy) {
+            $legacyPickupDelivery = (bool) ($validated['is_pickup_delivery'] ?? false);
+
+            return [$legacyPickupDelivery, $legacyPickupDelivery, true];
+        }
+
+        return [
+            (bool) ($validated['requires_pickup'] ?? false),
+            (bool) ($validated['requires_delivery'] ?? false),
+            false,
+        ];
+    }
+
+    private function buildLogisticsPoint(bool $enabled, string $address, string $slot): ?array
+    {
+        if (! $enabled) {
+            return null;
+        }
+
+        if ($address === '' && $slot === '') {
+            return null;
+        }
+
+        return [
+            'address_short' => $address !== '' ? $address : null,
+            'slot' => $slot !== '' ? $slot : null,
+        ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $rawItems
+     * @return array<int, array{service_id: string, qty: float|null, weight_kg: float|null}>
+     */
+    private function normalizeSubmittedItems(array $rawItems): array
+    {
+        $rows = [];
+
+        foreach ($rawItems as $index => $item) {
+            $serviceId = trim((string) ($item['service_id'] ?? ''));
+            $qtyRaw = $item['qty'] ?? null;
+            $weightRaw = $item['weight_kg'] ?? null;
+            $hasQty = $qtyRaw !== null && $qtyRaw !== '';
+            $hasWeight = $weightRaw !== null && $weightRaw !== '';
+
+            if ($serviceId === '') {
+                if ($hasQty || $hasWeight) {
+                    throw ValidationException::withMessages([
+                        "items.{$index}.service_id" => ['Layanan wajib dipilih saat qty/berat diisi.'],
+                    ]);
+                }
+
+                continue;
+            }
+
+            $rows[] = [
+                'service_id' => $serviceId,
+                'qty' => $hasQty ? (float) $qtyRaw : null,
+                'weight_kg' => $hasWeight ? (float) $weightRaw : null,
+            ];
+        }
+
+        return $rows;
+    }
+
+    private function resolveInitialCourierStatus(bool $requiresPickup, bool $requiresDelivery): ?string
+    {
+        if (! $requiresPickup && ! $requiresDelivery) {
+            return null;
+        }
+
+        if ($requiresPickup) {
+            return 'pickup_pending';
+        }
+
+        return 'at_outlet';
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function courierSteps(bool $requiresPickup, bool $requiresDelivery): array
+    {
+        if (! $requiresPickup && ! $requiresDelivery) {
+            return [];
+        }
+
+        if ($requiresPickup && $requiresDelivery) {
+            return ['pickup_pending', 'pickup_on_the_way', 'picked_up', 'at_outlet', 'delivery_pending', 'delivery_on_the_way', 'delivered'];
+        }
+
+        if ($requiresPickup) {
+            return ['pickup_pending', 'pickup_on_the_way', 'picked_up', 'at_outlet'];
+        }
+
+        return ['at_outlet', 'delivery_pending', 'delivery_on_the_way', 'delivered'];
+    }
+
+    private function resolveServiceDurationMinutes(Service $service): int
+    {
+        $days = (int) ($service->duration_days ?? 0);
+        $hours = (int) ($service->duration_hours ?? 0);
+
+        return max(($days * 24 * 60) + ($hours * 60), 0);
+    }
+
+    private function withAutoDeliverySchedule(?array $payload, int $longestDurationMinutes, Carbon $baseTime): array
+    {
+        $minutes = max($longestDurationMinutes, 0);
+        $scheduledAt = $baseTime->copy()->addMinutes($minutes);
+        $next = is_array($payload) ? $payload : [];
+
+        $next['slot'] = $scheduledAt->format('Y-m-d H:i');
+        $next['slot_auto'] = true;
+        $next['slot_generated_at'] = $baseTime->toIso8601String();
+        $next['slot_generated_duration_minutes'] = $minutes;
+
+        return $next;
     }
 
     private function ensureOperationalWriteAccess(string $tenantId): void

@@ -295,6 +295,8 @@ Alpine.data('webOrderFormBuilder', (payload = {}) => ({
     initial: payload?.initial && typeof payload.initial === 'object' ? payload.initial : {},
     serviceLookup: {},
     outletId: '',
+    requiresPickup: false,
+    requiresDelivery: false,
     shippingFee: '0',
     discount: '0',
     rows: [],
@@ -314,6 +316,8 @@ Alpine.data('webOrderFormBuilder', (payload = {}) => ({
         });
 
         this.outletId = String(this.initial?.outlet_id ?? '');
+        this.requiresPickup = this.boolToken(this.initial?.requires_pickup);
+        this.requiresDelivery = this.boolToken(this.initial?.requires_delivery);
         this.shippingFee = String(this.initial?.shipping_fee_amount ?? '0');
         this.discount = String(this.initial?.discount_amount ?? '0');
 
@@ -329,6 +333,10 @@ Alpine.data('webOrderFormBuilder', (payload = {}) => ({
         if (this.rows.length === 0) {
             this.rows = [this.emptyRow()];
         }
+    },
+
+    boolToken(value) {
+        return String(value ?? '').trim() === '1';
     },
 
     inputToken(value) {
@@ -417,17 +425,31 @@ Alpine.data('webOrderFormBuilder', (payload = {}) => ({
     },
 
     get estimatedSubtotal() {
+        if (this.requiresPickup) {
+            return 0;
+        }
+
         return this.rows.reduce((sum, row) => sum + this.lineSubtotal(row), 0);
     },
 
     get estimatedTotal() {
-        const fee = Math.round(this.numberValue(this.shippingFee));
+        const fee = this.requiresPickup || this.requiresDelivery
+            ? Math.round(this.numberValue(this.shippingFee))
+            : 0;
         const discount = Math.round(this.numberValue(this.discount));
 
         return Math.max(this.estimatedSubtotal + fee - discount, 0);
     },
 
+    get requiresItems() {
+        return !this.requiresPickup;
+    },
+
     rowHint(row) {
+        if (this.requiresPickup) {
+            return 'Item layanan diinput setelah barang dijemput.';
+        }
+
         const unit = this.unitOf(row?.service_id);
 
         if (!unit) {

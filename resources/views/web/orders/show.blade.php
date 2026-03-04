@@ -37,6 +37,16 @@
 
     $pickup = $orderRow->pickup ?? [];
     $delivery = $orderRow->delivery ?? [];
+    $requiresPickup = (bool) ($orderRow->requires_pickup ?? false);
+    $requiresDelivery = (bool) ($orderRow->requires_delivery ?? false);
+    $hasCourierFlow = $requiresPickup || $requiresDelivery;
+    $serviceModeLabel = match (true) {
+        $requiresPickup && $requiresDelivery => 'Jemput & Antar',
+        $requiresPickup => 'Jemput Saja',
+        $requiresDelivery => 'Antar Saja',
+        default => 'Datang Sendiri',
+    };
+    $defaultCourierStatus = $requiresPickup ? 'pickup_pending' : 'at_outlet';
     $laundryOptions = [
         'received' => 'Diterima',
         'washing' => 'Cuci',
@@ -156,7 +166,7 @@
         <div class="detail-pairs">
             <div>
                 <p class="muted-line">Tipe Layanan</p>
-                <p class="row-title">{{ $orderRow->is_pickup_delivery ? 'Pickup & Delivery' : 'Drop Off Outlet' }}</p>
+                <p class="row-title">{{ $serviceModeLabel }}</p>
                 <p class="row-subtitle">Kurir {{ $orderRow->courier?->name ?: '-' }}</p>
             </div>
             <div>
@@ -207,15 +217,15 @@
             </div>
         </form>
 
-        @if(! $orderRow->is_pickup_delivery)
-            <p class="muted-line" style="margin-top: 12px;">Order ini tidak memakai pickup-delivery.</p>
+        @if(! $hasCourierFlow)
+            <p class="muted-line" style="margin-top: 12px;">Order ini tidak memakai layanan kurir jemput/antar.</p>
         @else
             <form method="POST" action="{{ route('tenant.orders.status.courier', ['order' => $orderRow->id]) }}" class="filters-grid" style="margin-top: 12px;">
                 @csrf
                 <div>
                     <label for="courier_status_target">Status Kurir</label>
                     <select id="courier_status_target" name="courier_status" required>
-                        @php($selectedCourierStatus = old('courier_status', $orderRow->courier_status ?: 'pickup_pending'))
+                        @php($selectedCourierStatus = old('courier_status', $orderRow->courier_status ?: $defaultCourierStatus))
                         @foreach($courierOptions as $value => $label)
                             @php($isCourierAllowed = in_array((string) $value, $allowedCourierStatuses, true))
                             <option value="{{ $value }}" @selected((string) $selectedCourierStatus === (string) $value) @disabled(! $isCourierAllowed)>

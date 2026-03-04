@@ -353,7 +353,7 @@
                                     <input type="hidden" name="action" value="mark-completed">
                                     <button type="submit">Tandai selesai</button>
                                 </form>
-                                @if($order->is_pickup_delivery)
+                                @if(($order->requires_delivery ?? false))
                                     <form method="POST" action="{{ route('tenant.orders.bulk-update') }}">
                                         @csrf
                                         <input type="hidden" name="selected_ids" value="{{ $order->id }}">
@@ -372,6 +372,8 @@
                                         <input type="hidden" name="action" value="courier-delivered">
                                         <button type="submit">Kurir: terkirim</button>
                                     </form>
+                                @endif
+                                @if(($order->requires_pickup ?? false) || ($order->requires_delivery ?? false) || $order->is_pickup_delivery)
                                     @foreach($couriers as $courierOption)
                                         <form method="POST" action="{{ route('tenant.orders.bulk-update') }}">
                                             @csrf

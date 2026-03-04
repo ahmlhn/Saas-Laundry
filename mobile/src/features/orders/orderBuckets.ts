@@ -27,13 +27,15 @@ export function normalizeOrderBucket(value: string | null | undefined): OrderBuc
 export function resolveOrderBucket(order: OrderSummary): OrderBucket {
   const laundryStatus = (order.laundry_status || "").toLowerCase();
   const courierStatus = (order.courier_status || "").toLowerCase();
-  const isPickupDelivery = Boolean(order.is_pickup_delivery);
+  const requiresDelivery = typeof order.requires_delivery === "boolean"
+    ? order.requires_delivery
+    : Boolean(order.is_pickup_delivery);
 
-  if (isPickupDelivery && courierStatus === "delivered") {
+  if (requiresDelivery && courierStatus === "delivered") {
     return "selesai";
   }
 
-  if (!isPickupDelivery && laundryStatus === "completed") {
+  if (!requiresDelivery && laundryStatus === "completed") {
     return "selesai";
   }
 
@@ -50,14 +52,14 @@ export function resolveOrderBucket(order: OrderSummary): OrderBucket {
   }
 
   if (laundryStatus === "ready") {
-    return isPickupDelivery ? "siap_antar" : "siap_ambil";
+    return requiresDelivery ? "siap_antar" : "siap_ambil";
   }
 
   if (laundryStatus === "completed") {
-    return isPickupDelivery ? "siap_antar" : "selesai";
+    return requiresDelivery ? "siap_antar" : "selesai";
   }
 
-  if (isPickupDelivery && ["delivery_pending", "delivery_on_the_way"].includes(courierStatus)) {
+  if (requiresDelivery && ["delivery_pending", "delivery_on_the_way"].includes(courierStatus)) {
     return "siap_antar";
   }
 

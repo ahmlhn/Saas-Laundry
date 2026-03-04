@@ -56,6 +56,8 @@
             priceMap: @js($outletServicePriceMap),
             initial: @js([
                 'outlet_id' => (string) old('outlet_id', ''),
+                'requires_pickup' => (string) old('requires_pickup', '0'),
+                'requires_delivery' => (string) old('requires_delivery', '0'),
                 'shipping_fee_amount' => (string) old('shipping_fee_amount', 0),
                 'discount_amount' => (string) old('discount_amount', 0),
                 'items' => collect(old('items', [['service_id' => '', 'qty' => '', 'weight_kg' => '']]))
@@ -72,6 +74,7 @@
         @csrf
 
         <div class="filters-grid">
+            <input type="hidden" name="is_pickup_delivery" :value="(requiresPickup || requiresDelivery) ? '1' : '0'">
             <div>
                 <label for="outlet_id">Outlet</label>
                 <select id="outlet_id" name="outlet_id" x-model="outletId" required>
@@ -94,9 +97,9 @@
                 <input id="invoice_no" type="text" name="invoice_no" value="{{ old('invoice_no') }}" maxlength="50" placeholder="opsional">
             </div>
 
-            <div>
+            <div x-show="requiresPickup || requiresDelivery" x-cloak>
                 <label for="shipping_fee_amount">Biaya Antar/Jemput</label>
-                <input id="shipping_fee_amount" type="number" min="0" name="shipping_fee_amount" x-model="shippingFee">
+                <input id="shipping_fee_amount" type="number" min="0" name="shipping_fee_amount" x-model="shippingFee" :disabled="!requiresPickup && !requiresDelivery">
             </div>
 
             <div>
@@ -105,10 +108,27 @@
             </div>
 
             <div>
-                <label class="checkbox-inline" for="is_pickup_delivery">
-                    <input id="is_pickup_delivery" type="checkbox" name="is_pickup_delivery" value="1" @checked((string) old('is_pickup_delivery') === '1')>
-                    Transaksi pickup-delivery
-                </label>
+                <p class="muted-line" style="margin-bottom: 6px;">Mode Operasional</p>
+                <div class="filter-actions">
+                    <label class="checkbox-inline" for="requires_pickup">
+                        <input id="requires_pickup" type="checkbox" name="requires_pickup" value="1" x-model="requiresPickup">
+                        Jemput
+                    </label>
+                    <label class="checkbox-inline" for="requires_delivery">
+                        <input id="requires_delivery" type="checkbox" name="requires_delivery" value="1" x-model="requiresDelivery">
+                        Antar
+                    </label>
+                </div>
+            </div>
+
+            <div x-show="requiresPickup || requiresDelivery" x-cloak>
+                <label for="courier_user_id">Kurir (opsional)</label>
+                <select id="courier_user_id" name="courier_user_id" :disabled="!requiresPickup && !requiresDelivery">
+                    <option value="">Nanti saja / belum ada kurir khusus</option>
+                    @foreach($couriers as $courier)
+                        <option value="{{ $courier->id }}" @selected((string) old('courier_user_id') === (string) $courier->id)>{{ $courier->name }}</option>
+                    @endforeach
+                </select>
             </div>
         </div>
 
@@ -169,22 +189,24 @@
                     <h3>Jadwal Pickup/Delivery</h3>
                 </div>
                 <div class="filters-grid">
-                    <div>
+                    <div x-show="requiresPickup" x-cloak>
                         <label for="pickup_address">Alamat Jemput</label>
                         <input id="pickup_address" type="text" name="pickup_address" value="{{ old('pickup_address') }}" maxlength="255" placeholder="opsional">
                     </div>
-                    <div>
+                    <div x-show="requiresPickup" x-cloak>
                         <label for="pickup_slot">Slot Jemput</label>
-                        <input id="pickup_slot" type="text" name="pickup_slot" value="{{ old('pickup_slot') }}" maxlength="80" placeholder="contoh: 09:00-11:00">
+                        <input id="pickup_slot" type="text" name="pickup_slot" value="{{ old('pickup_slot') }}" maxlength="80" placeholder="contoh: 09:00-11:00" :required="requiresPickup">
                     </div>
-                    <div>
+                    <div x-show="requiresDelivery" x-cloak>
                         <label for="delivery_address">Alamat Antar</label>
                         <input id="delivery_address" type="text" name="delivery_address" value="{{ old('delivery_address') }}" maxlength="255" placeholder="opsional">
                     </div>
-                    <div>
+                    <div x-show="requiresDelivery" x-cloak>
                         <label for="delivery_slot">Slot Antar</label>
-                        <input id="delivery_slot" type="text" name="delivery_slot" value="{{ old('delivery_slot') }}" maxlength="80" placeholder="contoh: 16:00-18:00">
+                        <input id="delivery_slot" type="text" name="delivery_slot" value="{{ old('delivery_slot') }}" maxlength="80" placeholder="otomatis saat timbang/input item" readonly>
+                        <p class="muted-line">Jadwal antar otomatis = waktu input timbang + durasi layanan terlama.</p>
                     </div>
+                    <p class="muted-line" x-show="!requiresPickup && !requiresDelivery" x-cloak style="grid-column: 1 / -1;">Mode datang sendiri aktif. Ongkir otomatis Rp0.</p>
                 </div>
             </article>
         </div>
@@ -213,7 +235,7 @@
                     <template x-for="(row, index) in rows" :key="index">
                         <tr>
                             <td>
-                                <select :name="`items[${index}][service_id]`" x-model="row.service_id" @change="onServiceChanged(row)" required>
+                                <select :name="`items[${index}][service_id]`" x-model="row.service_id" @change="onServiceChanged(row)" :required="requiresItems" :disabled="requiresPickup">
                                     <option value="">Pilih layanan</option>
                                     @foreach($services as $service)
                                         <option value="{{ $service->id }}">
@@ -234,7 +256,7 @@
                                     min="0.01"
                                     :name="`items[${index}][qty]`"
                                     x-model="row.qty"
-                                    :disabled="unitOf(row.service_id) !== 'pcs'"
+                                    :disabled="requiresPickup || unitOf(row.service_id) !== 'pcs'"
                                     placeholder="untuk pcs"
                                 >
                             </td>
@@ -245,7 +267,7 @@
                                     min="0.01"
                                     :name="`items[${index}][weight_kg]`"
                                     x-model="row.weight_kg"
-                                    :disabled="unitOf(row.service_id) !== 'kg'"
+                                    :disabled="requiresPickup || unitOf(row.service_id) !== 'kg'"
                                     placeholder="untuk kg"
                                 >
                             </td>
@@ -253,7 +275,7 @@
                                 <p class="row-title">Rp<span x-text="formatCurrency(lineSubtotal(row))"></span></p>
                             </td>
                             <td>
-                                <button type="button" class="btn btn-danger btn-sm" @click="removeRow(index)" :disabled="rows.length === 1">Hapus</button>
+                                <button type="button" class="btn btn-danger btn-sm" @click="removeRow(index)" :disabled="requiresPickup || rows.length === 1">Hapus</button>
                             </td>
                         </tr>
                     </template>
@@ -262,12 +284,13 @@
             </div>
 
             <div class="order-builder-foot">
-                <button type="button" class="btn btn-muted" @click="addRow()">Tambah Item</button>
+                <button type="button" class="btn btn-muted" @click="addRow()" :disabled="requiresPickup">Tambah Item</button>
 
                 <div class="order-estimate">
                     <p class="muted-line">Estimasi Subtotal: <strong>Rp<span x-text="formatCurrency(estimatedSubtotal)"></span></strong></p>
                     <p class="muted-line">Estimasi Total: <strong>Rp<span x-text="formatCurrency(estimatedTotal)"></span></strong></p>
                     <p class="muted-line">Total final mengikuti validasi server saat submit.</p>
+                    <p class="muted-line" x-show="requiresPickup" x-cloak>Mode jemput aktif: item layanan diinput setelah barang diterima di outlet.</p>
                 </div>
             </div>
         </article>

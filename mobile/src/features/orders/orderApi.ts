@@ -133,6 +133,8 @@ export interface SaveOrderPayload {
     weightKg?: number;
   }>;
   notes?: string;
+  requiresPickup?: boolean;
+  requiresDelivery?: boolean;
   isPickupDelivery?: boolean;
   shippingFeeAmount?: number;
   discountAmount?: number;
@@ -156,14 +158,20 @@ export interface OrderListPage {
 }
 
 function buildOrderRequestBody(payload: SaveOrderPayload): Record<string, unknown> {
+  const requiresPickup = payload.requiresPickup ?? (payload.isPickupDelivery ?? false);
+  const requiresDelivery = payload.requiresDelivery ?? (payload.isPickupDelivery ?? false);
+  const hasCourierFlow = requiresPickup || requiresDelivery;
+
   return {
     outlet_id: payload.outletId,
-    is_pickup_delivery: payload.isPickupDelivery ?? false,
-    shipping_fee_amount: payload.shippingFeeAmount ?? 0,
+    is_pickup_delivery: hasCourierFlow,
+    requires_pickup: requiresPickup,
+    requires_delivery: requiresDelivery,
+    shipping_fee_amount: hasCourierFlow ? (payload.shippingFeeAmount ?? 0) : 0,
     discount_amount: payload.discountAmount ?? 0,
     notes: payload.notes?.trim() || undefined,
-    pickup: payload.pickup,
-    delivery: payload.delivery,
+    pickup: requiresPickup ? payload.pickup : undefined,
+    delivery: requiresDelivery ? payload.delivery : undefined,
     customer: {
       name: payload.customer.name,
       phone: payload.customer.phone,

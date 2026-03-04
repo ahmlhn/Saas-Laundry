@@ -65,10 +65,10 @@ class OrderController extends Controller
         if ($statusScope === 'open') {
             $query->where(function ($q): void {
                 $q->where(function ($inner): void {
-                    $inner->where('is_pickup_delivery', false)
+                    $inner->where('requires_delivery', false)
                         ->where('laundry_status', '!=', 'completed');
                 })->orWhere(function ($inner): void {
-                    $inner->where('is_pickup_delivery', true)
+                    $inner->where('requires_delivery', true)
                         ->where(function ($pickup): void {
                             $pickup->whereNull('courier_status')
                                 ->orWhere('courier_status', '!=', 'delivered');
@@ -78,10 +78,10 @@ class OrderController extends Controller
         } elseif ($statusScope === 'completed') {
             $query->where(function ($q): void {
                 $q->where(function ($inner): void {
-                    $inner->where('is_pickup_delivery', false)
+                    $inner->where('requires_delivery', false)
                         ->where('laundry_status', 'completed');
                 })->orWhere(function ($inner): void {
-                    $inner->where('is_pickup_delivery', true)
+                    $inner->where('requires_delivery', true)
                         ->where('courier_status', 'delivered');
                 });
             });
@@ -185,7 +185,10 @@ class OrderController extends Controller
             'outlet_id' => ['required', 'uuid'],
             'order_code' => ['nullable', 'string', 'max:32'],
             'invoice_no' => ['nullable', 'string', 'max:50'],
+            'requires_pickup' => ['nullable', 'boolean'],
+            'requires_delivery' => ['nullable', 'boolean'],
             'is_pickup_delivery' => ['nullable', 'boolean'],
+            'courier_user_id' => ['nullable', 'integer', 'min:1'],
             'shipping_fee_amount' => ['nullable', 'integer', 'min:0'],
             'discount_amount' => ['nullable', 'integer', 'min:0'],
             'notes' => ['nullable', 'string'],
@@ -195,17 +198,59 @@ class OrderController extends Controller
             'customer.name' => ['required', 'string', 'max:150'],
             'customer.phone' => ['required', 'string', 'max:30'],
             'customer.notes' => ['nullable', 'string'],
-            'items' => ['required', 'array', 'min:1'],
-            'items.*.service_id' => ['required', 'uuid'],
+            'items' => ['nullable', 'array'],
+            'items.*.service_id' => ['nullable', 'uuid'],
             'items.*.qty' => ['nullable', 'numeric', 'min:0.01'],
             'items.*.weight_kg' => ['nullable', 'numeric', 'min:0.01'],
         ]);
 
         $outletId = $validated['outlet_id'];
         $tenantId = $user->tenant_id;
-        $isPickup = (bool) ($validated['is_pickup_delivery'] ?? false);
-        $shippingFee = (int) ($validated['shipping_fee_amount'] ?? 0);
+        [$requiresPickup, $requiresDelivery, $isLegacyPickupMode] = $this->resolveCourierModeFlagsFromValidated($validated);
+        $isCourierFlow = $requiresPickup || $requiresDelivery;
+        $shippingFee = $isCourierFlow ? (int) ($validated['shipping_fee_amount'] ?? 0) : 0;
         $discount = (int) ($validated['discount_amount'] ?? 0);
+        $items = $this->normalizeSubmittedItems($validated['items'] ?? []);
+
+        if (! $requiresPickup && count($items) === 0) {
+            throw ValidationException::withMessages([
+                'items' => ['items is required for non-pickup orders.'],
+            ]);
+        }
+
+        if ($requiresPickup && ! $isLegacyPickupMode && count($items) > 0) {
+            throw ValidationException::withMessages([
+                'items' => ['For pickup mode, submit order first and input items after pickup is completed.'],
+            ]);
+        }
+
+        if ($requiresPickup && ! $isLegacyPickupMode && ! $this->hasScheduleSlot($validated['pickup'] ?? null)) {
+            throw ValidationException::withMessages([
+                'pickup' => ['pickup slot is required when requires_pickup is true.'],
+            ]);
+        }
+
+        if (array_key_exists('courier_user_id', $validated) && ! $isCourierFlow) {
+            throw ValidationException::withMessages([
+                'courier_user_id' => ['courier can only be assigned for pickup or delivery orders.'],
+            ]);
+        }
+
+        $selectedCourier = null;
+        if (isset($validated['courier_user_id'])) {
+            $selectedCourier = User::query()
+                ->with('roles:id,key')
+                ->where('id', (int) $validated['courier_user_id'])
+                ->where('tenant_id', $tenantId)
+                ->where('status', 'active')
+                ->first();
+
+            if (! $selectedCourier || ! $selectedCourier->hasRole('courier')) {
+                throw ValidationException::withMessages([
+                    'courier_user_id' => ['Assigned user must be an active courier in the same tenant.'],
+                ]);
+            }
+        }
 
         if (Order::query()->where('tenant_id', $tenantId)->where('order_code', $validated['order_code'] ?? '')->exists()) {
             throw ValidationException::withMessages([
@@ -214,7 +259,7 @@ class OrderController extends Controller
         }
 
         try {
-            $order = DB::transaction(function () use ($validated, $tenantId, $outletId, $isPickup, $shippingFee, $discount, $actorUserId, $sourceChannel): Order {
+            $order = DB::transaction(function () use ($validated, $tenantId, $outletId, $isCourierFlow, $requiresPickup, $requiresDelivery, $shippingFee, $discount, $actorUserId, $sourceChannel, $items, $selectedCourier): Order {
                 $this->quotaService->consumeOrderSlot($tenantId);
 
                 $phone = $this->normalizePhone($validated['customer']['phone']);
@@ -239,16 +284,19 @@ class OrderController extends Controller
                     'customer_id' => $customer->id,
                     'invoice_no' => $validated['invoice_no'] ?? null,
                     'order_code' => $validated['order_code'] ?? $this->generateOrderCode(),
-                    'is_pickup_delivery' => $isPickup,
+                    'is_pickup_delivery' => $isCourierFlow,
+                    'requires_pickup' => $requiresPickup,
+                    'requires_delivery' => $requiresDelivery,
                     'laundry_status' => 'received',
-                    'courier_status' => $isPickup ? 'pickup_pending' : null,
+                    'courier_status' => $this->resolveInitialCourierStatus($requiresPickup, $requiresDelivery),
+                    'courier_user_id' => $selectedCourier?->id,
                     'shipping_fee_amount' => $shippingFee,
                     'discount_amount' => $discount,
                     'total_amount' => 0,
                     'paid_amount' => 0,
                     'due_amount' => 0,
-                    'pickup' => $validated['pickup'] ?? null,
-                    'delivery' => $validated['delivery'] ?? null,
+                    'pickup' => $requiresPickup ? ($validated['pickup'] ?? null) : null,
+                    'delivery' => $requiresDelivery ? ($validated['delivery'] ?? null) : null,
                     'notes' => $validated['notes'] ?? null,
                     'created_by' => $actorUserId,
                     'updated_by' => $actorUserId,
@@ -256,7 +304,7 @@ class OrderController extends Controller
                 ]);
 
                 $subTotal = 0;
-                $items = $validated['items'];
+                $maxDurationMinutes = 0;
 
                 foreach ($items as $item) {
                     $service = Service::query()
@@ -297,6 +345,7 @@ class OrderController extends Controller
                     $metric = $service->unit_type === 'kg' ? (float) $weight : (float) $qty;
                     $lineSubTotal = (int) round($metric * $unitPrice);
                     $subTotal += $lineSubTotal;
+                    $maxDurationMinutes = max($maxDurationMinutes, $this->resolveServiceDurationMinutes($service));
 
                     OrderItem::query()->create([
                         'order_id' => $order->id,
@@ -310,12 +359,22 @@ class OrderController extends Controller
                     ]);
                 }
 
+                $resolvedDelivery = $requiresDelivery ? ($validated['delivery'] ?? null) : null;
+                if ($requiresDelivery && count($items) > 0) {
+                    $resolvedDelivery = $this->withAutoDeliverySchedule(
+                        payload: is_array($resolvedDelivery) ? $resolvedDelivery : null,
+                        longestDurationMinutes: $maxDurationMinutes,
+                        baseTime: CarbonImmutable::now(config('app.timezone', 'UTC')),
+                    );
+                }
+
                 $total = max($subTotal + $shippingFee - $discount, 0);
 
                 $order->forceFill([
                     'total_amount' => $total,
                     'paid_amount' => 0,
                     'due_amount' => $total,
+                    'delivery' => $resolvedDelivery,
                     'updated_by' => $actorUserId,
                     'source_channel' => $sourceChannel,
                 ])->save();
@@ -339,12 +398,14 @@ class OrderController extends Controller
             ], 422);
         }
 
-        $this->waDispatchService->enqueueOrderEvent($order, 'WA_PICKUP_CONFIRM', metadata: [
-            'event' => 'order_created',
-            'source' => 'api',
-            'actor_user_id' => $user->id,
-            'source_channel' => $sourceChannel,
-        ]);
+        if ($order->requires_pickup) {
+            $this->waDispatchService->enqueueOrderEvent($order, 'WA_PICKUP_CONFIRM', metadata: [
+                'event' => 'order_created',
+                'source' => 'api',
+                'actor_user_id' => $user->id,
+                'source_channel' => $sourceChannel,
+            ]);
+        }
 
         $this->auditTrail->record(
             eventKey: AuditEventKeys::ORDER_CREATED,
@@ -358,6 +419,8 @@ class OrderController extends Controller
                 'invoice_no' => $order->invoice_no,
                 'total_amount' => $order->total_amount,
                 'is_pickup_delivery' => $order->is_pickup_delivery,
+                'requires_pickup' => (bool) $order->requires_pickup,
+                'requires_delivery' => (bool) $order->requires_delivery,
             ],
             channel: 'api',
             request: $request,
@@ -380,7 +443,10 @@ class OrderController extends Controller
 
         $validated = $request->validate([
             'outlet_id' => ['required', 'uuid'],
+            'requires_pickup' => ['nullable', 'boolean'],
+            'requires_delivery' => ['nullable', 'boolean'],
             'is_pickup_delivery' => ['nullable', 'boolean'],
+            'courier_user_id' => ['nullable', 'integer', 'min:1'],
             'shipping_fee_amount' => ['nullable', 'integer', 'min:0'],
             'discount_amount' => ['nullable', 'integer', 'min:0'],
             'notes' => ['nullable', 'string'],
@@ -402,19 +468,55 @@ class OrderController extends Controller
             ]);
         }
 
-        if ((! $order->is_pickup_delivery && $order->laundry_status === 'completed')
-            || ($order->is_pickup_delivery && $order->courier_status === 'delivered')) {
+        if ((! $order->requires_delivery && $order->laundry_status === 'completed')
+            || ($order->requires_delivery && $order->courier_status === 'delivered')) {
             throw ValidationException::withMessages([
                 'order' => ['Pesanan yang sudah selesai tidak bisa diedit lagi.'],
             ]);
         }
 
         $tenantId = $user->tenant_id;
-        $isPickup = (bool) ($validated['is_pickup_delivery'] ?? false);
-        $shippingFee = (int) ($validated['shipping_fee_amount'] ?? 0);
+        [$requiresPickup, $requiresDelivery] = $this->resolveCourierModeFlagsFromValidated($validated, $order);
+        $isCourierFlow = $requiresPickup || $requiresDelivery;
+        $shippingFee = $isCourierFlow ? (int) ($validated['shipping_fee_amount'] ?? 0) : 0;
         $discount = (int) ($validated['discount_amount'] ?? 0);
 
-        $updatedOrder = DB::transaction(function () use ($validated, $tenantId, $order, $isPickup, $shippingFee, $discount, $actorUserId, $sourceChannel): Order {
+        $resolvedPickupInput = $requiresPickup
+            ? (array_key_exists('pickup', $validated) ? $validated['pickup'] : $order->pickup)
+            : null;
+        $resolvedDeliveryInput = $requiresDelivery
+            ? (array_key_exists('delivery', $validated) ? $validated['delivery'] : $order->delivery)
+            : null;
+
+        if ($requiresPickup && array_key_exists('pickup', $validated) && ! $this->hasScheduleSlot($resolvedPickupInput)) {
+            throw ValidationException::withMessages([
+                'pickup' => ['pickup slot is required when requires_pickup is true.'],
+            ]);
+        }
+
+        if (array_key_exists('courier_user_id', $validated) && ! $isCourierFlow) {
+            throw ValidationException::withMessages([
+                'courier_user_id' => ['courier can only be assigned for pickup or delivery orders.'],
+            ]);
+        }
+
+        $selectedCourier = null;
+        if (array_key_exists('courier_user_id', $validated) && $validated['courier_user_id'] !== null) {
+            $selectedCourier = User::query()
+                ->with('roles:id,key')
+                ->where('id', (int) $validated['courier_user_id'])
+                ->where('tenant_id', $tenantId)
+                ->where('status', 'active')
+                ->first();
+
+            if (! $selectedCourier || ! $selectedCourier->hasRole('courier')) {
+                throw ValidationException::withMessages([
+                    'courier_user_id' => ['Assigned user must be an active courier in the same tenant.'],
+                ]);
+            }
+        }
+
+        $updatedOrder = DB::transaction(function () use ($validated, $tenantId, $order, $requiresPickup, $requiresDelivery, $isCourierFlow, $shippingFee, $discount, $resolvedPickupInput, $resolvedDeliveryInput, $selectedCourier, $actorUserId, $sourceChannel): Order {
             $phone = $this->normalizePhone($validated['customer']['phone']);
 
             if (! $phone) {
@@ -433,6 +535,8 @@ class OrderController extends Controller
 
             $subTotal = 0;
             $lineItems = [];
+            $maxDurationMinutes = 0;
+            $previousItemCount = (int) OrderItem::query()->where('order_id', $order->id)->count();
 
             foreach ($validated['items'] as $item) {
                 $service = Service::query()
@@ -473,6 +577,7 @@ class OrderController extends Controller
                 $metric = $service->unit_type === 'kg' ? (float) $weight : (float) $qty;
                 $lineSubTotal = (int) round($metric * $unitPrice);
                 $subTotal += $lineSubTotal;
+                $maxDurationMinutes = max($maxDurationMinutes, $this->resolveServiceDurationMinutes($service));
 
                 $lineItems[] = [
                     'service_id' => $service->id,
@@ -503,19 +608,33 @@ class OrderController extends Controller
                 ]);
             }
 
-            $resolvedPickup = $isPickup ? ($validated['pickup'] ?? $order->pickup) : null;
-            $resolvedDelivery = $isPickup ? ($validated['delivery'] ?? $order->delivery) : null;
+            $resolvedDelivery = is_array($resolvedDeliveryInput) ? $resolvedDeliveryInput : null;
+            if ($requiresDelivery && count($lineItems) > 0 && $previousItemCount === 0) {
+                $resolvedDelivery = $this->withAutoDeliverySchedule(
+                    payload: $resolvedDelivery,
+                    longestDurationMinutes: $maxDurationMinutes,
+                    baseTime: CarbonImmutable::now(config('app.timezone', 'UTC')),
+                );
+            }
+
+            $resolvedCourierUserId = match (true) {
+                ! $isCourierFlow => null,
+                array_key_exists('courier_user_id', $validated) => $selectedCourier?->id,
+                default => $order->courier_user_id,
+            };
 
             $order->forceFill([
                 'customer_id' => $customer->id,
-                'is_pickup_delivery' => $isPickup,
-                'courier_status' => $this->resolveEditedCourierStatus($order, $isPickup),
-                'courier_user_id' => $isPickup ? $order->courier_user_id : null,
+                'is_pickup_delivery' => $isCourierFlow,
+                'requires_pickup' => $requiresPickup,
+                'requires_delivery' => $requiresDelivery,
+                'courier_status' => $this->resolveEditedCourierStatus($order, $requiresPickup, $requiresDelivery),
+                'courier_user_id' => $resolvedCourierUserId,
                 'shipping_fee_amount' => $shippingFee,
                 'discount_amount' => $discount,
                 'total_amount' => $total,
                 'due_amount' => max($total - $paidAmount, 0),
-                'pickup' => $resolvedPickup,
+                'pickup' => $requiresPickup ? (is_array($resolvedPickupInput) ? $resolvedPickupInput : null) : null,
                 'delivery' => $resolvedDelivery,
                 'notes' => $validated['notes'] ?? null,
                 'updated_by' => $actorUserId,
@@ -536,6 +655,8 @@ class OrderController extends Controller
                 'order_code' => $updatedOrder->order_code,
                 'total_amount' => $updatedOrder->total_amount,
                 'is_pickup_delivery' => $updatedOrder->is_pickup_delivery,
+                'requires_pickup' => (bool) $updatedOrder->requires_pickup,
+                'requires_delivery' => (bool) $updatedOrder->requires_delivery,
             ],
             channel: 'api',
             request: $request,
@@ -732,6 +853,13 @@ class OrderController extends Controller
             ], 422);
         }
 
+        if ($validated['status'] !== 'received' && ! OrderItem::query()->where('order_id', $order->id)->exists()) {
+            return response()->json([
+                'reason_code' => 'ITEMS_REQUIRED',
+                'message' => 'Order items are required before progressing laundry status.',
+            ], 422);
+        }
+
         if ($validated['status'] === 'completed' && (int) $order->due_amount > 0) {
             return response()->json([
                 'reason_code' => 'PAYMENT_REQUIRED',
@@ -755,7 +883,7 @@ class OrderController extends Controller
             ]);
         }
 
-        if ($validated['status'] === 'completed' && ! $order->is_pickup_delivery) {
+        if ($validated['status'] === 'completed' && ! $order->requires_delivery) {
             $this->waDispatchService->enqueueOrderEvent($order, 'WA_ORDER_DONE', metadata: [
                 'event' => 'order_done',
                 'source' => 'api',
@@ -796,7 +924,7 @@ class OrderController extends Controller
         if (! $order->is_pickup_delivery) {
             return response()->json([
                 'reason_code' => 'INVALID_TRANSITION',
-                'message' => 'Courier status is only available for pickup-delivery orders.',
+                'message' => 'Courier status is only available for pickup/delivery orders.',
             ], 422);
         }
 
@@ -804,8 +932,25 @@ class OrderController extends Controller
             'status' => ['required', 'string', 'max:32'],
         ]);
 
-        $current = $order->courier_status ?? 'pickup_pending';
+        $requiresPickup = (bool) ($order->requires_pickup ?? false);
+        $requiresDelivery = (bool) ($order->requires_delivery ?? false);
+        $current = $order->courier_status ?? $this->resolveInitialCourierStatus($requiresPickup, $requiresDelivery);
         $next = $validated['status'];
+
+        if (! $requiresPickup && in_array($next, ['pickup_pending', 'pickup_on_the_way', 'picked_up'], true)) {
+            return response()->json([
+                'reason_code' => 'INVALID_TRANSITION',
+                'message' => 'pickup statuses are not available for delivery-only orders.',
+            ], 422);
+        }
+
+        if (! $requiresDelivery && in_array($next, ['delivery_pending', 'delivery_on_the_way', 'delivered'], true)) {
+            return response()->json([
+                'reason_code' => 'INVALID_TRANSITION',
+                'message' => 'delivery statuses are not available for pickup-only orders.',
+            ], 422);
+        }
+
         $result = $validator->validateCourier($current, $next);
 
         if (! $result['ok']) {
@@ -895,7 +1040,7 @@ class OrderController extends Controller
         if (! $order->is_pickup_delivery) {
             return response()->json([
                 'reason_code' => 'VALIDATION_FAILED',
-                'message' => 'Courier can only be assigned for pickup-delivery orders.',
+                'message' => 'Courier can only be assigned for pickup/delivery orders.',
             ], 422);
         }
 
@@ -907,6 +1052,7 @@ class OrderController extends Controller
             ->with('roles:id,key')
             ->where('id', $validated['courier_user_id'])
             ->where('tenant_id', $user->tenant_id)
+            ->where('status', 'active')
             ->first();
 
         if (! $courier || ! $courier->hasRole('courier')) {
@@ -950,10 +1096,14 @@ class OrderController extends Controller
         $this->ensureOperationalWriteAccess($user->tenant_id);
         $sourceChannel = $this->resolveSourceChannel($request, 'web');
 
-        if ($user->hasRole('cashier') && in_array((string) $order->courier_status, ['pickup_on_the_way', 'picked_up', 'at_outlet', 'delivery_pending', 'delivery_on_the_way', 'delivered'], true)) {
+        $cashierLockedStatuses = (bool) ($order->requires_pickup ?? false)
+            ? ['pickup_on_the_way', 'picked_up', 'at_outlet', 'delivery_pending', 'delivery_on_the_way', 'delivered']
+            : ['delivery_on_the_way', 'delivered'];
+
+        if ($user->hasRole('cashier') && in_array((string) $order->courier_status, $cashierLockedStatuses, true)) {
             return response()->json([
                 'reason_code' => 'SCHEDULE_LOCKED',
-                'message' => 'Cashier can only edit schedule before pickup_on_the_way.',
+                'message' => 'Cashier can only edit schedule before courier is on the way.',
             ], 422);
         }
 
@@ -968,6 +1118,10 @@ class OrderController extends Controller
             ? (int) $validated['shipping_fee_amount']
             : $order->shipping_fee_amount;
 
+        if (! $order->is_pickup_delivery) {
+            $newShippingFee = 0;
+        }
+
         $newTotal = max(
             ($order->total_amount - $order->shipping_fee_amount) + $newShippingFee,
             0
@@ -977,8 +1131,8 @@ class OrderController extends Controller
 
         $order->forceFill([
             'shipping_fee_amount' => $newShippingFee,
-            'pickup' => $validated['pickup'] ?? $order->pickup,
-            'delivery' => $validated['delivery'] ?? $order->delivery,
+            'pickup' => $order->requires_pickup ? ($validated['pickup'] ?? $order->pickup) : null,
+            'delivery' => $order->requires_delivery ? ($validated['delivery'] ?? $order->delivery) : null,
             'notes' => $validated['notes'] ?? $order->notes,
             'total_amount' => $newTotal,
             'due_amount' => $newDue,
@@ -1125,20 +1279,146 @@ class OrderController extends Controller
         return 'ORD-'.strtoupper(Str::random(8));
     }
 
-    private function resolveEditedCourierStatus(Order $order, bool $isPickup): ?string
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array{0: bool, 1: bool, 2: bool}
+     */
+    private function resolveCourierModeFlagsFromValidated(array $validated, ?Order $currentOrder = null): array
     {
-        if (! $isPickup) {
+        $explicitPickup = array_key_exists('requires_pickup', $validated);
+        $explicitDelivery = array_key_exists('requires_delivery', $validated);
+        $isLegacy = ! $explicitPickup && ! $explicitDelivery;
+
+        if ($explicitPickup || $explicitDelivery) {
+            return [
+                (bool) ($validated['requires_pickup'] ?? false),
+                (bool) ($validated['requires_delivery'] ?? false),
+                false,
+            ];
+        }
+
+        if (array_key_exists('is_pickup_delivery', $validated)) {
+            $legacyPickupDelivery = (bool) ($validated['is_pickup_delivery'] ?? false);
+
+            return [$legacyPickupDelivery, $legacyPickupDelivery, true];
+        }
+
+        if ($currentOrder) {
+            return [
+                (bool) ($currentOrder->requires_pickup ?? false),
+                (bool) ($currentOrder->requires_delivery ?? false),
+                false,
+            ];
+        }
+
+        return [false, false, $isLegacy];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $rawItems
+     * @return array<int, array{service_id: string, qty: float|null, weight_kg: float|null}>
+     */
+    private function normalizeSubmittedItems(array $rawItems): array
+    {
+        $rows = [];
+
+        foreach ($rawItems as $index => $item) {
+            $serviceId = trim((string) ($item['service_id'] ?? ''));
+            $qtyRaw = $item['qty'] ?? null;
+            $weightRaw = $item['weight_kg'] ?? null;
+            $hasQty = $qtyRaw !== null && $qtyRaw !== '';
+            $hasWeight = $weightRaw !== null && $weightRaw !== '';
+
+            if ($serviceId === '') {
+                if ($hasQty || $hasWeight) {
+                    throw ValidationException::withMessages([
+                        "items.{$index}.service_id" => ['service_id is required when qty or weight_kg is provided.'],
+                    ]);
+                }
+
+                continue;
+            }
+
+            $rows[] = [
+                'service_id' => $serviceId,
+                'qty' => $hasQty ? (float) $qtyRaw : null,
+                'weight_kg' => $hasWeight ? (float) $weightRaw : null,
+            ];
+        }
+
+        return $rows;
+    }
+
+    private function hasScheduleSlot(mixed $schedule): bool
+    {
+        if (! is_array($schedule)) {
+            return false;
+        }
+
+        $slot = trim((string) ($schedule['slot'] ?? $schedule['schedule_slot'] ?? $schedule['date'] ?? ''));
+
+        return $slot !== '';
+    }
+
+    private function resolveInitialCourierStatus(bool $requiresPickup, bool $requiresDelivery): ?string
+    {
+        if (! $requiresPickup && ! $requiresDelivery) {
+            return null;
+        }
+
+        if ($requiresPickup) {
+            return 'pickup_pending';
+        }
+
+        return 'at_outlet';
+    }
+
+    private function resolveServiceDurationMinutes(Service $service): int
+    {
+        $days = (int) ($service->duration_days ?? 0);
+        $hours = (int) ($service->duration_hours ?? 0);
+
+        return max(($days * 24 * 60) + ($hours * 60), 0);
+    }
+
+    private function withAutoDeliverySchedule(?array $payload, int $longestDurationMinutes, CarbonImmutable $baseTime): array
+    {
+        $minutes = max($longestDurationMinutes, 0);
+        $scheduledAt = $baseTime->addMinutes($minutes);
+        $next = is_array($payload) ? $payload : [];
+
+        $next['slot'] = $scheduledAt->format('Y-m-d H:i');
+        $next['slot_auto'] = true;
+        $next['slot_generated_at'] = $baseTime->toIso8601String();
+        $next['slot_generated_duration_minutes'] = $minutes;
+
+        return $next;
+    }
+
+    private function resolveEditedCourierStatus(Order $order, bool $requiresPickup, bool $requiresDelivery): ?string
+    {
+        if (! $requiresPickup && ! $requiresDelivery) {
             return null;
         }
 
         $currentStatus = (string) ($order->courier_status ?? '');
         if ($currentStatus !== '') {
+            if (! $requiresPickup && in_array($currentStatus, ['pickup_pending', 'pickup_on_the_way', 'picked_up'], true)) {
+                return in_array((string) $order->laundry_status, ['ready', 'completed'], true) ? 'delivery_pending' : 'at_outlet';
+            }
+
+            if (! $requiresDelivery && in_array($currentStatus, ['delivery_pending', 'delivery_on_the_way', 'delivered'], true)) {
+                return 'at_outlet';
+            }
+
             return $currentStatus;
         }
 
-        return in_array((string) $order->laundry_status, ['ready', 'completed'], true)
-            ? 'delivery_pending'
-            : 'pickup_pending';
+        if (! $requiresPickup && $requiresDelivery && in_array((string) $order->laundry_status, ['ready', 'completed'], true)) {
+            return 'delivery_pending';
+        }
+
+        return $this->resolveInitialCourierStatus($requiresPickup, $requiresDelivery);
     }
 
     /**

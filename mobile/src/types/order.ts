@@ -53,6 +53,8 @@ export interface OrderSummary {
   tracking_token?: string;
   tracking_url?: string;
   is_pickup_delivery: boolean;
+  requires_pickup?: boolean;
+  requires_delivery?: boolean;
   laundry_status: string;
   courier_status: string | null;
   total_amount: number;
