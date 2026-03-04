@@ -304,7 +304,9 @@ interface QuickActionDraftSnapshot {
   customerName: string;
   customerPhone: string;
   customerNotes: string;
-  isPickupDelivery: boolean;
+  requiresPickup: boolean;
+  requiresDelivery: boolean;
+  isPickupDelivery?: boolean;
   pickupScheduleInput: string;
   deliveryScheduleInput: string;
   pickupAddressDraft: string;
@@ -531,7 +533,8 @@ export function QuickActionScreen() {
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerNotes, setCustomerNotes] = useState("");
-  const [isPickupDelivery, setIsPickupDelivery] = useState(false);
+  const [requiresPickup, setRequiresPickup] = useState(false);
+  const [requiresDelivery, setRequiresDelivery] = useState(false);
   const [pickupScheduleInput, setPickupScheduleInput] = useState("");
   const [deliveryScheduleInput, setDeliveryScheduleInput] = useState("");
   const [pickupAddressDraft, setPickupAddressDraft] = useState("");
@@ -946,7 +949,8 @@ export function QuickActionScreen() {
     setCustomerName("");
     setCustomerPhone("");
     setCustomerNotes("");
-    setIsPickupDelivery(false);
+    setRequiresPickup(false);
+    setRequiresDelivery(false);
     setSchedulePickerField(null);
     setPickupScheduleInput("");
     setDeliveryScheduleInput("");
@@ -999,7 +1003,10 @@ export function QuickActionScreen() {
     setCustomerName(draft.customerName);
     setCustomerPhone(draft.customerPhone);
     setCustomerNotes(draft.customerNotes);
-    setIsPickupDelivery(draft.isPickupDelivery);
+    const draftRequiresPickup = typeof draft.requiresPickup === "boolean" ? draft.requiresPickup : Boolean(draft.isPickupDelivery);
+    const draftRequiresDelivery = typeof draft.requiresDelivery === "boolean" ? draft.requiresDelivery : Boolean(draft.isPickupDelivery);
+    setRequiresPickup(draftRequiresPickup);
+    setRequiresDelivery(draftRequiresDelivery);
     setPickupScheduleInput(draft.pickupScheduleInput);
     setDeliveryScheduleInput(draft.deliveryScheduleInput);
     setPickupAddressDraft(draft.pickupAddressDraft);
@@ -1033,7 +1040,8 @@ export function QuickActionScreen() {
       customerName,
       customerPhone,
       customerNotes,
-      isPickupDelivery,
+      requiresPickup,
+      requiresDelivery,
       pickupScheduleInput,
       deliveryScheduleInput,
       pickupAddressDraft,
@@ -1217,7 +1225,10 @@ export function QuickActionScreen() {
     setCustomerName(order.customer?.name ?? "");
     setCustomerPhone(order.customer?.phone_normalized ?? "");
     setCustomerNotes(customerNote);
-    setIsPickupDelivery(Boolean(order.is_pickup_delivery));
+    const resolvedRequiresPickup = typeof order.requires_pickup === "boolean" ? order.requires_pickup : Boolean(order.is_pickup_delivery);
+    const resolvedRequiresDelivery = typeof order.requires_delivery === "boolean" ? order.requires_delivery : Boolean(order.is_pickup_delivery);
+    setRequiresPickup(resolvedRequiresPickup);
+    setRequiresDelivery(resolvedRequiresDelivery);
     setCustomerOrdersPreview([]);
     setLoadingCustomerOrdersPreview(false);
     setFocusedMetricServiceId(null);
@@ -1374,6 +1385,21 @@ export function QuickActionScreen() {
   }
 
   useEffect(() => {
+    if (!schedulePickerField) {
+      return;
+    }
+
+    if (schedulePickerField === "pickup" && !requiresPickup) {
+      setSchedulePickerField(null);
+      return;
+    }
+
+    if (schedulePickerField === "delivery" && (!requiresDelivery || requiresPickup)) {
+      setSchedulePickerField(null);
+    }
+  }, [requiresDelivery, requiresPickup, schedulePickerField]);
+
+  useEffect(() => {
     if (!pendingAutoSelectCustomerId || loadingCustomers) {
       return;
     }
@@ -1509,6 +1535,22 @@ export function QuickActionScreen() {
 
     return parseCustomerProfileMeta(selectedCustomer.notes);
   }, [selectedCustomer]);
+  const hasCourierFlow = requiresPickup || requiresDelivery;
+  const courierModeLabel = useMemo(() => {
+    if (requiresPickup && requiresDelivery) {
+      return "Jemput + Antar";
+    }
+
+    if (requiresPickup) {
+      return "Jemput";
+    }
+
+    if (requiresDelivery) {
+      return "Antar";
+    }
+
+    return "Datang Sendiri";
+  }, [requiresDelivery, requiresPickup]);
   const resolvedPickupAddress = useMemo(() => {
     const fromDraft = pickupAddressDraft.trim();
     if (fromDraft) {
@@ -1526,7 +1568,7 @@ export function QuickActionScreen() {
     return selectedCustomerProfile?.address?.trim() ?? "";
   }, [deliveryAddressDraft, selectedCustomerProfile?.address]);
   const pickupPayload = useMemo(() => {
-    if (!isPickupDelivery) {
+    if (!requiresPickup) {
       return undefined;
     }
 
@@ -1541,9 +1583,9 @@ export function QuickActionScreen() {
       address_short: address || undefined,
       slot: slot || undefined,
     };
-  }, [isPickupDelivery, pickupScheduleInput, resolvedPickupAddress]);
+  }, [pickupScheduleInput, requiresPickup, resolvedPickupAddress]);
   const deliveryPayload = useMemo(() => {
-    if (!isPickupDelivery) {
+    if (!requiresDelivery) {
       return undefined;
     }
 
@@ -1558,7 +1600,7 @@ export function QuickActionScreen() {
       address_short: address || undefined,
       slot: slot || undefined,
     };
-  }, [deliveryScheduleInput, isPickupDelivery, resolvedDeliveryAddress]);
+  }, [deliveryScheduleInput, requiresDelivery, resolvedDeliveryAddress]);
   const customerPackageSummary = useMemo(() => resolveCustomerPackageSummary(selectedCustomer), [selectedCustomer]);
 
   useEffect(() => {
@@ -1873,10 +1915,14 @@ export function QuickActionScreen() {
     };
   }, [insets.bottom]);
 
-  const selectedLines = useMemo(() => selectedServiceDrafts.filter((line) => line.hasValidMetric), [selectedServiceDrafts]);
+  const isPickupBookingFlow = requiresPickup && editingOrderId === null;
+  const selectedLines = useMemo(
+    () => (isPickupBookingFlow ? [] : selectedServiceDrafts.filter((line) => line.hasValidMetric)),
+    [isPickupBookingFlow, selectedServiceDrafts],
+  );
   const selectedPerfumeService = useMemo(
-    () => (selectedPerfumeServiceId ? perfumeServiceById.get(selectedPerfumeServiceId) ?? null : null),
-    [perfumeServiceById, selectedPerfumeServiceId],
+    () => (isPickupBookingFlow || !selectedPerfumeServiceId ? null : perfumeServiceById.get(selectedPerfumeServiceId) ?? null),
+    [isPickupBookingFlow, perfumeServiceById, selectedPerfumeServiceId],
   );
   const selectedPerfumeAmount = useMemo(
     () => Math.max(selectedPerfumeService?.effective_price_amount ?? 0, 0),
@@ -2153,7 +2199,7 @@ export function QuickActionScreen() {
   const promoDiscountAmount = useMemo(() => appliedPromoDrafts.reduce((sum, item) => sum + item.discountAmount, 0), [appliedPromoDrafts]);
   const totalDiscountAmount = discountAmount + promoDiscountAmount;
   const manualDiscountSummaryLabel = manualDiscountType === "percent" ? `Diskon Manual (${manualDiscountPercent}%)` : "Diskon Manual";
-  const effectiveShippingFee = isPickupDelivery ? shippingFee : 0;
+  const effectiveShippingFee = hasCourierFlow ? shippingFee : 0;
   const discountLimitBaseAmount = subtotal + effectiveShippingFee;
   const total = useMemo(() => Math.max(discountLimitBaseAmount - totalDiscountAmount, 0), [discountLimitBaseAmount, totalDiscountAmount]);
   const paymentFlowSummaryLabel = paymentFlowType === "now" ? "Bayar Sekarang" : "Bayar Nanti";
@@ -2192,9 +2238,10 @@ export function QuickActionScreen() {
   }, [step, voucherCodeRejected, promoErrorMessage, discountExceedsLimit]);
 
   const canCustomerNext = selectedCustomerId !== null;
-  const canServicesNext = selectedLines.length > 0;
+  const canServicesNext = isPickupBookingFlow || selectedLines.length > 0;
+  const requiresItemInputNow = !isPickupBookingFlow;
   const hasDraftChanges = useMemo(() => {
-    if (selectedCustomerId !== null || selectedServiceIds.length > 0 || selectedPerfumeServiceId !== null || isPickupDelivery || selectedPromoId !== null) {
+    if (selectedCustomerId !== null || selectedServiceIds.length > 0 || selectedPerfumeServiceId !== null || requiresPickup || requiresDelivery || selectedPromoId !== null) {
       return true;
     }
 
@@ -2217,11 +2264,12 @@ export function QuickActionScreen() {
     return orderNotes.trim() !== "";
   }, [
     discountInput,
-    isPickupDelivery,
     metrics,
     orderNotes,
     paymentFlowType,
     promoVoucherCodeInput,
+    requiresDelivery,
+    requiresPickup,
     selectedCustomerId,
     selectedPerfumeServiceId,
     selectedPromoId,
@@ -2456,12 +2504,21 @@ export function QuickActionScreen() {
       }
       setActiveServiceGroupKey(null);
       setShowServiceItemValidation(false);
-      setStep("services");
-      setErrorMessage(null);
+      if (isPickupBookingFlow) {
+        goToReviewStep();
+      } else {
+        setStep("services");
+        setErrorMessage(null);
+      }
       return;
     }
 
     if (step === "services") {
+      if (isPickupBookingFlow) {
+        goToReviewStep();
+        return;
+      }
+
       if (selectedServiceDrafts.length === 0) {
         setErrorMessage("Pilih minimal satu layanan terlebih dulu.");
         return;
@@ -2551,7 +2608,7 @@ export function QuickActionScreen() {
     }
 
     setShowServiceItemValidation(false);
-    setStep("services");
+    setStep(isPickupBookingFlow ? "customer" : "services");
     setErrorMessage(null);
   }
 
@@ -2566,7 +2623,13 @@ export function QuickActionScreen() {
       return;
     }
 
-    if (!canServicesNext) {
+    if (isPickupBookingFlow && !pickupScheduleInput.trim()) {
+      setErrorMessage("Jadwal jemput wajib diisi untuk pesanan jemput.");
+      setStep("customer");
+      return;
+    }
+
+    if (requiresItemInputNow && !canServicesNext) {
       if (selectedServiceDrafts.length === 0) {
         setErrorMessage("Pilih minimal satu layanan terlebih dulu.");
       } else {
@@ -2601,7 +2664,9 @@ export function QuickActionScreen() {
     try {
       const payload = {
         outletId: selectedOutlet.id,
-        isPickupDelivery,
+        requiresPickup,
+        requiresDelivery,
+        isPickupDelivery: hasCourierFlow,
         pickup: pickupPayload,
         delivery: deliveryPayload,
         customer: {
@@ -2609,22 +2674,24 @@ export function QuickActionScreen() {
           phone: customerPhone.trim(),
           notes: customerNotes,
         },
-        items: [
-          ...selectedLines.map((line) => ({
-            serviceId: line.service.id,
-            qty: isKgUnit(line.service.unit_type) ? undefined : line.metricValue,
-            weightKg: isKgUnit(line.service.unit_type) ? line.metricValue : undefined,
-          })),
-          ...(selectedPerfumeService
-            ? [
-                {
-                  serviceId: selectedPerfumeService.id,
-                  qty: 1,
-                  weightKg: undefined,
-                },
-              ]
-            : []),
-        ],
+        items: isPickupBookingFlow
+          ? []
+          : [
+              ...selectedLines.map((line) => ({
+                serviceId: line.service.id,
+                qty: isKgUnit(line.service.unit_type) ? undefined : line.metricValue,
+                weightKg: isKgUnit(line.service.unit_type) ? line.metricValue : undefined,
+              })),
+              ...(selectedPerfumeService
+                ? [
+                    {
+                      serviceId: selectedPerfumeService.id,
+                      qty: 1,
+                      weightKg: undefined,
+                    },
+                  ]
+                : []),
+            ],
         shippingFeeAmount: effectiveShippingFee,
         discountAmount: totalDiscountAmount,
         notes: orderNotesWithPromo,
@@ -2642,6 +2709,16 @@ export function QuickActionScreen() {
       resetDraft();
 
       if (editingOrderId) {
+        navigation.navigate("OrdersTab", {
+          screen: "OrderDetail",
+          params: {
+            orderId: savedOrder.id,
+          },
+        });
+        return;
+      }
+
+      if (isPickupBookingFlow) {
         navigation.navigate("OrdersTab", {
           screen: "OrderDetail",
           params: {
@@ -2678,17 +2755,19 @@ export function QuickActionScreen() {
     step === "customer"
       ? !canCustomerNext
       : step === "services"
-        ? selectedServiceDrafts.length === 0
+        ? requiresItemInputNow && selectedServiceDrafts.length === 0
         : step === "review"
-          ? selectedLines.length === 0 || discountExceedsLimit || voucherCodeRejected
-          : submitting || selectedLines.length === 0 || discountExceedsLimit || voucherCodeRejected;
+          ? !canServicesNext || discountExceedsLimit || voucherCodeRejected
+          : submitting || !canServicesNext || discountExceedsLimit || voucherCodeRejected;
   const secondaryButtonTitle = step === "customer" ? "Keluar" : "Kembali";
   const secondaryButtonIconName: keyof typeof Ionicons.glyphMap = step === "customer" ? "close-outline" : "arrow-back-outline";
   const primaryButtonTitle =
     step === "review"
       ? editingOrderId
         ? "Simpan Perubahan"
-        : "Simpan & Ke Pembayaran"
+        : isPickupBookingFlow
+          ? "Simpan Pesanan Jemput"
+          : "Simpan & Ke Pembayaran"
       : step === "payment"
         ? editingOrderId
           ? "Simpan Perubahan"
@@ -2700,7 +2779,7 @@ export function QuickActionScreen() {
     }
 
     if (step === "customer") {
-      return "Pilih konsumen dulu untuk lanjut ke layanan.";
+      return isPickupBookingFlow ? "Pilih konsumen dulu untuk lanjut ke review pesanan jemput." : "Pilih konsumen dulu untuk lanjut ke layanan.";
     }
 
     if (step === "services") {
@@ -2731,8 +2810,12 @@ export function QuickActionScreen() {
       return "Total potongan melebihi batas. Cek diskon manual atau promo.";
     }
 
-    return editingOrderId ? "Simpan perubahan pesanan dulu." : "Simpan pesanan dulu untuk lanjut ke halaman pembayaran.";
-  }, [discountExceedsLimit, editingOrderId, primaryDisabled, step, submitting, voucherCodeRejected]);
+    if (editingOrderId) {
+      return "Simpan perubahan pesanan dulu.";
+    }
+
+    return isPickupBookingFlow ? "Simpan pesanan jemput dulu." : "Simpan pesanan dulu untuk lanjut ke halaman pembayaran.";
+  }, [discountExceedsLimit, editingOrderId, isPickupBookingFlow, primaryDisabled, step, submitting, voucherCodeRejected]);
   const startCreateTitle = hasSavedDraft ? "Lanjutkan Draft" : "Buat Pesanan Baru";
   const startCreateIconName: keyof typeof Ionicons.glyphMap = hasSavedDraft ? "document-text-outline" : "bag-add-outline";
 
@@ -2929,68 +3012,91 @@ export function QuickActionScreen() {
                     <View style={styles.deliveryModePanel}>
                       <View style={styles.deliveryModeHeader}>
                         <Text style={styles.deliveryModeTitle}>Metode Pesanan</Text>
-                        <Text style={styles.deliveryModeValue}>{isPickupDelivery ? "Antar Jemput" : "Datang Sendiri"}</Text>
+                        <Text style={styles.deliveryModeValue}>{courierModeLabel}</Text>
                       </View>
                       <View style={styles.deliveryModeOptions}>
                         <Pressable
-                          onPress={() => setIsPickupDelivery(false)}
-                          style={({ pressed }) => [styles.deliveryModeOption, !isPickupDelivery ? styles.deliveryModeOptionActive : null, pressed ? styles.pressed : null]}
+                          onPress={() => setRequiresPickup((current) => !current)}
+                          style={({ pressed }) => [styles.deliveryModeOption, requiresPickup ? styles.deliveryModeOptionActive : null, pressed ? styles.pressed : null]}
                         >
-                          <Ionicons color={!isPickupDelivery ? theme.colors.info : theme.colors.textMuted} name="walk-outline" size={14} />
-                          <Text style={[styles.deliveryModeOptionText, !isPickupDelivery ? styles.deliveryModeOptionTextActive : null]}>Datang Sendiri</Text>
+                          <Ionicons color={requiresPickup ? theme.colors.info : theme.colors.textMuted} name={requiresPickup ? "checkbox-outline" : "square-outline"} size={14} />
+                          <Text style={[styles.deliveryModeOptionText, requiresPickup ? styles.deliveryModeOptionTextActive : null]}>Jemput</Text>
                         </Pressable>
                         <Pressable
-                          onPress={() => setIsPickupDelivery(true)}
-                          style={({ pressed }) => [styles.deliveryModeOption, isPickupDelivery ? styles.deliveryModeOptionActive : null, pressed ? styles.pressed : null]}
+                          onPress={() => setRequiresDelivery((current) => !current)}
+                          style={({ pressed }) => [styles.deliveryModeOption, requiresDelivery ? styles.deliveryModeOptionActive : null, pressed ? styles.pressed : null]}
                         >
-                          <Ionicons color={isPickupDelivery ? theme.colors.info : theme.colors.textMuted} name="car-outline" size={14} />
-                          <Text style={[styles.deliveryModeOptionText, isPickupDelivery ? styles.deliveryModeOptionTextActive : null]}>Antar Jemput</Text>
+                          <Ionicons color={requiresDelivery ? theme.colors.info : theme.colors.textMuted} name={requiresDelivery ? "checkbox-outline" : "square-outline"} size={14} />
+                          <Text style={[styles.deliveryModeOptionText, requiresDelivery ? styles.deliveryModeOptionTextActive : null]}>Antar</Text>
                         </Pressable>
                       </View>
-                      {isPickupDelivery ? (
+                      <Text style={styles.deliveryModeHint}>
+                        {requiresPickup
+                          ? resolvedPickupAddress
+                            ? requiresDelivery
+                              ? "Isi jadwal jemput. Jadwal antar otomatis saat layanan ditimbang dan diinput."
+                              : "Isi jadwal jemput. Item layanan diinput setelah barang dijemput."
+                            : "Alamat pelanggan belum diisi. Lengkapi alamat untuk memudahkan jadwal jemput/antar."
+                          : requiresDelivery
+                            ? "Pelanggan datang sendiri lalu minta diantar saat selesai. Item layanan wajib diisi sekarang."
+                            : "Pelanggan datang dan ambil sendiri. Tanpa ongkir."}
+                      </Text>
+                      {hasCourierFlow ? (
                         <>
-                          <Text style={styles.deliveryModeHint}>
-                            {resolvedPickupAddress ? "Alamat pelanggan dipakai untuk pickup dan delivery. Anda bisa atur jadwalnya di bawah." : "Alamat pelanggan belum diisi. Jadwal tetap bisa diatur, tetapi alamat sebaiknya dilengkapi di data pelanggan."}
-                          </Text>
                           <View style={styles.deliveryScheduleGrid}>
-                            <View style={styles.deliveryScheduleCard}>
-                              <Text style={styles.deliveryScheduleLabel}>Jemput</Text>
-                              <Text style={[styles.deliveryScheduleAddress, !resolvedPickupAddress ? styles.deliveryScheduleAddressMuted : null]}>
-                                {resolvedPickupAddress || "Alamat belum tersedia"}
-                              </Text>
-                              <View style={styles.deliveryScheduleActionRow}>
-                                <Pressable onPress={() => openSchedulePicker("pickup")} style={({ pressed }) => [styles.deliverySchedulePickerButton, pressed ? styles.pressed : null]}>
-                                  <Ionicons color={theme.colors.info} name="calendar-outline" size={14} />
-                                  <Text style={[styles.deliverySchedulePickerValue, !pickupScheduleInput.trim() ? styles.deliverySchedulePickerPlaceholder : null]}>
-                                    {pickupScheduleInput.trim() || "Pilih tanggal"}
-                                  </Text>
-                                </Pressable>
-                                {pickupScheduleInput.trim() ? (
-                                  <Pressable hitSlop={6} onPress={() => clearScheduleValue("pickup")} style={({ pressed }) => [styles.deliveryScheduleClearButton, pressed ? styles.pressed : null]}>
-                                    <Ionicons color={theme.colors.textMuted} name="close-circle" size={18} />
+                            {requiresPickup ? (
+                              <View style={styles.deliveryScheduleCard}>
+                                <Text style={styles.deliveryScheduleLabel}>Jemput</Text>
+                                <Text style={[styles.deliveryScheduleAddress, !resolvedPickupAddress ? styles.deliveryScheduleAddressMuted : null]}>
+                                  {resolvedPickupAddress || "Alamat belum tersedia"}
+                                </Text>
+                                <View style={styles.deliveryScheduleActionRow}>
+                                  <Pressable onPress={() => openSchedulePicker("pickup")} style={({ pressed }) => [styles.deliverySchedulePickerButton, pressed ? styles.pressed : null]}>
+                                    <Ionicons color={theme.colors.info} name="calendar-outline" size={14} />
+                                    <Text style={[styles.deliverySchedulePickerValue, !pickupScheduleInput.trim() ? styles.deliverySchedulePickerPlaceholder : null]}>
+                                      {pickupScheduleInput.trim() || "Pilih tanggal"}
+                                    </Text>
                                   </Pressable>
-                                ) : null}
+                                  {pickupScheduleInput.trim() ? (
+                                    <Pressable hitSlop={6} onPress={() => clearScheduleValue("pickup")} style={({ pressed }) => [styles.deliveryScheduleClearButton, pressed ? styles.pressed : null]}>
+                                      <Ionicons color={theme.colors.textMuted} name="close-circle" size={18} />
+                                    </Pressable>
+                                  ) : null}
+                                </View>
                               </View>
-                            </View>
-                            <View style={styles.deliveryScheduleCard}>
-                              <Text style={styles.deliveryScheduleLabel}>Antar</Text>
-                              <Text style={[styles.deliveryScheduleAddress, !resolvedDeliveryAddress ? styles.deliveryScheduleAddressMuted : null]}>
-                                {resolvedDeliveryAddress || "Alamat belum tersedia"}
-                              </Text>
-                              <View style={styles.deliveryScheduleActionRow}>
-                                <Pressable onPress={() => openSchedulePicker("delivery")} style={({ pressed }) => [styles.deliverySchedulePickerButton, pressed ? styles.pressed : null]}>
-                                  <Ionicons color={theme.colors.info} name="calendar-outline" size={14} />
-                                  <Text style={[styles.deliverySchedulePickerValue, !deliveryScheduleInput.trim() ? styles.deliverySchedulePickerPlaceholder : null]}>
-                                    {deliveryScheduleInput.trim() || "Pilih tanggal"}
-                                  </Text>
-                                </Pressable>
-                                {deliveryScheduleInput.trim() ? (
-                                  <Pressable hitSlop={6} onPress={() => clearScheduleValue("delivery")} style={({ pressed }) => [styles.deliveryScheduleClearButton, pressed ? styles.pressed : null]}>
-                                    <Ionicons color={theme.colors.textMuted} name="close-circle" size={18} />
-                                  </Pressable>
-                                ) : null}
+                            ) : null}
+                            {requiresDelivery ? (
+                              <View style={styles.deliveryScheduleCard}>
+                                <Text style={styles.deliveryScheduleLabel}>Antar</Text>
+                                <Text style={[styles.deliveryScheduleAddress, !resolvedDeliveryAddress ? styles.deliveryScheduleAddressMuted : null]}>
+                                  {resolvedDeliveryAddress || "Alamat belum tersedia"}
+                                </Text>
+                                <View style={styles.deliveryScheduleActionRow}>
+                                  {requiresPickup ? (
+                                    <View style={styles.deliverySchedulePickerButton}>
+                                      <Ionicons color={theme.colors.info} name="time-outline" size={14} />
+                                      <Text style={styles.deliverySchedulePickerValue}>
+                                        {deliveryScheduleInput.trim() || "Otomatis setelah input timbang"}
+                                      </Text>
+                                    </View>
+                                  ) : (
+                                    <>
+                                      <Pressable onPress={() => openSchedulePicker("delivery")} style={({ pressed }) => [styles.deliverySchedulePickerButton, pressed ? styles.pressed : null]}>
+                                        <Ionicons color={theme.colors.info} name="calendar-outline" size={14} />
+                                        <Text style={[styles.deliverySchedulePickerValue, !deliveryScheduleInput.trim() ? styles.deliverySchedulePickerPlaceholder : null]}>
+                                          {deliveryScheduleInput.trim() || "Pilih tanggal"}
+                                        </Text>
+                                      </Pressable>
+                                      {deliveryScheduleInput.trim() ? (
+                                        <Pressable hitSlop={6} onPress={() => clearScheduleValue("delivery")} style={({ pressed }) => [styles.deliveryScheduleClearButton, pressed ? styles.pressed : null]}>
+                                          <Ionicons color={theme.colors.textMuted} name="close-circle" size={18} />
+                                        </Pressable>
+                                      ) : null}
+                                    </>
+                                  )}
+                                </View>
                               </View>
-                            </View>
+                            ) : null}
                           </View>
                         </>
                       ) : null}
@@ -3131,7 +3237,9 @@ export function QuickActionScreen() {
                   <View style={styles.servicesTopBar}>
                     <View style={styles.servicesTopTitleWrap}>
                       <Text style={styles.stepHeaderTitle}>Pilih Layanan</Text>
-                      <Text style={styles.servicesTopSubtitle}>Pilih group dulu, lanjut pilih layanan dan isi qty/berat.</Text>
+                      <Text style={styles.servicesTopSubtitle}>
+                        {isPickupBookingFlow ? "Mode jemput: item layanan diinput setelah barang dijemput. Anda bisa langsung lanjut ke review." : "Pilih group dulu, lanjut pilih layanan dan isi qty/berat."}
+                      </Text>
                     </View>
                     <View style={styles.servicesTopActions}>
                       <Pressable
@@ -3337,7 +3445,9 @@ export function QuickActionScreen() {
                     </View>
                     <View style={styles.stepHeaderTextWrap}>
                       <Text style={styles.stepHeaderTitle}>Review Pesanan</Text>
-                      <Text style={styles.stepHeaderSubtitle}>Cek total dan catatan sebelum lanjut ke pembayaran.</Text>
+                      <Text style={styles.stepHeaderSubtitle}>
+                        {isPickupBookingFlow ? "Cek jadwal jemput dan catatan sebelum simpan booking." : "Cek total dan catatan sebelum lanjut ke pembayaran."}
+                      </Text>
                     </View>
                   </View>
 
@@ -3351,12 +3461,16 @@ export function QuickActionScreen() {
                           {formatCustomerPhoneDisplay(customerPhone)}
                         </Text>
                       </View>
-                      <Text style={styles.reviewCustomerMethod}>{isPickupDelivery ? "Antar Jemput" : "Datang Sendiri"}</Text>
+                      <Text style={styles.reviewCustomerMethod}>{courierModeLabel}</Text>
                     </View>
-                    {isPickupDelivery ? (
+                    {hasCourierFlow ? (
                       <View style={styles.reviewScheduleStack}>
-                        <Text style={styles.reviewScheduleText}>Jemput: {pickupScheduleInput.trim() || "Belum diatur"}</Text>
-                        <Text style={styles.reviewScheduleText}>Antar: {deliveryScheduleInput.trim() || "Belum diatur"}</Text>
+                        {requiresPickup ? <Text style={styles.reviewScheduleText}>Jemput: {pickupScheduleInput.trim() || "Belum diatur"}</Text> : null}
+                        {requiresDelivery ? (
+                          <Text style={styles.reviewScheduleText}>
+                            Antar: {requiresPickup ? deliveryScheduleInput.trim() || "Otomatis setelah input timbang" : deliveryScheduleInput.trim() || "Belum diatur"}
+                          </Text>
+                        ) : null}
                       </View>
                     ) : null}
                   </AppPanel>
@@ -3391,13 +3505,18 @@ export function QuickActionScreen() {
                           <Text style={styles.summaryItemMeta}>Parfum pilihan x 1 PCS</Text>
                         </View>
                       ) : null}
+                      {selectedReviewItemCount === 0 ? (
+                        <Text style={styles.infoText}>
+                          {isPickupBookingFlow ? "Item layanan akan diinput setelah barang dijemput." : "Belum ada item layanan."}
+                        </Text>
+                      ) : null}
                     </View>
                     <View style={styles.summaryDivider} />
                     <View style={styles.summaryRow}>
                       <Text style={styles.summaryText}>Subtotal</Text>
                       <Text style={styles.summaryValue}>{formatMoney(subtotal)}</Text>
                     </View>
-                    {isPickupDelivery ? (
+                    {hasCourierFlow ? (
                       <View style={styles.summaryRow}>
                         <Text style={styles.summaryText}>Ongkir</Text>
                         <Text style={styles.summaryValue}>{formatMoney(effectiveShippingFee)}</Text>
@@ -3624,7 +3743,7 @@ export function QuickActionScreen() {
                           {totalDiscountAmount > 0 ? <Text style={styles.reviewSectionValue}>- {formatMoney(totalDiscountAmount)}</Text> : null}
                         </View>
                         <View style={styles.reviewAdjustmentsGrid}>
-                          {isPickupDelivery ? (
+                          {hasCourierFlow ? (
                             <View style={styles.reviewAmountField}>
                               <Text style={styles.reviewAmountLabel}>Ongkir</Text>
                               <TextInput
@@ -3686,7 +3805,7 @@ export function QuickActionScreen() {
                         </View>
                         {discountExceedsLimit ? (
                           <Text style={styles.reviewFieldError}>
-                            Total potongan (promo + manual) melebihi {isPickupDelivery ? "subtotal + ongkir" : "subtotal"}.
+                            Total potongan (promo + manual) melebihi {hasCourierFlow ? "subtotal + ongkir" : "subtotal"}.
                           </Text>
                         ) : null}
                       </AppPanel>
