@@ -50,6 +50,8 @@ interface TrendPoint {
 }
 
 const REPORT_PAGE_SIZE = 100;
+const TREND_BAR_TRACK_HEIGHT_PHONE = 132;
+const TREND_BAR_TRACK_HEIGHT_TABLET = 148;
 const REPORT_RANGES: Array<{ key: ReportRangeKey; label: string; subtitle: string }> = [
   { key: "today", label: "Hari Ini", subtitle: "Operasional hari berjalan" },
   { key: "7d", label: "7 Hari", subtitle: "Performa mingguan" },
@@ -598,6 +600,7 @@ export function ReportsScreen() {
     }),
     [chartTransition]
   );
+  const barTrackHeight = isTablet ? TREND_BAR_TRACK_HEIGHT_TABLET : TREND_BAR_TRACK_HEIGHT_PHONE;
   const barChartSlotWidth = isTablet ? 88 : 68;
   const barChartGap = theme.spacing.xs;
   const barChartContentMinWidth = useMemo(() => {
@@ -992,7 +995,7 @@ export function ReportsScreen() {
                     {trendPoints.map((point) => {
                       const currentValue = activeTrendMetric === "amount" ? point.amount : point.count;
                       const maxValue = Math.max(activeTrendMetric === "amount" ? salesTrendPeak?.amount ?? 0 : trendPeak?.count ?? 0, 1);
-                      const barHeight = currentValue > 0 ? Math.max((currentValue / maxValue) * 100, 14) : 4;
+                      const barHeight = currentValue > 0 ? Math.max((currentValue / maxValue) * barTrackHeight, 10) : 4;
                       const isPeak = point.key === activeTrendPeak?.key && currentValue > 0;
 
                       return (
@@ -1006,12 +1009,12 @@ export function ReportsScreen() {
                           >
                             {activeTrendMetric === "amount" ? formatCompactMoney(point.amount) : point.count}
                           </Text>
-                          <View style={styles.barTrack}>
+                          <View style={[styles.barTrack, { height: barTrackHeight }]}>
                             <View
                               style={[
                                 styles.barFill,
                                 {
-                                  height: `${barHeight}%`,
+                                  height: barHeight,
                                   backgroundColor:
                                     isPeak
                                       ? activeTrendColor
