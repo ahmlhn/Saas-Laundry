@@ -259,6 +259,47 @@ class MasterDataBillingApiTest extends TestCase
         ]);
     }
 
+    public function test_service_can_be_recreated_with_same_name_after_archive(): void
+    {
+        $createInitial = $this->apiAs($this->admin)
+            ->postJson('/api/services', [
+                'name' => 'Sprei',
+                'service_type' => 'item',
+                'unit_type' => 'pcs',
+                'base_price_amount' => 12000,
+                'active' => true,
+            ])
+            ->assertCreated();
+
+        $archivedServiceId = (string) $createInitial->json('data.id');
+
+        $this->apiAs($this->admin)
+            ->deleteJson('/api/services/'.$archivedServiceId)
+            ->assertOk()
+            ->assertJsonPath('data.id', $archivedServiceId);
+
+        $recreate = $this->apiAs($this->admin)
+            ->postJson('/api/services', [
+                'name' => 'Sprei',
+                'service_type' => 'item',
+                'unit_type' => 'pcs',
+                'base_price_amount' => 13000,
+                'active' => true,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'Sprei');
+
+        $newServiceId = (string) $recreate->json('data.id');
+
+        $this->assertNotSame($archivedServiceId, $newServiceId);
+
+        $this->apiAs($this->admin)
+            ->postJson('/api/services/'.$archivedServiceId.'/restore')
+            ->assertStatus(422)
+            ->assertJsonPath('reason_code', 'VALIDATION_FAILED')
+            ->assertJsonPath('message', 'Nama layanan sudah digunakan pada level yang sama.');
+    }
+
     public function test_service_create_and_update_endpoints_require_owner_or_admin(): void
     {
         $this->apiAs($this->cashier)

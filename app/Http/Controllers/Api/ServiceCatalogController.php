@@ -517,6 +517,19 @@ class ServiceCatalogController extends Controller
             ], 422);
         }
 
+        if ($this->serviceNameExists(
+            tenantId: (string) $user->tenant_id,
+            serviceType: (string) $service->service_type,
+            parentServiceId: $service->parent_service_id ? (string) $service->parent_service_id : null,
+            name: (string) $service->name,
+            exceptId: (string) $service->id,
+        )) {
+            return response()->json([
+                'reason_code' => 'VALIDATION_FAILED',
+                'message' => 'Nama layanan sudah digunakan pada level yang sama.',
+            ], 422);
+        }
+
         $service->restore();
 
         $this->auditTrail->record(
@@ -543,7 +556,7 @@ class ServiceCatalogController extends Controller
      */
     private function serviceNameExists(string $tenantId, string $serviceType, ?string $parentServiceId, string $name, ?string $exceptId = null): bool
     {
-        $query = Service::withTrashed()
+        $query = Service::query()
             ->where('tenant_id', $tenantId)
             ->where('service_type', $serviceType)
             ->whereRaw('LOWER(name) = ?', [mb_strtolower($name)]);
