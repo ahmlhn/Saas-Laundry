@@ -52,6 +52,8 @@ Route::middleware(['auth:sanctum', 'outlet.access'])->group(function (): void {
     Route::post('/orders', [OrderController::class, 'store']);
     Route::get('/orders/{order}', [OrderController::class, 'show']);
     Route::patch('/orders/{order}', [OrderController::class, 'update']);
+    Route::post('/orders/{order}/cancel', [OrderController::class, 'cancel']);
+    Route::delete('/orders/{order}', [OrderController::class, 'destroy']);
     Route::post('/orders/{order}/payments', [OrderController::class, 'addPayment']);
     Route::post('/orders/{order}/payments/qris-intent', [OrderController::class, 'createQrisIntent']);
     Route::get('/orders/{order}/payments/qris-status', [OrderController::class, 'qrisPaymentStatus']);

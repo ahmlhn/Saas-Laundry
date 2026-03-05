@@ -63,6 +63,7 @@ class OrderController extends Controller
 
         $statusScope = $validated['status_scope'] ?? 'all';
         if ($statusScope === 'open') {
+            $query->whereNull('cancelled_at');
             $query->where(function ($q): void {
                 $q->where(function ($inner): void {
                     $inner->where('requires_delivery', false)
@@ -76,6 +77,7 @@ class OrderController extends Controller
                 });
             });
         } elseif ($statusScope === 'completed') {
+            $query->whereNull('cancelled_at');
             $query->where(function ($q): void {
                 $q->where(function ($inner): void {
                     $inner->where('requires_delivery', false)
@@ -438,6 +440,7 @@ class OrderController extends Controller
         $this->ensureRole($user, ['owner', 'admin', 'cashier']);
         $this->ensureOrderAccess($user, $order);
         $this->ensureOperationalWriteAccess($user->tenant_id);
+        $this->ensureOrderActive($order);
         $sourceChannel = $this->resolveSourceChannel($request, 'web');
         $actorUserId = $user->id;
 
@@ -667,6 +670,135 @@ class OrderController extends Controller
         ]);
     }
 
+    public function cancel(Request $request, Order $order): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner', 'admin', 'cashier']);
+        $this->ensureOrderAccess($user, $order);
+        $this->ensureOperationalWriteAccess($user->tenant_id);
+        $sourceChannel = $this->resolveSourceChannel($request, 'web');
+
+        if ($this->isOrderCancelled($order)) {
+            return response()->json([
+                'reason_code' => 'ORDER_ALREADY_CANCELLED',
+                'message' => 'Order has already been cancelled.',
+            ], 422);
+        }
+
+        if ((int) $order->paid_amount > 0) {
+            return response()->json([
+                'reason_code' => 'PAYMENT_EXISTS',
+                'message' => 'Paid orders cannot be cancelled. Process refund first if needed.',
+            ], 422);
+        }
+
+        if ((! $order->requires_delivery && $order->laundry_status === 'completed')
+            || ($order->requires_delivery && $order->courier_status === 'delivered')) {
+            return response()->json([
+                'reason_code' => 'ORDER_ALREADY_COMPLETED',
+                'message' => 'Completed orders cannot be cancelled.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'max:300'],
+        ]);
+
+        $reason = trim((string) $validated['reason']);
+        if ($reason === '') {
+            throw ValidationException::withMessages([
+                'reason' => ['reason is required.'],
+            ]);
+        }
+
+        $order->forceFill([
+            'cancelled_at' => now(),
+            'cancelled_by' => $user->id,
+            'cancelled_reason' => $reason,
+            'total_amount' => 0,
+            'due_amount' => 0,
+            'shipping_fee_amount' => 0,
+            'discount_amount' => 0,
+            'updated_by' => $user->id,
+            'source_channel' => $sourceChannel,
+        ])->save();
+
+        $this->auditTrail->record(
+            eventKey: AuditEventKeys::ORDER_CANCELLED,
+            actor: $user,
+            tenantId: $user->tenant_id,
+            outletId: $order->outlet_id,
+            entityType: 'order',
+            entityId: $order->id,
+            metadata: [
+                'order_code' => $order->order_code,
+                'laundry_status' => $order->laundry_status,
+                'courier_status' => $order->courier_status,
+                'cancelled_reason' => $reason,
+            ],
+            channel: 'api',
+            request: $request,
+        );
+
+        return response()->json([
+            'data' => $this->serializeOrderDetailPayload($order),
+        ]);
+    }
+
+    public function destroy(Request $request, Order $order): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $this->ensureRole($user, ['owner', 'admin']);
+        $this->ensureOrderAccess($user, $order);
+        $this->ensureOperationalWriteAccess($user->tenant_id);
+        $sourceChannel = $this->resolveSourceChannel($request, 'web');
+
+        if (! $this->isOrderCancelled($order)) {
+            return response()->json([
+                'reason_code' => 'ORDER_NOT_CANCELLED',
+                'message' => 'Cancel the order before deleting it permanently.',
+            ], 422);
+        }
+
+        if ((int) $order->paid_amount > 0) {
+            return response()->json([
+                'reason_code' => 'PAYMENT_EXISTS',
+                'message' => 'Paid orders cannot be deleted.',
+            ], 422);
+        }
+
+        $orderId = $order->id;
+        $orderCode = $order->order_code;
+        $outletId = $order->outlet_id;
+        $cancelledReason = $order->cancelled_reason;
+        $order->delete();
+
+        $this->auditTrail->record(
+            eventKey: AuditEventKeys::ORDER_DELETED,
+            actor: $user,
+            tenantId: $user->tenant_id,
+            outletId: $outletId,
+            entityType: 'order',
+            entityId: $orderId,
+            metadata: [
+                'order_code' => $orderCode,
+                'source_channel' => $sourceChannel,
+                'cancelled_reason' => $cancelledReason,
+            ],
+            channel: 'api',
+            request: $request,
+        );
+
+        return response()->json([
+            'data' => [
+                'id' => $orderId,
+            ],
+            'message' => 'Order deleted successfully.',
+        ]);
+    }
+
     public function addPayment(Request $request, Order $order): JsonResponse
     {
         /** @var User $user */
@@ -674,6 +806,7 @@ class OrderController extends Controller
         $this->ensureRole($user, ['owner', 'admin', 'cashier']);
         $this->ensureOrderAccess($user, $order);
         $this->ensureOperationalWriteAccess($user->tenant_id);
+        $this->ensureOrderActive($order);
         $sourceChannel = $this->resolveSourceChannel($request, 'web');
         $actorUserId = $user->id;
 
@@ -738,6 +871,7 @@ class OrderController extends Controller
         $this->ensureRole($user, ['owner', 'admin', 'cashier']);
         $this->ensureOrderAccess($user, $order);
         $this->ensureOperationalWriteAccess($user->tenant_id);
+        $this->ensureOrderActive($order);
 
         $validated = $request->validate([
             'amount' => ['nullable', 'integer', 'min:1'],
@@ -838,6 +972,7 @@ class OrderController extends Controller
         $this->ensureRole($user, ['owner', 'admin', 'worker']);
         $this->ensureOrderAccess($user, $order);
         $this->ensureOperationalWriteAccess($user->tenant_id);
+        $this->ensureOrderActive($order);
         $sourceChannel = $this->resolveSourceChannel($request, 'web');
 
         $validated = $request->validate([
@@ -919,6 +1054,7 @@ class OrderController extends Controller
         $this->ensureRole($user, ['owner', 'admin', 'courier']);
         $this->ensureOrderAccess($user, $order);
         $this->ensureOperationalWriteAccess($user->tenant_id);
+        $this->ensureOrderActive($order);
         $sourceChannel = $this->resolveSourceChannel($request, 'web');
 
         if (! $order->is_pickup_delivery) {
@@ -941,6 +1077,13 @@ class OrderController extends Controller
             return response()->json([
                 'reason_code' => 'INVALID_TRANSITION',
                 'message' => 'pickup statuses are not available for delivery-only orders.',
+            ], 422);
+        }
+
+        if ($requiresPickup && ! $requiresDelivery && $next === 'at_outlet') {
+            return response()->json([
+                'reason_code' => 'INVALID_TRANSITION',
+                'message' => 'at_outlet status is not available for pickup-only orders.',
             ], 422);
         }
 
@@ -1035,6 +1178,7 @@ class OrderController extends Controller
         $this->ensureRole($user, ['owner', 'admin']);
         $this->ensureOrderAccess($user, $order);
         $this->ensureOperationalWriteAccess($user->tenant_id);
+        $this->ensureOrderActive($order);
         $sourceChannel = $this->resolveSourceChannel($request, 'web');
 
         if (! $order->is_pickup_delivery) {
@@ -1094,6 +1238,7 @@ class OrderController extends Controller
         $this->ensureRole($user, ['owner', 'admin', 'cashier']);
         $this->ensureOrderAccess($user, $order);
         $this->ensureOperationalWriteAccess($user->tenant_id);
+        $this->ensureOrderActive($order);
         $sourceChannel = $this->resolveSourceChannel($request, 'web');
 
         $cashierLockedStatuses = (bool) ($order->requires_pickup ?? false)
@@ -1159,6 +1304,23 @@ class OrderController extends Controller
         return response()->json([
             'data' => $order->fresh(),
         ]);
+    }
+
+    private function ensureOrderActive(Order $order): void
+    {
+        if (! $this->isOrderCancelled($order)) {
+            return;
+        }
+
+        abort(response()->json([
+            'reason_code' => 'ORDER_CANCELLED',
+            'message' => 'Order has been cancelled and can no longer be updated.',
+        ], 422));
+    }
+
+    private function isOrderCancelled(Order $order): bool
+    {
+        return $order->cancelled_at !== null;
     }
 
     private function ensureOrderAccess(User $user, Order $order): void
@@ -1408,7 +1570,7 @@ class OrderController extends Controller
             }
 
             if (! $requiresDelivery && in_array($currentStatus, ['delivery_pending', 'delivery_on_the_way', 'delivered'], true)) {
-                return 'at_outlet';
+                return $requiresPickup ? 'picked_up' : null;
             }
 
             return $currentStatus;
@@ -1468,6 +1630,10 @@ class OrderController extends Controller
         $payload['estimated_completion_is_late'] = $isLate;
         $payload['tracking_token'] = $loadedOrder->tracking_token;
         $payload['tracking_url'] = route('customer.track', ['token' => $loadedOrder->tracking_token]);
+        $payload['is_cancelled'] = $this->isOrderCancelled($loadedOrder);
+        $payload['cancelled_at'] = $loadedOrder->cancelled_at?->toIso8601String();
+        $payload['cancelled_by'] = $loadedOrder->cancelled_by ? (int) $loadedOrder->cancelled_by : null;
+        $payload['cancelled_reason'] = $loadedOrder->cancelled_reason;
 
         return $payload;
     }

@@ -41,6 +41,9 @@ class Order extends Model
         'created_by',
         'updated_by',
         'source_channel',
+        'cancelled_at',
+        'cancelled_by',
+        'cancelled_reason',
         'collection_status',
         'collection_last_contacted_at',
         'collection_next_follow_up_at',
@@ -55,6 +58,7 @@ class Order extends Model
             'requires_delivery' => 'boolean',
             'pickup' => 'array',
             'delivery' => 'array',
+            'cancelled_at' => 'datetime',
             'collection_last_contacted_at' => 'datetime',
             'collection_next_follow_up_at' => 'datetime',
         ];

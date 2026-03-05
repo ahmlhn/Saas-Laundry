@@ -48,6 +48,7 @@ type ReviewPanelKey = "perfume" | "promo" | "discount" | "notes";
 type ReviewFocusableInputKey = "voucher" | "shippingFee" | "discount" | "notes";
 type InputVisibilityMode = "visible" | "comfort";
 type ScheduleField = "pickup" | "delivery";
+type EditStartStep = "customer" | "services" | "review";
 
 const STEP_ORDER: Step[] = ["customer", "services", "review"];
 const CUSTOMER_LIMIT = 40;
@@ -661,16 +662,18 @@ export function QuickActionScreen() {
 
   useEffect(() => {
     const editOrderId = route.params?.editOrderId;
+    const editStartStep = route.params?.editStartStep;
     if (!editOrderId || !canCreateOrder || loadingServices) {
       return;
     }
 
     let active = true;
 
-    void openEditFlow(editOrderId).finally(() => {
+    void openEditFlow(editOrderId, editStartStep === "customer" || editStartStep === "services" || editStartStep === "review" ? editStartStep : "review").finally(() => {
       if (active) {
         navigation.setParams({
           editOrderId: undefined,
+          editStartStep: undefined,
         });
       }
     });
@@ -678,7 +681,7 @@ export function QuickActionScreen() {
     return () => {
       active = false;
     };
-  }, [route.params?.editOrderId, canCreateOrder, loadingServices, navigation, selectedOutlet?.id]);
+  }, [route.params?.editOrderId, route.params?.editStartStep, canCreateOrder, loadingServices, navigation, selectedOutlet?.id]);
 
   useEffect(() => {
     if (!actionMessage && !errorMessage) {
@@ -1068,7 +1071,7 @@ export function QuickActionScreen() {
     setHasSavedDraft(false);
   }
 
-  function applyEditOrderSnapshot(order: OrderDetail): void {
+  function applyEditOrderSnapshot(order: OrderDetail, startStep: EditStartStep = "review"): void {
     const fallbackServices: ServiceCatalogItem[] = [];
     const fallbackPerfumeServices: ServiceCatalogItem[] = [];
     const knownServiceIds = new Set(services.map((item) => item.id));
@@ -1207,7 +1210,7 @@ export function QuickActionScreen() {
     setDeliveryScheduleInput(readOrderMetaText(order.delivery ?? null, ["slot", "schedule_slot", "date"]));
     setEditingOrderId(order.id);
     setEditingOrderReference(order.order_code || order.invoice_no || order.id);
-    setStep("review");
+    setStep(startStep);
     setSelectedServiceIds(nextSelectedServiceIds);
     setSelectedPerfumeServiceId(nextSelectedPerfumeServiceId);
     setMetrics(nextMetrics);
@@ -1255,7 +1258,7 @@ export function QuickActionScreen() {
     setActionMessage(null);
   }
 
-  async function openEditFlow(orderId: string): Promise<void> {
+  async function openEditFlow(orderId: string, startStep: EditStartStep = "review"): Promise<void> {
     if (!selectedOutlet) {
       setErrorMessage("Pilih outlet terlebih dulu sebelum mengedit pesanan.");
       return;
@@ -1277,7 +1280,7 @@ export function QuickActionScreen() {
         return;
       }
 
-      applyEditOrderSnapshot(order);
+      applyEditOrderSnapshot(order, startStep);
     } catch (error) {
       setShowCreateForm(false);
       setErrorMessage(getApiErrorMessage(error));

@@ -297,6 +297,80 @@ class OrderApiTest extends TestCase
         ])->assertStatus(422)->assertJsonPath('reason_code', 'SCHEDULE_LOCKED');
     }
 
+    public function test_cashier_can_cancel_order_and_lock_following_mutations(): void
+    {
+        $order = $this->createOrder('ORD-CAN01');
+
+        $this->apiAs($this->cashier)
+            ->postJson("/api/orders/{$order->id}/cancel", [
+                'reason' => 'Pelanggan membatalkan pesanan.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.is_cancelled', true)
+            ->assertJsonPath('data.cancelled_reason', 'Pelanggan membatalkan pesanan.')
+            ->assertJsonPath('data.total_amount', 0)
+            ->assertJsonPath('data.due_amount', 0);
+
+        $this->assertDatabaseHas('orders', [
+            'id' => $order->id,
+            'cancelled_by' => $this->cashier->id,
+            'cancelled_reason' => 'Pelanggan membatalkan pesanan.',
+            'total_amount' => 0,
+            'due_amount' => 0,
+        ]);
+
+        $this->apiAs($this->worker)->postJson("/api/orders/{$order->id}/status/laundry", [
+            'status' => 'washing',
+        ])->assertStatus(422)->assertJsonPath('reason_code', 'ORDER_CANCELLED');
+    }
+
+    public function test_order_must_be_cancelled_before_delete_and_can_be_deleted_afterwards(): void
+    {
+        $order = $this->createOrder('ORD-DEL01');
+
+        $this->apiAs($this->admin)
+            ->deleteJson("/api/orders/{$order->id}")
+            ->assertStatus(422)
+            ->assertJsonPath('reason_code', 'ORDER_NOT_CANCELLED');
+
+        $this->apiAs($this->cashier)->postJson("/api/orders/{$order->id}/cancel", [
+            'reason' => 'Pesanan dibatalkan sebelum diproses.',
+        ])->assertOk();
+
+        $this->apiAs($this->admin)
+            ->deleteJson("/api/orders/{$order->id}")
+            ->assertOk()
+            ->assertJsonPath('data.id', $order->id);
+
+        $this->assertDatabaseMissing('orders', [
+            'id' => $order->id,
+        ]);
+    }
+
+    public function test_cashier_cannot_delete_order(): void
+    {
+        $order = $this->createOrder('ORD-DEL-ROLE');
+
+        $this->apiAs($this->cashier)->postJson("/api/orders/{$order->id}/cancel", [
+            'reason' => 'Dibatalkan untuk uji role.',
+        ])->assertOk();
+
+        $this->apiAs($this->cashier)
+            ->deleteJson("/api/orders/{$order->id}")
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'ROLE_ACCESS_DENIED');
+    }
+
+    public function test_cancel_requires_reason(): void
+    {
+        $order = $this->createOrder('ORD-CAN-NO-REASON');
+
+        $this->apiAs($this->cashier)
+            ->postJson("/api/orders/{$order->id}/cancel", [])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['reason']);
+    }
+
     public function test_order_mutations_are_audited(): void
     {
         $order = $this->createOrder('ORD-AUD01');

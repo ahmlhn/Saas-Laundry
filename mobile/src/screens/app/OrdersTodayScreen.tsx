@@ -529,18 +529,18 @@ export function OrdersTodayScreen() {
         <View style={styles.orderContent}>
           <View style={styles.orderTop}>
             <View style={styles.orderTitleWrap}>
+              <View style={styles.customerRow}>
+                <Ionicons color={theme.colors.textPrimary} name="person" size={15} />
+                <Text numberOfLines={1} style={styles.orderCustomer}>
+                  {item.customer?.name ?? "-"}
+                </Text>
+              </View>
               <Text numberOfLines={1} style={styles.orderTitle}>
                 {item.invoice_no ?? item.order_code}
               </Text>
               <Text numberOfLines={1} style={styles.orderCode}>
                 {identitySecondary}
               </Text>
-              <View style={styles.customerRow}>
-                <Ionicons color={subtleIconColor} name="person-outline" size={14} />
-                <Text numberOfLines={1} style={styles.orderCustomer}>
-                  {item.customer?.name ?? "-"}
-                </Text>
-              </View>
             </View>
             <StatusPill label={formatStatusLabel(item.laundry_status)} tone={laundryTone} />
           </View>
@@ -1176,10 +1176,10 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
       gap: isCompactLandscape ? 3 : 4,
     },
     orderTitle: {
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.bold,
-      fontSize: isTablet ? 16 : isCompactLandscape ? 14 : 15,
-      lineHeight: isTablet ? 22 : isCompactLandscape ? 18 : 20,
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: isTablet ? 13.5 : isCompactLandscape ? 12 : 12.5,
+      lineHeight: isTablet ? 19 : isCompactLandscape ? 16 : 17,
     },
     orderCode: {
       color: theme.mode === "dark" ? "#a9c6df" : theme.colors.textMuted,
@@ -1190,14 +1190,14 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
     customerRow: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 4,
+      gap: 5,
     },
     orderCustomer: {
       flex: 1,
-      color: theme.colors.textSecondary,
-      fontFamily: theme.fonts.medium,
-      fontSize: isCompactLandscape ? 11 : 12,
-      lineHeight: isCompactLandscape ? 15 : 17,
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: isTablet ? 16 : isCompactLandscape ? 13 : 14,
+      lineHeight: isTablet ? 22 : isCompactLandscape ? 18 : 19,
     },
     metricsRow: {
       flexDirection: "row",

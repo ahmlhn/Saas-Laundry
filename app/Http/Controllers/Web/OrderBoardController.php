@@ -1321,6 +1321,16 @@ class OrderBoardController extends Controller
             ];
         }
 
+        if ($requiresPickup && ! $requiresDelivery && $targetStatus === 'at_outlet') {
+            return [
+                'updated' => false,
+                'reason_code' => 'INVALID_TRANSITION',
+                'reason_label' => 'Status di outlet tidak tersedia untuk mode jemput saja.',
+                'from' => $currentStatus,
+                'to' => $targetStatus,
+            ];
+        }
+
         if (! $requiresDelivery && in_array($targetStatus, ['delivery_pending', 'delivery_on_the_way', 'delivered'], true)) {
             return [
                 'updated' => false,
@@ -1599,8 +1609,8 @@ class OrderBoardController extends Controller
             return match ($currentStatus) {
                 'pickup_pending' => ['pickup_pending', 'pickup_on_the_way'],
                 'pickup_on_the_way' => ['pickup_on_the_way', 'picked_up'],
-                'picked_up' => ['picked_up', 'at_outlet'],
-                'at_outlet' => ['at_outlet', 'delivery_pending'],
+                'picked_up' => in_array($laundryStatus, ['ready', 'completed'], true) ? ['picked_up', 'delivery_pending'] : ['picked_up'],
+                'at_outlet' => in_array($laundryStatus, ['ready', 'completed'], true) ? ['at_outlet', 'delivery_pending'] : ['at_outlet'],
                 'delivery_pending' => ['delivery_pending', 'delivery_on_the_way'],
                 'delivery_on_the_way' => ['delivery_on_the_way', 'delivered'],
                 'delivered' => ['delivered'],
@@ -1612,7 +1622,7 @@ class OrderBoardController extends Controller
             return match ($currentStatus) {
                 'pickup_pending' => ['pickup_pending', 'pickup_on_the_way'],
                 'pickup_on_the_way' => ['pickup_on_the_way', 'picked_up'],
-                'picked_up' => ['picked_up', 'at_outlet'],
+                'picked_up' => ['picked_up'],
                 'at_outlet' => ['at_outlet'],
                 default => ['pickup_pending'],
             };
@@ -1724,11 +1734,11 @@ class OrderBoardController extends Controller
         }
 
         if ($requiresPickup && $requiresDelivery) {
-            return ['pickup_pending', 'pickup_on_the_way', 'picked_up', 'at_outlet', 'delivery_pending', 'delivery_on_the_way', 'delivered'];
+            return ['pickup_pending', 'pickup_on_the_way', 'picked_up', 'delivery_pending', 'delivery_on_the_way', 'delivered'];
         }
 
         if ($requiresPickup) {
-            return ['pickup_pending', 'pickup_on_the_way', 'picked_up', 'at_outlet'];
+            return ['pickup_pending', 'pickup_on_the_way', 'picked_up'];
         }
 
         return ['at_outlet', 'delivery_pending', 'delivery_on_the_way', 'delivered'];

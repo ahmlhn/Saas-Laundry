@@ -22,7 +22,7 @@ class OrderStatusTransitionValidator
     private const COURIER_TRANSITIONS = [
         'pickup_pending' => ['pickup_on_the_way'],
         'pickup_on_the_way' => ['picked_up'],
-        'picked_up' => ['at_outlet'],
+        'picked_up' => ['delivery_pending', 'at_outlet'],
         'at_outlet' => ['delivery_pending'],
         'delivery_pending' => ['delivery_on_the_way'],
         'delivery_on_the_way' => ['delivered'],

@@ -768,6 +768,10 @@ class SyncController extends Controller
             throw new SyncRejectException('INVALID_TRANSITION', 'Pickup statuses are not available for delivery-only orders.');
         }
 
+        if ($requiresPickup && ! $requiresDelivery && $validated['status'] === 'at_outlet') {
+            throw new SyncRejectException('INVALID_TRANSITION', 'at_outlet status is not available for pickup-only orders.');
+        }
+
         if (! $requiresDelivery && in_array($validated['status'], ['delivery_pending', 'delivery_on_the_way', 'delivered'], true)) {
             throw new SyncRejectException('INVALID_TRANSITION', 'Delivery statuses are not available for pickup-only orders.');
         }

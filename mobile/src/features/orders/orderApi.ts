@@ -17,6 +17,13 @@ interface OrderDetailResponse {
   data: OrderDetail;
 }
 
+interface DeleteOrderResponse {
+  data: {
+    id: string;
+  };
+  message?: string;
+}
+
 interface CreateOrderResponse {
   data: OrderDetail;
 }
@@ -310,6 +317,22 @@ export async function updateOrder(orderId: string, payload: SaveOrderPayload): P
 
   invalidateCache("orders:list:");
   return response.data.data;
+}
+
+export async function cancelOrder(payload: { orderId: string; reason: string }): Promise<OrderDetail> {
+  const response = await httpClient.post<OrderDetailResponse>(`/orders/${payload.orderId}/cancel`, {
+    reason: payload.reason,
+  });
+
+  invalidateCache("orders:list:");
+  return response.data.data;
+}
+
+export async function deleteOrder(orderId: string): Promise<string> {
+  const response = await httpClient.delete<DeleteOrderResponse>(`/orders/${orderId}`);
+
+  invalidateCache("orders:list:");
+  return response.data.data.id;
 }
 
 export async function addOrderPayment(payload: AddOrderPaymentPayload): Promise<OrderDetail | null> {

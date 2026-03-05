@@ -107,6 +107,7 @@ export type AppTabParamList = {
         openCreateStamp?: number;
         preselectCustomerId?: string;
         editOrderId?: string;
+        editStartStep?: "customer" | "services" | "review";
       }
     | undefined;
   ReportsTab: undefined;

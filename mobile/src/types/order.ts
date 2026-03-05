@@ -60,6 +60,10 @@ export interface OrderSummary {
   total_amount: number;
   paid_amount: number;
   due_amount: number;
+  is_cancelled?: boolean;
+  cancelled_at?: string | null;
+  cancelled_by?: number | null;
+  cancelled_reason?: string | null;
   created_at: string;
   updated_at: string;
   customer?: OrderCustomer;
