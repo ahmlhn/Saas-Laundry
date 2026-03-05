@@ -91,6 +91,58 @@ function centerReceiptLine(value: string, lineWidth: number): string {
   return `${" ".repeat(paddingStart)}${trimmed}`;
 }
 
+function wrapReceiptText(value: string, lineWidth: number): string[] {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return [];
+  }
+
+  const words = normalized.split(" ");
+  const wrapped: string[] = [];
+  let currentLine = "";
+
+  for (const word of words) {
+    if (word.length > lineWidth) {
+      if (currentLine) {
+        wrapped.push(currentLine);
+        currentLine = "";
+      }
+
+      let remainder = word;
+      while (remainder.length > lineWidth) {
+        wrapped.push(remainder.slice(0, lineWidth));
+        remainder = remainder.slice(lineWidth);
+      }
+
+      if (remainder) {
+        currentLine = remainder;
+      }
+      continue;
+    }
+
+    const nextLine = currentLine ? `${currentLine} ${word}` : word;
+    if (nextLine.length <= lineWidth) {
+      currentLine = nextLine;
+      continue;
+    }
+
+    if (currentLine) {
+      wrapped.push(currentLine);
+    }
+    currentLine = word;
+  }
+
+  if (currentLine) {
+    wrapped.push(currentLine);
+  }
+
+  return wrapped;
+}
+
+function buildCenteredReceiptLines(value: string, lineWidth: number): string[] {
+  return wrapReceiptText(value, lineWidth).map((line) => centerReceiptLine(line, lineWidth));
+}
+
 function resolveReceiptLayout(paperWidth?: PrinterPaperWidth): { divider: string; labelWidth: number } {
   if (paperWidth === "80mm") {
     return {
@@ -105,22 +157,60 @@ function resolveReceiptLayout(paperWidth?: PrinterPaperWidth): { divider: string
   };
 }
 
-function buildProductionLines(order: OrderDetail): string[] {
-  const items = order.items ?? [];
-  if (items.length === 0) {
-    return ["- Tidak ada item layanan"];
+function buildColumnLines(left: string, right: string, lineWidth: number): string[] {
+  const normalizedLeft = left.trim();
+  const normalizedRight = right.trim();
+
+  if (!normalizedLeft && !normalizedRight) {
+    return [""];
   }
 
-  return items.map((item, index) => `${index + 1}. ${item.service_name_snapshot} (${formatItemMetric(item)})`);
+  if (!normalizedRight) {
+    return wrapReceiptText(normalizedLeft, lineWidth);
+  }
+
+  if (!normalizedLeft) {
+    return wrapReceiptText(normalizedRight, lineWidth);
+  }
+
+  const minGap = 2;
+  if (normalizedLeft.length + normalizedRight.length + minGap <= lineWidth) {
+    const spaces = " ".repeat(Math.max(lineWidth - normalizedLeft.length - normalizedRight.length, minGap));
+    return [`${normalizedLeft}${spaces}${normalizedRight}`];
+  }
+
+  const leftLines = wrapReceiptText(normalizedLeft, lineWidth);
+  if (normalizedRight.length <= lineWidth) {
+    return [...leftLines, normalizedRight.padStart(lineWidth, " ")];
+  }
+
+  return [...leftLines, ...wrapReceiptText(normalizedRight, lineWidth)];
 }
 
-function buildCustomerLines(order: OrderDetail): string[] {
+function buildProductionLines(order: OrderDetail, lineWidth: number): string[] {
   const items = order.items ?? [];
   if (items.length === 0) {
     return ["- Tidak ada item layanan"];
   }
 
-  return items.map((item, index) => `${index + 1}. ${item.service_name_snapshot} | ${formatItemMetric(item)} | ${formatMoney(item.subtotal_amount)}`);
+  return items.flatMap((item, index) => {
+    const serviceLines = wrapReceiptText(`${index + 1}. ${item.service_name_snapshot}`, lineWidth);
+    const metricLines = buildColumnLines("Jumlah", formatItemMetric(item), lineWidth);
+    return [...serviceLines, ...metricLines];
+  });
+}
+
+function buildCustomerLines(order: OrderDetail, lineWidth: number): string[] {
+  const items = order.items ?? [];
+  if (items.length === 0) {
+    return ["- Tidak ada item layanan"];
+  }
+
+  return items.flatMap((item, index) => {
+    const serviceLines = wrapReceiptText(`${index + 1}. ${item.service_name_snapshot}`, lineWidth);
+    const detailLines = buildColumnLines(formatItemMetric(item), formatMoney(item.subtotal_amount), lineWidth);
+    return [...serviceLines, ...detailLines];
+  });
 }
 
 function resolveSelectedPerfumeLabel(order: OrderDetail): string | null {
@@ -160,6 +250,7 @@ export function buildOrderReceiptText(params: BuildOrderReceiptParams): string {
   const itemSubTotal = resolveItemSubTotal(order);
   const selectedPerfume = resolveSelectedPerfumeLabel(order);
   const { divider, labelWidth } = resolveReceiptLayout(paperWidth);
+  const lineWidth = divider.length;
   const profileName = resolveReceiptProfileName(noteSettings, outletLabel);
   const descriptionLine = resolveReceiptDescription(noteSettings);
   const outletPhone = resolveReceiptPhone(noteSettings);
@@ -167,23 +258,23 @@ export function buildOrderReceiptText(params: BuildOrderReceiptParams): string {
   const lines: string[] = [];
 
   if (kind === "production") {
-    lines.push(centerReceiptLine("(Nota Produksi)", divider.length));
-    lines.push(centerReceiptLine(profileName, divider.length));
+    lines.push(...buildCenteredReceiptLines("(Nota Produksi)", divider.length));
+    lines.push(...buildCenteredReceiptLines(profileName, divider.length));
     if (descriptionLine) {
-      lines.push(centerReceiptLine(descriptionLine, divider.length));
+      lines.push(...buildCenteredReceiptLines(descriptionLine, divider.length));
     }
     if (outletPhone) {
-      lines.push(centerReceiptLine(`Telp. ${outletPhone}`, divider.length));
+      lines.push(...buildCenteredReceiptLines(`Telp. ${outletPhone}`, divider.length));
     }
-    lines.push(centerReceiptLine(reference, divider.length));
-    lines.push(centerReceiptLine(customerName, divider.length));
-    lines.push(centerReceiptLine("Sisa Pembayaran", divider.length));
-    lines.push(centerReceiptLine(formatReceiptMoney(order.due_amount), divider.length));
+    lines.push(...buildCenteredReceiptLines(reference, divider.length));
+    lines.push(...buildCenteredReceiptLines(customerName, divider.length));
+    lines.push(...buildCenteredReceiptLines("Sisa Pembayaran", divider.length));
+    lines.push(...buildCenteredReceiptLines(formatReceiptMoney(order.due_amount), divider.length));
     lines.push(divider);
     lines.push(buildKeyValueLine("Tgl Pesan", formatDateTime(order.created_at), labelWidth));
     lines.push(buildKeyValueLine("Est Selesai", formatDateTime(order.estimated_completion_at ?? null), labelWidth));
     lines.push(divider);
-    lines.push(...buildProductionLines(order));
+    lines.push(...buildProductionLines(order, lineWidth));
     if (selectedPerfume) {
       lines.push(buildKeyValueLine("Parfum", selectedPerfume, labelWidth));
     }
@@ -196,16 +287,16 @@ export function buildOrderReceiptText(params: BuildOrderReceiptParams): string {
       lines.push(buildKeyValueLine("Catatan", order.notes.trim(), labelWidth));
     }
     lines.push(divider);
-    lines.push(centerReceiptLine(resolveReceiptFooter(noteSettings, "Internal produksi. Tanpa informasi harga."), divider.length));
+    lines.push(...buildCenteredReceiptLines(resolveReceiptFooter(noteSettings, "Internal produksi. Tanpa informasi harga."), divider.length));
     return lines.join("\n");
   }
 
-  lines.push(centerReceiptLine(profileName, divider.length));
+  lines.push(...buildCenteredReceiptLines(profileName, divider.length));
   if (descriptionLine) {
-    lines.push(centerReceiptLine(descriptionLine, divider.length));
+    lines.push(...buildCenteredReceiptLines(descriptionLine, divider.length));
   }
   if (outletPhone) {
-    lines.push(centerReceiptLine(`Telp. ${outletPhone}`, divider.length));
+    lines.push(...buildCenteredReceiptLines(`Telp. ${outletPhone}`, divider.length));
   }
   lines.push(divider);
   lines.push(buildKeyValueLine("Nomor Nota", reference, labelWidth));
@@ -223,7 +314,7 @@ export function buildOrderReceiptText(params: BuildOrderReceiptParams): string {
 
   lines.push("ITEM LAYANAN");
   lines.push(divider);
-  lines.push(...buildCustomerLines(order));
+  lines.push(...buildCustomerLines(order, lineWidth));
   if (selectedPerfume) {
     lines.push(buildKeyValueLine("Parfum", selectedPerfume, labelWidth));
   }

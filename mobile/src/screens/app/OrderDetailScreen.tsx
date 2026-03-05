@@ -18,6 +18,7 @@ import { DEFAULT_PRINTER_LOCAL_SETTINGS, getPrinterLocalSettings } from "../../f
 import { printBluetoothThermalReceipt } from "../../features/settings/thermalBluetoothPrinter";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AppRootStackParamList, OrdersStackParamList } from "../../navigation/types";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
@@ -28,6 +29,13 @@ type DetailRoute = RouteProp<OrdersStackParamList, "OrderDetail">;
 
 const NOTICE_AUTO_HIDE_MS = 4000;
 const CANCEL_REASON_OTHER_ID = "other";
+const RECEIPT_PREVIEW_ZOOM_MIN = 0.75;
+const RECEIPT_PREVIEW_ZOOM_MAX = 1.8;
+const RECEIPT_PREVIEW_ZOOM_STEP = 0.15;
+const RECEIPT_PREVIEW_FONT_SIZE = 10.5;
+const RECEIPT_PREVIEW_LINE_HEIGHT = 16;
+const RECEIPT_PREVIEW_CHAR_WIDTH_FACTOR = 0.64;
+const RECEIPT_PREVIEW_SIDE_PADDING = 26;
 
 const CANCEL_REASON_OPTIONS: Array<{ id: string; label: string }> = [
   { id: "customer_change_mind", label: "Pelanggan membatalkan pesanan" },
@@ -332,6 +340,7 @@ export function OrderDetailScreen() {
   const [receiptPreviewKind, setReceiptPreviewKind] = useState<OrderReceiptKind>("customer");
   const [receiptPreviewText, setReceiptPreviewText] = useState("");
   const [receiptPreviewPaperWidth, setReceiptPreviewPaperWidth] = useState(DEFAULT_PRINTER_LOCAL_SETTINGS.paperWidth);
+  const [receiptPreviewZoom, setReceiptPreviewZoom] = useState(1);
   const [cancellingOrder, setCancellingOrder] = useState(false);
   const [deletingOrder, setDeletingOrder] = useState(false);
   const [selectedCancelReasonId, setSelectedCancelReasonId] = useState<string | null>(null);
@@ -570,6 +579,16 @@ export function OrderDetailScreen() {
   const totalWeight = useMemo(() => (detail?.items ?? []).reduce((sum, item) => sum + parseLooseNumber(item.weight_kg), 0), [detail?.items]);
   const receiptPreviewKindLabel = receiptPreviewKind === "production" ? "Resi Produksi" : "Resi Pelanggan";
   const isReceiptActionBusy = preparingReceiptPreview || printingReceipt || sendingReceipt;
+  const receiptPaperWidthMm = receiptPreviewPaperWidth === "80mm" ? 80 : 58;
+  const receiptColumnWidth = receiptPreviewPaperWidth === "80mm" ? 48 : 32;
+  const receiptPreviewFontSize = RECEIPT_PREVIEW_FONT_SIZE * receiptPreviewZoom;
+  const receiptPreviewLineHeight = RECEIPT_PREVIEW_LINE_HEIGHT * receiptPreviewZoom;
+  const receiptPaperPreviewWidth = useMemo(() => {
+    const charWidth = receiptPreviewFontSize * RECEIPT_PREVIEW_CHAR_WIDTH_FACTOR;
+    return Math.round(receiptColumnWidth * charWidth + RECEIPT_PREVIEW_SIDE_PADDING);
+  }, [receiptColumnWidth, receiptPreviewFontSize]);
+  const canZoomOutReceiptPreview = receiptPreviewZoom > RECEIPT_PREVIEW_ZOOM_MIN + 0.001;
+  const canZoomInReceiptPreview = receiptPreviewZoom < RECEIPT_PREVIEW_ZOOM_MAX - 0.001;
   const pickupAddress = useMemo(() => readRecordText(detail?.pickup ?? null, ["address_short", "address"]), [detail?.pickup]);
   const pickupSchedule = useMemo(() => readRecordText(detail?.pickup ?? null, ["slot", "schedule_slot", "date"]), [detail?.pickup]);
   const pickupInstructionLocation = useMemo(() => {
@@ -1017,6 +1036,19 @@ export function OrderDetailScreen() {
     setShowReceiptPreviewModal(false);
   }
 
+  function updateReceiptPreviewZoom(nextValue: number): void {
+    const clamped = Math.max(RECEIPT_PREVIEW_ZOOM_MIN, Math.min(RECEIPT_PREVIEW_ZOOM_MAX, nextValue));
+    setReceiptPreviewZoom(Math.round(clamped * 100) / 100);
+  }
+
+  function handleZoomOutReceiptPreview(): void {
+    updateReceiptPreviewZoom(receiptPreviewZoom - RECEIPT_PREVIEW_ZOOM_STEP);
+  }
+
+  function handleZoomInReceiptPreview(): void {
+    updateReceiptPreviewZoom(receiptPreviewZoom + RECEIPT_PREVIEW_ZOOM_STEP);
+  }
+
   async function resolveReceiptPayload(kind: OrderReceiptKind): Promise<{
     latestDetail: OrderDetail;
     printerSettings: Awaited<ReturnType<typeof getPrinterLocalSettings>>;
@@ -1056,7 +1088,7 @@ export function OrderDetailScreen() {
   async function loadReceiptPreview(kind: OrderReceiptKind): Promise<void> {
     const payload = await resolveReceiptPayload(kind);
     setReceiptPreviewPaperWidth(payload.printerSettings.paperWidth);
-    setReceiptPreviewText(payload.receiptText);
+    setReceiptPreviewText(payload.receiptText.trimEnd());
   }
 
   async function handleOpenReceiptPreview(initialKind: OrderReceiptKind = "customer"): Promise<void> {
@@ -1069,6 +1101,7 @@ export function OrderDetailScreen() {
     setActionMessage(null);
 
     try {
+      setReceiptPreviewZoom(1);
       setReceiptPreviewKind(initialKind);
       await loadReceiptPreview(initialKind);
       setShowReceiptPreviewModal(true);
@@ -1498,94 +1531,160 @@ export function OrderDetailScreen() {
           <Modal
             animationType="fade"
             onRequestClose={handleCloseReceiptPreviewModal}
+            statusBarTranslucent
             transparent
             visible={showReceiptPreviewModal}
           >
             <View style={styles.receiptModalBackdrop}>
-              <View style={styles.receiptModalCard}>
-                <View style={styles.receiptModalHeader}>
-                  <View style={styles.receiptModalHeaderMain}>
-                    <View style={styles.receiptModalHeaderIconWrap}>
-                      <Ionicons color={theme.colors.info} name="receipt-outline" size={16} />
+              <SafeAreaView edges={["top", "bottom"]} style={styles.receiptModalSafeArea}>
+                <View style={styles.receiptModalCard}>
+                  <View style={styles.receiptModalHeader}>
+                    <View style={styles.receiptModalHeaderMain}>
+                      <View style={styles.receiptModalHeaderIconWrap}>
+                        <Ionicons color={theme.colors.info} name="receipt-outline" size={16} />
+                      </View>
+                      <View style={styles.receiptModalHeaderCopy}>
+                        <Text style={styles.receiptModalTitle}>Preview Resi</Text>
+                        <Text style={styles.receiptModalHint}>Menyesuaikan pengaturan Printer & Nota outlet aktif.</Text>
+                      </View>
                     </View>
-                    <View style={styles.receiptModalHeaderCopy}>
-                      <Text style={styles.receiptModalTitle}>Preview Resi</Text>
-                      <Text style={styles.receiptModalHint}>Menyesuaikan pengaturan Printer & Nota outlet aktif.</Text>
-                    </View>
-                  </View>
-                  <Pressable
-                    disabled={isReceiptActionBusy}
-                    hitSlop={6}
-                    onPress={handleCloseReceiptPreviewModal}
-                    style={({ pressed }) => [styles.receiptModalCloseButton, pressed ? styles.heroIconButtonPressed : null]}
-                  >
-                    <Ionicons color={theme.colors.textSecondary} name="close-outline" size={18} />
-                  </Pressable>
-                </View>
-
-                <View style={styles.receiptModalMetaRow}>
-                  <Text style={styles.receiptModalMetaPill}>{receiptPreviewPaperWidth === "80mm" ? "Kertas 80mm" : "Kertas 58mm"}</Text>
-                  <Text style={styles.receiptModalMetaText}>{receiptPreviewKindLabel}</Text>
-                </View>
-
-                <View style={styles.receiptTabRow}>
-                  <Pressable
-                    disabled={isReceiptActionBusy}
-                    onPress={() => void handleSwitchReceiptPreviewKind("customer")}
-                    style={({ pressed }) => [styles.receiptTabButton, receiptPreviewKind === "customer" ? styles.receiptTabButtonActive : null, pressed ? styles.heroIconButtonPressed : null]}
-                  >
-                    <Text style={[styles.receiptTabButtonText, receiptPreviewKind === "customer" ? styles.receiptTabButtonTextActive : null]}>Resi Pelanggan</Text>
-                  </Pressable>
-                  <Pressable
-                    disabled={isReceiptActionBusy}
-                    onPress={() => void handleSwitchReceiptPreviewKind("production")}
-                    style={({ pressed }) => [styles.receiptTabButton, receiptPreviewKind === "production" ? styles.receiptTabButtonActive : null, pressed ? styles.heroIconButtonPressed : null]}
-                  >
-                    <Text style={[styles.receiptTabButtonText, receiptPreviewKind === "production" ? styles.receiptTabButtonTextActive : null]}>Resi Produksi</Text>
-                  </Pressable>
-                </View>
-
-                <View style={styles.receiptPreviewCard}>
-                  {preparingReceiptPreview ? (
-                    <View style={styles.receiptPreviewLoadingWrap}>
-                      <ActivityIndicator color={theme.colors.primaryStrong} size="small" />
-                      <Text style={styles.receiptPreviewLoadingText}>Menyiapkan resi...</Text>
-                    </View>
-                  ) : (
-                    <ScrollView
-                      contentContainerStyle={styles.receiptPreviewScrollContent}
-                      showsVerticalScrollIndicator={false}
-                      style={styles.receiptPreviewScrollView}
+                    <Pressable
+                      disabled={isReceiptActionBusy}
+                      hitSlop={6}
+                      onPress={handleCloseReceiptPreviewModal}
+                      style={({ pressed }) => [styles.receiptModalCloseButton, pressed ? styles.heroIconButtonPressed : null]}
                     >
-                      <Text style={styles.receiptPreviewMono}>{receiptPreviewText}</Text>
-                    </ScrollView>
-                  )}
-                </View>
+                      <Ionicons color={theme.colors.textSecondary} name="close-outline" size={18} />
+                    </Pressable>
+                  </View>
 
-                <View style={styles.receiptModalFooter}>
-                  <View style={styles.receiptModalActionRow}>
-                    <View style={styles.receiptModalActionButton}>
-                      <AppButton
-                        disabled={isReceiptActionBusy}
-                        leftElement={<Ionicons color={theme.colors.primaryContrast} name="print-outline" size={16} />}
-                        loading={printingReceipt}
-                        onPress={() => void handlePrintReceipt(receiptPreviewKind)}
-                        title="Print"
-                      />
+                  <View style={styles.receiptModalMetaRow}>
+                    <Text style={styles.receiptModalMetaPill}>{receiptPreviewPaperWidth === "80mm" ? "Kertas 80mm" : "Kertas 58mm"}</Text>
+                    <Text style={styles.receiptModalMetaText}>{receiptPreviewKindLabel}</Text>
+                  </View>
+
+                  <View style={styles.receiptTabRow}>
+                    <Pressable
+                      disabled={isReceiptActionBusy}
+                      onPress={() => void handleSwitchReceiptPreviewKind("customer")}
+                      style={({ pressed }) => [styles.receiptTabButton, receiptPreviewKind === "customer" ? styles.receiptTabButtonActive : null, pressed ? styles.heroIconButtonPressed : null]}
+                    >
+                      <Text style={[styles.receiptTabButtonText, receiptPreviewKind === "customer" ? styles.receiptTabButtonTextActive : null]}>Resi Pelanggan</Text>
+                    </Pressable>
+                    <Pressable
+                      disabled={isReceiptActionBusy}
+                      onPress={() => void handleSwitchReceiptPreviewKind("production")}
+                      style={({ pressed }) => [styles.receiptTabButton, receiptPreviewKind === "production" ? styles.receiptTabButtonActive : null, pressed ? styles.heroIconButtonPressed : null]}
+                    >
+                      <Text style={[styles.receiptTabButtonText, receiptPreviewKind === "production" ? styles.receiptTabButtonTextActive : null]}>Resi Produksi</Text>
+                    </Pressable>
+                  </View>
+
+                  <View style={styles.receiptPreviewToolsRow}>
+                    <View style={styles.receiptPreviewZoomGroup}>
+                      <Pressable
+                        accessibilityHint="Perkecil tampilan resi"
+                        accessibilityLabel="Perkecil preview resi"
+                        accessibilityRole="button"
+                        disabled={!canZoomOutReceiptPreview}
+                        onPress={handleZoomOutReceiptPreview}
+                        style={({ pressed }) => [
+                          styles.receiptPreviewZoomButton,
+                          !canZoomOutReceiptPreview ? styles.receiptPreviewZoomButtonDisabled : null,
+                          pressed ? styles.heroIconButtonPressed : null,
+                        ]}
+                      >
+                        <Ionicons color={!canZoomOutReceiptPreview ? theme.colors.textMuted : theme.colors.textSecondary} name="remove" size={15} />
+                      </Pressable>
+                      <Pressable
+                        accessibilityHint="Perbesar tampilan resi"
+                        accessibilityLabel="Perbesar preview resi"
+                        accessibilityRole="button"
+                        disabled={!canZoomInReceiptPreview}
+                        onPress={handleZoomInReceiptPreview}
+                        style={({ pressed }) => [
+                          styles.receiptPreviewZoomButton,
+                          !canZoomInReceiptPreview ? styles.receiptPreviewZoomButtonDisabled : null,
+                          pressed ? styles.heroIconButtonPressed : null,
+                        ]}
+                      >
+                        <Ionicons color={!canZoomInReceiptPreview ? theme.colors.textMuted : theme.colors.textSecondary} name="add" size={15} />
+                      </Pressable>
                     </View>
-                    <View style={styles.receiptModalActionButton}>
-                      <AppButton
-                        disabled={isReceiptActionBusy}
-                        leftElement={<Ionicons color={theme.colors.info} name="share-social-outline" size={16} />}
-                        loading={sendingReceipt}
-                        onPress={() => void handleSendReceipt(receiptPreviewKind)}
-                        title="Kirim Resi"
-                        variant="secondary"
-                      />
+                  </View>
+
+                  <View style={styles.receiptPreviewCard}>
+                    {preparingReceiptPreview ? (
+                      <View style={styles.receiptPreviewLoadingWrap}>
+                        <ActivityIndicator color={theme.colors.primaryStrong} size="small" />
+                        <Text style={styles.receiptPreviewLoadingText}>Menyiapkan resi...</Text>
+                      </View>
+                    ) : (
+                      <ScrollView
+                        contentContainerStyle={styles.receiptPreviewScrollContent}
+                        nestedScrollEnabled
+                        showsVerticalScrollIndicator={false}
+                        style={styles.receiptPreviewScrollView}
+                      >
+                        <ScrollView
+                          contentContainerStyle={styles.receiptPreviewHorizontalContent}
+                          horizontal
+                          nestedScrollEnabled
+                          showsHorizontalScrollIndicator
+                          style={styles.receiptPreviewHorizontalScroll}
+                        >
+                          <View style={[styles.receiptPaperSheet, { width: receiptPaperPreviewWidth }]}>
+                            <View style={styles.receiptPaperEdgeRow}>
+                              <View style={styles.receiptPaperPunch} />
+                              <View style={styles.receiptPaperDash} />
+                              <View style={styles.receiptPaperPunch} />
+                            </View>
+                            <View style={styles.receiptPaperBody}>
+                              <Text
+                                style={[
+                                  styles.receiptPreviewMono,
+                                  { fontSize: receiptPreviewFontSize, lineHeight: receiptPreviewLineHeight },
+                                ]}
+                              >
+                                {receiptPreviewText}
+                              </Text>
+                            </View>
+                            <View style={styles.receiptPaperEdgeRow}>
+                              <View style={styles.receiptPaperPunch} />
+                              <View style={styles.receiptPaperDash} />
+                              <View style={styles.receiptPaperPunch} />
+                            </View>
+                          </View>
+                        </ScrollView>
+                      </ScrollView>
+                    )}
+                  </View>
+
+                  <View style={styles.receiptModalFooter}>
+                    <View style={styles.receiptModalActionRow}>
+                      <View style={styles.receiptModalActionButton}>
+                        <AppButton
+                          disabled={isReceiptActionBusy}
+                          leftElement={<Ionicons color={theme.colors.primaryContrast} name="print-outline" size={16} />}
+                          loading={printingReceipt}
+                          onPress={() => void handlePrintReceipt(receiptPreviewKind)}
+                          title="Print"
+                        />
+                      </View>
+                      <View style={styles.receiptModalActionButton}>
+                        <AppButton
+                          disabled={isReceiptActionBusy}
+                          leftElement={<Ionicons color={theme.colors.info} name="share-social-outline" size={16} />}
+                          loading={sendingReceipt}
+                          onPress={() => void handleSendReceipt(receiptPreviewKind)}
+                          title="Kirim Resi"
+                          variant="secondary"
+                        />
+                      </View>
                     </View>
                   </View>
                 </View>
-              </View>
+              </SafeAreaView>
             </View>
           </Modal>
 
@@ -2087,6 +2186,9 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       flex: 1,
       backgroundColor: "rgba(10, 16, 28, 0.64)",
     },
+    receiptModalSafeArea: {
+      flex: 1,
+    },
     receiptModalCard: {
       flex: 1,
       width: "100%",
@@ -2094,8 +2196,8 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       borderTopRightRadius: isTablet ? theme.radii.xl : 0,
       backgroundColor: theme.colors.background,
       paddingHorizontal: isTablet ? 20 : 14,
-      paddingTop: isTablet ? 18 : 12,
-      paddingBottom: isTablet ? 14 : 10,
+      paddingTop: isTablet ? 16 : 12,
+      paddingBottom: isTablet ? 10 : 8,
       gap: 10,
     },
     receiptModalHeader: {
@@ -2201,15 +2303,40 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     receiptTabButtonTextActive: {
       color: theme.colors.info,
     },
+    receiptPreviewToolsRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+      gap: 10,
+    },
+    receiptPreviewZoomGroup: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    receiptPreviewZoomButton: {
+      width: 30,
+      height: 30,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: theme.colors.surfaceSoft,
+    },
+    receiptPreviewZoomButtonDisabled: {
+      backgroundColor: theme.colors.surface,
+      borderColor: theme.colors.borderStrong,
+    },
     receiptPreviewCard: {
       flex: 1,
       width: "100%",
       borderWidth: 1,
       borderColor: theme.colors.borderStrong,
       borderRadius: theme.radii.md,
-      backgroundColor: theme.colors.surface,
-      paddingHorizontal: 12,
-      paddingVertical: 12,
+      backgroundColor: theme.mode === "dark" ? "rgba(18, 28, 40, 0.94)" : "#eef1f4",
+      paddingHorizontal: 10,
+      paddingVertical: 10,
       minHeight: 0,
       shadowColor: "#000",
       shadowOpacity: 0.08,
@@ -2217,11 +2344,64 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       shadowOffset: { width: 0, height: 4 },
       elevation: 2,
     },
+    receiptPaperSheet: {
+      alignSelf: "center",
+      borderWidth: 1,
+      borderColor: "#d7dce3",
+      borderRadius: 10,
+      backgroundColor: "#ffffff",
+      overflow: "hidden",
+      shadowColor: "#000",
+      shadowOpacity: 0.14,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 4,
+    },
+    receiptPaperEdgeRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingHorizontal: 8,
+      paddingVertical: 5,
+      backgroundColor: "#ffffff",
+    },
+    receiptPaperDash: {
+      flex: 1,
+      borderTopWidth: 1,
+      borderStyle: "dashed",
+      borderColor: "#d9dde4",
+    },
+    receiptPaperPunch: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: "#ffffff",
+      borderWidth: 1,
+      borderColor: "#d9dde4",
+    },
     receiptPreviewScrollView: {
       flex: 1,
+      width: "100%",
     },
     receiptPreviewScrollContent: {
       flexGrow: 1,
+      alignItems: "stretch",
+      justifyContent: "flex-start",
+      paddingVertical: 2,
+    },
+    receiptPreviewHorizontalScroll: {
+      width: "100%",
+    },
+    receiptPreviewHorizontalContent: {
+      flexGrow: 1,
+      alignItems: "flex-start",
+      justifyContent: "center",
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+    },
+    receiptPaperBody: {
+      paddingHorizontal: 12,
+      paddingTop: 10,
       paddingBottom: 12,
     },
     receiptPreviewLoadingWrap: {
@@ -2237,16 +2417,14 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontSize: 12,
     },
     receiptPreviewMono: {
-      color: theme.colors.textPrimary,
+      color: "#1f2430",
       fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: theme.fonts.medium }),
-      fontSize: 10.5,
-      lineHeight: 16,
     },
     receiptModalFooter: {
       borderTopWidth: 1,
       borderTopColor: theme.colors.border,
       paddingTop: 10,
-      paddingBottom: isTablet ? 4 : 0,
+      paddingBottom: isTablet ? 6 : 4,
     },
     receiptModalActionRow: {
       flexDirection: "row",
