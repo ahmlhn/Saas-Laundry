@@ -618,6 +618,14 @@ export function QuickActionScreen() {
   }, [selectedOutlet?.id, canCreateOrder]);
 
   useEffect(() => {
+    if (!isFocused || !selectedOutlet || !canCreateOrder) {
+      return;
+    }
+
+    void loadServices(true);
+  }, [isFocused, selectedOutlet?.id, canCreateOrder]);
+
+  useEffect(() => {
     if (!route.params?.openCreateStamp || !canCreateOrder) {
       return;
     }
@@ -748,7 +756,7 @@ export function QuickActionScreen() {
         listServices({
           outletId: selectedOutlet.id,
           active: true,
-          serviceType: ["regular", "package"],
+          serviceType: ["regular", "package", "item"],
           isGroup: false,
           forceRefresh,
         }),

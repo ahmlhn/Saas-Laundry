@@ -3,7 +3,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from "@react-native-community/datetimepicker";
-import { ActivityIndicator, Animated, Easing, NativeModules, Platform, Pressable, RefreshControl, Share, StyleSheet, Text, TextInput, UIManager, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Animated, Easing, NativeModules, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, UIManager, View, useWindowDimensions } from "react-native";
 import { captureRef } from "react-native-view-shot";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
@@ -395,6 +395,7 @@ export function ReportsScreen() {
   const [appliedCustomDateTo, setAppliedCustomDateTo] = useState(todayToken);
   const [datePickerTarget, setDatePickerTarget] = useState<"from" | "to" | null>(null);
   const [pickerDraftDate, setPickerDraftDate] = useState<Date>(() => parseDateToken(todayToken));
+  const [chartViewportWidth, setChartViewportWidth] = useState(0);
   const firstFocusHandledRef = useRef(false);
   const reportCaptureRef = useRef<View | null>(null);
   const chartTransition = useRef(new Animated.Value(1)).current;
@@ -597,6 +598,16 @@ export function ReportsScreen() {
     }),
     [chartTransition]
   );
+  const barChartSlotWidth = isTablet ? 88 : 68;
+  const barChartGap = theme.spacing.xs;
+  const barChartContentMinWidth = useMemo(() => {
+    const barsWidth =
+      trendPoints.length > 0
+        ? trendPoints.length * barChartSlotWidth + Math.max(trendPoints.length - 1, 0) * barChartGap
+        : 0;
+
+    return Math.max(chartViewportWidth, barsWidth);
+  }, [barChartGap, barChartSlotWidth, chartViewportWidth, trendPoints.length]);
 
   const applyPickedDate = useCallback(
     (target: "from" | "to", nextDate: Date) => {
@@ -964,49 +975,64 @@ export function ReportsScreen() {
                 <Text style={styles.chartGroupMeta}>
                   {activeTrendMetric === "amount" ? "Nominal omzet per titik periode" : "Jumlah transaksi per titik periode"}
                 </Text>
-                <View style={styles.barChartRow}>
-                  {trendPoints.map((point) => {
-                    const currentValue = activeTrendMetric === "amount" ? point.amount : point.count;
-                    const maxValue = Math.max(activeTrendMetric === "amount" ? salesTrendPeak?.amount ?? 0 : trendPeak?.count ?? 0, 1);
-                    const barHeight = currentValue > 0 ? Math.max((currentValue / maxValue) * 100, 14) : 4;
-                    const isPeak = point.key === activeTrendPeak?.key && currentValue > 0;
+                <View
+                  onLayout={(event) => {
+                    const nextWidth = Math.round(event.nativeEvent.layout.width);
+                    if (nextWidth !== chartViewportWidth) {
+                      setChartViewportWidth(nextWidth);
+                    }
+                  }}
+                  style={styles.barChartViewport}
+                >
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={[styles.barChartRow, { minWidth: barChartContentMinWidth }]}
+                  >
+                    {trendPoints.map((point) => {
+                      const currentValue = activeTrendMetric === "amount" ? point.amount : point.count;
+                      const maxValue = Math.max(activeTrendMetric === "amount" ? salesTrendPeak?.amount ?? 0 : trendPeak?.count ?? 0, 1);
+                      const barHeight = currentValue > 0 ? Math.max((currentValue / maxValue) * 100, 14) : 4;
+                      const isPeak = point.key === activeTrendPeak?.key && currentValue > 0;
 
-                    return (
-                      <View key={`${point.key}:${activeTrendMetric}`} style={styles.barColumn}>
-                        <Text
-                          style={[
-                            styles.barValueText,
-                            isPeak ? (activeTrendMetric === "amount" ? styles.barValueMoneyActive : styles.barValueTextActive) : null,
-                          ]}
-                        >
-                          {activeTrendMetric === "amount" ? formatCompactMoney(point.amount) : point.count}
-                        </Text>
-                        <View style={styles.barTrack}>
-                          <View
+                      return (
+                        <View key={`${point.key}:${activeTrendMetric}`} style={[styles.barColumn, { width: barChartSlotWidth }]}>
+                          <Text
+                            numberOfLines={1}
                             style={[
-                              styles.barFill,
-                              {
-                                height: `${barHeight}%`,
-                                backgroundColor:
-                                  isPeak
-                                    ? activeTrendColor
-                                    : activeTrendMetric === "amount"
-                                      ? theme.mode === "dark"
-                                        ? "#4d8367"
-                                        : "#b7ebcf"
-                                      : theme.mode === "dark"
-                                        ? "#4f7698"
-                                        : "#9bd2ff",
-                              },
+                              styles.barValueText,
+                              isPeak ? (activeTrendMetric === "amount" ? styles.barValueMoneyActive : styles.barValueTextActive) : null,
                             ]}
-                          />
+                          >
+                            {activeTrendMetric === "amount" ? formatCompactMoney(point.amount) : point.count}
+                          </Text>
+                          <View style={styles.barTrack}>
+                            <View
+                              style={[
+                                styles.barFill,
+                                {
+                                  height: `${barHeight}%`,
+                                  backgroundColor:
+                                    isPeak
+                                      ? activeTrendColor
+                                      : activeTrendMetric === "amount"
+                                        ? theme.mode === "dark"
+                                          ? "#4d8367"
+                                          : "#b7ebcf"
+                                        : theme.mode === "dark"
+                                          ? "#4f7698"
+                                          : "#9bd2ff",
+                                },
+                              ]}
+                            />
+                          </View>
+                          <Text numberOfLines={2} style={styles.barLabel}>
+                            {point.label}
+                          </Text>
                         </View>
-                        <Text numberOfLines={1} style={styles.barLabel}>
-                          {point.label}
-                        </Text>
-                      </View>
-                    );
-                  })}
+                      );
+                    })}
+                  </ScrollView>
                 </View>
               </Animated.View>
 
@@ -1553,22 +1579,32 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     chartMetricChipLabelActive: {
       color: theme.colors.info,
     },
+    barChartViewport: {
+      marginTop: theme.spacing.xs,
+      borderRadius: theme.radii.md,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.02)" : "#f7fbff",
+      paddingHorizontal: theme.spacing.xs,
+      paddingVertical: theme.spacing.xs,
+    },
     barChartRow: {
       flexDirection: "row",
       alignItems: "flex-end",
       gap: theme.spacing.xs,
-      minHeight: 180,
-      marginTop: theme.spacing.xs,
+      minHeight: 188,
     },
     barColumn: {
-      flex: 1,
       alignItems: "center",
       gap: 6,
     },
     barValueText: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.semibold,
-      fontSize: 11,
+      fontSize: 10,
+      lineHeight: 13,
+      width: "100%",
+      textAlign: "center",
     },
     barValueTextActive: {
       color: theme.colors.info,
@@ -1578,7 +1614,7 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
     barTrack: {
       width: "100%",
-      minHeight: 130,
+      minHeight: 132,
       borderRadius: theme.radii.md,
       backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.05)" : "#edf6fd",
       justifyContent: "flex-end",
@@ -1595,7 +1631,10 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
       fontSize: 11,
+      lineHeight: 14,
       textAlign: "center",
+      width: "100%",
+      minHeight: 28,
     },
     chartFootnote: {
       color: theme.colors.textMuted,
