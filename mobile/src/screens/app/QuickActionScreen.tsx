@@ -47,7 +47,7 @@ type Direction = -1 | 1;
 type ReviewPanelKey = "perfume" | "promo" | "discount" | "notes";
 type ReviewFocusableInputKey = "voucher" | "shippingFee" | "discount" | "notes";
 type InputVisibilityMode = "visible" | "comfort";
-type ScheduleField = "pickup" | "delivery";
+type ScheduleField = "pickup";
 type EditStartStep = "customer" | "services" | "review";
 
 const STEP_ORDER: Step[] = ["customer", "services", "review"];
@@ -1019,7 +1019,7 @@ export function QuickActionScreen() {
     setRequiresPickup(draftRequiresPickup);
     setRequiresDelivery(draftRequiresDelivery);
     setPickupScheduleInput(draft.pickupScheduleInput);
-    setDeliveryScheduleInput(draft.deliveryScheduleInput);
+    setDeliveryScheduleInput("");
     setPickupAddressDraft(draft.pickupAddressDraft);
     setDeliveryAddressDraft(draft.deliveryAddressDraft);
     setCustomerOrdersPreview([]);
@@ -1357,13 +1357,12 @@ export function QuickActionScreen() {
     setErrorMessage(null);
   }
 
-  function openSchedulePicker(field: ScheduleField): void {
-    const currentValue = field === "pickup" ? pickupScheduleInput : deliveryScheduleInput;
-    const parsed = parseScheduleSelection(currentValue);
+  function openSchedulePicker(): void {
+    const parsed = parseScheduleSelection(pickupScheduleInput);
     const now = new Date();
     const fallbackDateToken = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
-    setSchedulePickerField(field);
+    setSchedulePickerField("pickup");
     setSchedulePickerDateToken(parsed?.dateToken ?? fallbackDateToken);
   }
 
@@ -1371,13 +1370,8 @@ export function QuickActionScreen() {
     setSchedulePickerField(null);
   }
 
-  function clearScheduleValue(field: ScheduleField): void {
-    if (field === "pickup") {
-      setPickupScheduleInput("");
-      return;
-    }
-
-    setDeliveryScheduleInput("");
+  function clearScheduleValue(): void {
+    setPickupScheduleInput("");
   }
 
   function applySchedulePicker(): void {
@@ -1386,11 +1380,7 @@ export function QuickActionScreen() {
     }
 
     const nextValue = formatScheduleDisplayValue(schedulePickerDateToken);
-    if (schedulePickerField === "pickup") {
-      setPickupScheduleInput(nextValue);
-    } else {
-      setDeliveryScheduleInput(nextValue);
-    }
+    setPickupScheduleInput(nextValue);
 
     setSchedulePickerField(null);
   }
@@ -1402,13 +1392,8 @@ export function QuickActionScreen() {
 
     if (schedulePickerField === "pickup" && !requiresPickup) {
       setSchedulePickerField(null);
-      return;
     }
-
-    if (schedulePickerField === "delivery" && (!requiresDelivery || requiresPickup)) {
-      setSchedulePickerField(null);
-    }
-  }, [requiresDelivery, requiresPickup, schedulePickerField]);
+  }, [requiresPickup, schedulePickerField]);
 
   useEffect(() => {
     if (!pendingAutoSelectCustomerId || loadingCustomers) {
@@ -1601,7 +1586,7 @@ export function QuickActionScreen() {
     }
 
     const address = resolvedDeliveryAddress;
-    const slot = deliveryScheduleInput.trim();
+    const slot = editingOrderId ? deliveryScheduleInput.trim() : "";
     if (!address && !slot) {
       return undefined;
     }
@@ -1609,9 +1594,9 @@ export function QuickActionScreen() {
     return {
       address: address || undefined,
       address_short: address || undefined,
-      slot: slot || undefined,
+      ...(slot ? { slot } : {}),
     };
-  }, [deliveryScheduleInput, requiresDelivery, resolvedDeliveryAddress]);
+  }, [deliveryScheduleInput, editingOrderId, requiresDelivery, resolvedDeliveryAddress]);
   const customerPackageSummary = useMemo(() => resolveCustomerPackageSummary(selectedCustomer), [selectedCustomer]);
 
   useEffect(() => {
@@ -3049,7 +3034,7 @@ export function QuickActionScreen() {
                               : "Isi jadwal jemput. Item layanan diinput setelah barang dijemput."
                             : "Alamat pelanggan belum diisi. Lengkapi alamat untuk memudahkan jadwal jemput/antar."
                           : requiresDelivery
-                            ? "Pelanggan datang sendiri lalu minta diantar saat selesai. Item layanan wajib diisi sekarang."
+                            ? "Pelanggan datang sendiri lalu minta diantar saat selesai. Jadwal antar otomatis diisi sistem."
                             : "Pelanggan datang dan ambil sendiri. Tanpa ongkir."}
                       </Text>
                       {hasCourierFlow ? (
@@ -3062,14 +3047,14 @@ export function QuickActionScreen() {
                                   {resolvedPickupAddress || "Alamat belum tersedia"}
                                 </Text>
                                 <View style={styles.deliveryScheduleActionRow}>
-                                  <Pressable onPress={() => openSchedulePicker("pickup")} style={({ pressed }) => [styles.deliverySchedulePickerButton, pressed ? styles.pressed : null]}>
+                                  <Pressable onPress={openSchedulePicker} style={({ pressed }) => [styles.deliverySchedulePickerButton, pressed ? styles.pressed : null]}>
                                     <Ionicons color={theme.colors.info} name="calendar-outline" size={14} />
                                     <Text style={[styles.deliverySchedulePickerValue, !pickupScheduleInput.trim() ? styles.deliverySchedulePickerPlaceholder : null]}>
                                       {pickupScheduleInput.trim() || "Pilih tanggal"}
                                     </Text>
                                   </Pressable>
                                   {pickupScheduleInput.trim() ? (
-                                    <Pressable hitSlop={6} onPress={() => clearScheduleValue("pickup")} style={({ pressed }) => [styles.deliveryScheduleClearButton, pressed ? styles.pressed : null]}>
+                                    <Pressable hitSlop={6} onPress={clearScheduleValue} style={({ pressed }) => [styles.deliveryScheduleClearButton, pressed ? styles.pressed : null]}>
                                       <Ionicons color={theme.colors.textMuted} name="close-circle" size={18} />
                                     </Pressable>
                                   ) : null}
@@ -3083,28 +3068,12 @@ export function QuickActionScreen() {
                                   {resolvedDeliveryAddress || "Alamat belum tersedia"}
                                 </Text>
                                 <View style={styles.deliveryScheduleActionRow}>
-                                  {requiresPickup ? (
-                                    <View style={styles.deliverySchedulePickerButton}>
-                                      <Ionicons color={theme.colors.info} name="time-outline" size={14} />
-                                      <Text style={styles.deliverySchedulePickerValue}>
-                                        {deliveryScheduleInput.trim() || "Otomatis setelah input timbang"}
-                                      </Text>
-                                    </View>
-                                  ) : (
-                                    <>
-                                      <Pressable onPress={() => openSchedulePicker("delivery")} style={({ pressed }) => [styles.deliverySchedulePickerButton, pressed ? styles.pressed : null]}>
-                                        <Ionicons color={theme.colors.info} name="calendar-outline" size={14} />
-                                        <Text style={[styles.deliverySchedulePickerValue, !deliveryScheduleInput.trim() ? styles.deliverySchedulePickerPlaceholder : null]}>
-                                          {deliveryScheduleInput.trim() || "Pilih tanggal"}
-                                        </Text>
-                                      </Pressable>
-                                      {deliveryScheduleInput.trim() ? (
-                                        <Pressable hitSlop={6} onPress={() => clearScheduleValue("delivery")} style={({ pressed }) => [styles.deliveryScheduleClearButton, pressed ? styles.pressed : null]}>
-                                          <Ionicons color={theme.colors.textMuted} name="close-circle" size={18} />
-                                        </Pressable>
-                                      ) : null}
-                                    </>
-                                  )}
+                                  <View style={styles.deliverySchedulePickerButton}>
+                                    <Ionicons color={theme.colors.info} name="time-outline" size={14} />
+                                    <Text style={styles.deliverySchedulePickerValue}>
+                                      {deliveryScheduleInput.trim() || "Otomatis oleh sistem"}
+                                    </Text>
+                                  </View>
                                 </View>
                               </View>
                             ) : null}
@@ -3479,7 +3448,7 @@ export function QuickActionScreen() {
                         {requiresPickup ? <Text style={styles.reviewScheduleText}>Jemput: {pickupScheduleInput.trim() || "Belum diatur"}</Text> : null}
                         {requiresDelivery ? (
                           <Text style={styles.reviewScheduleText}>
-                            Antar: {requiresPickup ? deliveryScheduleInput.trim() || "Otomatis setelah input timbang" : deliveryScheduleInput.trim() || "Belum diatur"}
+                            Antar: {deliveryScheduleInput.trim() || "Otomatis oleh sistem"}
                           </Text>
                         ) : null}
                       </View>
@@ -4016,7 +3985,7 @@ export function QuickActionScreen() {
           <Pressable onPress={closeSchedulePicker} style={[styles.scheduleModalBackdrop, { paddingBottom: insets.bottom + theme.spacing.md }]}>
             <Pressable onPress={(event) => event.stopPropagation()} style={styles.scheduleModalCard}>
               <View style={styles.scheduleModalHandle} />
-              <Text style={styles.scheduleModalTitle}>{schedulePickerField === "pickup" ? "Atur Jadwal Jemput" : "Atur Jadwal Antar"}</Text>
+              <Text style={styles.scheduleModalTitle}>Atur Jadwal Jemput</Text>
               <Text style={styles.scheduleModalHint}>Pilih tanggal tanpa mengetik manual.</Text>
 
               <View style={styles.scheduleModalSection}>

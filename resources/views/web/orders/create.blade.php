@@ -202,9 +202,9 @@
                         <input id="delivery_address" type="text" name="delivery_address" value="{{ old('delivery_address') }}" maxlength="255" placeholder="opsional">
                     </div>
                     <div x-show="requiresDelivery" x-cloak>
-                        <label for="delivery_slot">Slot Antar</label>
-                        <input id="delivery_slot" type="text" name="delivery_slot" value="{{ old('delivery_slot') }}" maxlength="80" placeholder="otomatis saat timbang/input item" readonly>
-                        <p class="muted-line">Jadwal antar otomatis = waktu input timbang + durasi layanan terlama.</p>
+                        <label for="delivery_slot_info">Slot Antar</label>
+                        <input id="delivery_slot_info" type="text" value="Otomatis oleh sistem" readonly disabled>
+                        <p class="muted-line">Sistem mengisi jadwal antar otomatis = waktu input timbang + durasi layanan terlama.</p>
                     </div>
                     <p class="muted-line" x-show="!requiresPickup && !requiresDelivery" x-cloak style="grid-column: 1 / -1;">Mode datang sendiri aktif. Ongkir otomatis Rp0.</p>
                 </div>

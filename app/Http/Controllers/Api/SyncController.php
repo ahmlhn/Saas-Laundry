@@ -378,6 +378,9 @@ class SyncController extends Controller
                 orderTime: $orderTime,
                 clientInvoiceNo: $validated['invoice_no'] ?? null
             );
+            $initialDelivery = $requiresDelivery
+                ? $this->withoutScheduleSlot(is_array($validated['delivery'] ?? null) ? $validated['delivery'] : null)
+                : null;
 
             $order = Order::query()->create([
                 'tenant_id' => $user->tenant_id,
@@ -396,7 +399,7 @@ class SyncController extends Controller
                 'paid_amount' => 0,
                 'due_amount' => 0,
                 'pickup' => $requiresPickup ? ($validated['pickup'] ?? null) : null,
-                'delivery' => $requiresDelivery ? ($validated['delivery'] ?? null) : null,
+                'delivery' => $initialDelivery,
                 'notes' => $validated['notes'] ?? null,
                 'created_by' => $user->id,
                 'updated_by' => $user->id,
@@ -411,6 +414,7 @@ class SyncController extends Controller
             ])->save();
 
             $subTotal = 0;
+            $maxDurationMinutes = 0;
             $lastCursor = null;
 
             foreach ($validated['items'] as $item) {
@@ -446,6 +450,7 @@ class SyncController extends Controller
                 $metric = $service->unit_type === 'kg' ? (float) $weight : (float) $qty;
                 $lineSubTotal = (int) round($metric * $unitPrice);
                 $subTotal += $lineSubTotal;
+                $maxDurationMinutes = max($maxDurationMinutes, $this->resolveServiceDurationMinutes($service));
 
                 $orderItem = OrderItem::query()->create([
                     'order_id' => $order->id,
@@ -469,12 +474,22 @@ class SyncController extends Controller
                 $lastCursor = (int) $itemChange->cursor;
             }
 
+            $resolvedDelivery = $initialDelivery;
+            if ($requiresDelivery && count($validated['items']) > 0) {
+                $resolvedDelivery = $this->withAutoDeliverySchedule(
+                    payload: is_array($resolvedDelivery) ? $resolvedDelivery : null,
+                    longestDurationMinutes: $maxDurationMinutes,
+                    baseTime: $orderTime->copy(),
+                );
+            }
+
             $total = max($subTotal + ($isCourierFlow ? (int) ($validated['shipping_fee_amount'] ?? 0) : 0) - (int) ($validated['discount_amount'] ?? 0), 0);
 
             $order->forceFill([
                 'total_amount' => $total,
                 'due_amount' => $total,
                 'paid_amount' => 0,
+                'delivery' => $resolvedDelivery,
                 'updated_at' => $orderTime,
                 'updated_by' => $user->id,
                 'source_channel' => $sourceChannel,
@@ -1008,6 +1023,40 @@ class SyncController extends Controller
         $raw = strtolower((string) $request->header('X-Source-Channel', $fallback));
 
         return in_array($raw, ['mobile', 'web', 'system'], true) ? $raw : $fallback;
+    }
+
+    private function resolveServiceDurationMinutes(Service $service): int
+    {
+        $days = (int) ($service->duration_days ?? 0);
+        $hours = (int) ($service->duration_hours ?? 0);
+
+        return max(($days * 24 * 60) + ($hours * 60), 0);
+    }
+
+    private function withAutoDeliverySchedule(?array $payload, int $longestDurationMinutes, Carbon $baseTime): array
+    {
+        $minutes = max($longestDurationMinutes, 0);
+        $scheduledAt = $baseTime->copy()->addMinutes($minutes);
+        $next = is_array($payload) ? $payload : [];
+
+        $next['slot'] = $scheduledAt->format('Y-m-d H:i');
+        $next['slot_auto'] = true;
+        $next['slot_generated_at'] = $baseTime->toIso8601String();
+        $next['slot_generated_duration_minutes'] = $minutes;
+
+        return $next;
+    }
+
+    private function withoutScheduleSlot(?array $payload): ?array
+    {
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        $next = $payload;
+        unset($next['slot'], $next['schedule_slot'], $next['date']);
+
+        return $next;
     }
 
     private function normalizePhone(string $phone): ?string

@@ -117,6 +117,39 @@ class OrderApiTest extends TestCase
         ]);
     }
 
+    public function test_create_order_ignores_manual_delivery_slot_and_sets_auto_schedule(): void
+    {
+        $response = $this->apiAs($this->cashier)->postJson('/api/orders', [
+            'outlet_id' => $this->outlet->id,
+            'order_code' => 'ORD-AUTO-DELIVERY',
+            'requires_pickup' => false,
+            'requires_delivery' => true,
+            'customer' => [
+                'name' => 'Delivery Auto',
+                'phone' => '0812 7777 8888',
+            ],
+            'delivery' => [
+                'address' => 'Jl. Mawar 10',
+                'slot' => 'manual-slot-from-client',
+            ],
+            'items' => [
+                [
+                    'service_id' => $this->kgService->id,
+                    'weight_kg' => 1.5,
+                ],
+            ],
+        ]);
+
+        $response
+            ->assertCreated()
+            ->assertJsonPath('data.delivery.address', 'Jl. Mawar 10')
+            ->assertJsonPath('data.delivery.slot_auto', true);
+
+        $slot = data_get($response->json(), 'data.delivery.slot');
+        $this->assertIsString($slot);
+        $this->assertNotSame('manual-slot-from-client', $slot);
+    }
+
     public function test_create_order_upserts_customer_by_phone_per_tenant(): void
     {
         $payload = [

@@ -213,6 +213,9 @@ class OrderController extends Controller
         $shippingFee = $isCourierFlow ? (int) ($validated['shipping_fee_amount'] ?? 0) : 0;
         $discount = (int) ($validated['discount_amount'] ?? 0);
         $items = $this->normalizeSubmittedItems($validated['items'] ?? []);
+        $createDeliveryPayload = $requiresDelivery
+            ? $this->withoutScheduleSlot(is_array($validated['delivery'] ?? null) ? $validated['delivery'] : null)
+            : null;
 
         if (! $requiresPickup && count($items) === 0) {
             throw ValidationException::withMessages([
@@ -261,7 +264,7 @@ class OrderController extends Controller
         }
 
         try {
-            $order = DB::transaction(function () use ($validated, $tenantId, $outletId, $isCourierFlow, $requiresPickup, $requiresDelivery, $shippingFee, $discount, $actorUserId, $sourceChannel, $items, $selectedCourier): Order {
+            $order = DB::transaction(function () use ($validated, $tenantId, $outletId, $isCourierFlow, $requiresPickup, $requiresDelivery, $shippingFee, $discount, $actorUserId, $sourceChannel, $items, $selectedCourier, $createDeliveryPayload): Order {
                 $this->quotaService->consumeOrderSlot($tenantId);
 
                 $phone = $this->normalizePhone($validated['customer']['phone']);
@@ -298,7 +301,7 @@ class OrderController extends Controller
                     'paid_amount' => 0,
                     'due_amount' => 0,
                     'pickup' => $requiresPickup ? ($validated['pickup'] ?? null) : null,
-                    'delivery' => $requiresDelivery ? ($validated['delivery'] ?? null) : null,
+                    'delivery' => $createDeliveryPayload,
                     'notes' => $validated['notes'] ?? null,
                     'created_by' => $actorUserId,
                     'updated_by' => $actorUserId,
@@ -361,7 +364,7 @@ class OrderController extends Controller
                     ]);
                 }
 
-                $resolvedDelivery = $requiresDelivery ? ($validated['delivery'] ?? null) : null;
+                $resolvedDelivery = $createDeliveryPayload;
                 if ($requiresDelivery && count($items) > 0) {
                     $resolvedDelivery = $this->withAutoDeliverySchedule(
                         payload: is_array($resolvedDelivery) ? $resolvedDelivery : null,
@@ -1520,6 +1523,18 @@ class OrderController extends Controller
         $slot = trim((string) ($schedule['slot'] ?? $schedule['schedule_slot'] ?? $schedule['date'] ?? ''));
 
         return $slot !== '';
+    }
+
+    private function withoutScheduleSlot(?array $payload): ?array
+    {
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        $next = $payload;
+        unset($next['slot'], $next['schedule_slot'], $next['date']);
+
+        return $next;
     }
 
     private function resolveInitialCourierStatus(bool $requiresPickup, bool $requiresDelivery): ?string
