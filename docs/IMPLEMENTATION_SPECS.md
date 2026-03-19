@@ -1,7 +1,7 @@
 # Implementation Specs (Merged) — SaaS Laundry
 Version: 1.1
 Status: READY-FOR-EXECUTION-PLAN (mengacu ke SAAS_LAUNDRY_BLUEPRINT.md yang LOCKED)
-Backend: Laravel 12
+Backend: Laravel 13
 Clients:
 - Mobile (Android/iOS): offline-first + sync
 - Web: online-first (PWA kasir offline terbatas opsional)
@@ -409,7 +409,7 @@ Indexes:
 
 ## 8) Target Arsitektur Implementasi (MVP)
 
-### 8.1 Backend (Laravel 12)
+### 8.1 Backend (Laravel 13)
 Pisahkan per bounded-context agar maintainable:
 - Identity & Access: auth, role, outlet assignment, policy/guard
 - Master Data: customers, services, outlet overrides, shipping zones
@@ -651,7 +651,7 @@ Audit event minimum:
 
 ### Phase 0 - Foundation (Week 1)
 Deliverables:
-- setup project Laravel 12, auth baseline, multi-tenant scoping
+- setup project Laravel 13, auth baseline, multi-tenant scoping
 - migration core tables: tenant/outlet/user/role/customer/service/order/payment
 - seed plans + roles
 

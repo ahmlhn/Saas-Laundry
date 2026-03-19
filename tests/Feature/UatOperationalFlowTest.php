@@ -154,15 +154,11 @@ class UatOperationalFlowTest extends TestCase
             'status' => 'delivery_on_the_way',
         ])->assertOk();
 
-        $this->apiAs($this->courier)->postJson("/api/orders/{$orderId}/status/courier", [
-            'status' => 'delivered',
-        ])->assertOk();
-
-        $detailAfterDelivery = $this->apiAs($this->admin)
+        $detailBeforeDelivery = $this->apiAs($this->admin)
             ->getJson("/api/orders/{$orderId}")
             ->assertOk();
 
-        $totalAmount = (int) $detailAfterDelivery->json('data.total_amount');
+        $totalAmount = (int) $detailBeforeDelivery->json('data.total_amount');
         $firstPaymentAmount = 20000;
         $secondPaymentAmount = max($totalAmount - $firstPaymentAmount, 1);
 
@@ -175,6 +171,10 @@ class UatOperationalFlowTest extends TestCase
             'amount' => $secondPaymentAmount,
             'method' => 'qris',
         ])->assertCreated();
+
+        $this->apiAs($this->courier)->postJson("/api/orders/{$orderId}/status/courier", [
+            'status' => 'delivered',
+        ])->assertOk();
 
         $this->apiAs($this->admin)
             ->getJson("/api/orders/{$orderId}")

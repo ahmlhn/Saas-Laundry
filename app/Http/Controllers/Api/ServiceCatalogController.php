@@ -23,7 +23,7 @@ class ServiceCatalogController extends Controller
 
     private const SERVICE_TYPES = ['regular', 'package', 'perfume', 'item'];
 
-    private const DISPLAY_UNITS = ['kg', 'pcs', 'meter'];
+    private const DISPLAY_UNITS = ['kg', 'pcs', 'meter', 'satuan'];
 
     private const PACKAGE_QUOTA_UNITS = ['kg', 'pcs'];
 

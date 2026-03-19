@@ -1,4 +1,4 @@
-# SaaS Laundry (Laravel 12)
+# SaaS Laundry (Laravel 13)
 
 Backend + web panel MVP untuk aplikasi laundry multi-tenant.
 
@@ -15,7 +15,7 @@ Backend + web panel MVP untuk aplikasi laundry multi-tenant.
 - Web management lifecycle: archive/restore `users/outlets` (owner-only) + `customers/services` (owner/admin)
 
 ## Requirements
-- PHP 8.2+
+- PHP 8.3+
 - Composer
 - Node.js 20+
 - MySQL 8+
@@ -121,6 +121,8 @@ Jika mobile app dijalankan di Android fisik terhadap backend lokal, set `EXPO_PU
   - `php artisan ops:wa:redrive-failed --limit=100`
 - Reconcile quota usage:
   - `php artisan ops:quota:reconcile`
+- Preflight upgrade Laravel 13:
+  - `pwsh -File tools/laravel13-upgrade-preflight.ps1`
 
 ## CI
 Workflow tersedia di:
@@ -165,6 +167,7 @@ Workflow deploy akan jalan saat:
 
 ## Dokumentasi
 - `docs/IMPLEMENTATION_SPECS.md`
+- `docs/LARAVEL_13_UPGRADE_CHECKLIST.md`
 - `docs/SYNC_API_CONTRACT.md`
 - `docs/OBSERVABILITY_BASELINE.md`
 - `docs/OPERATIONS_RUNBOOK.md`

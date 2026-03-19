@@ -1,7 +1,7 @@
 # SaaS Laundry Blueprint (Mobile + Web, Multi-Tenant, Multi-Outlet, Offline-First)
 Version: 1.1
 Status: LOCKED (perencanaan final sebelum implementasi)
-Backend: Laravel 12 (API + domain + billing + messaging)
+Backend: Laravel 13 (API + domain + billing + messaging)
 Clients:
 - Mobile App: Android & iOS (cross-platform)
 - Web App: Owner/Admin panel + opsional Kasir POS

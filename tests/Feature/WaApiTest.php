@@ -310,7 +310,7 @@ class WaApiTest extends TestCase
         $this->assertSame(2, WaMessage::query()->where('order_id', $orderId)->count());
     }
 
-    public function test_non_pickup_order_creation_also_enqueues_wa_confirmation_message(): void
+    public function test_non_pickup_order_creation_does_not_enqueue_pickup_confirmation_message(): void
     {
         $this->setPlan('premium');
 
@@ -340,14 +340,13 @@ class WaApiTest extends TestCase
 
         $orderId = $response->json('data.id');
 
-        $this->assertDatabaseHas('wa_messages', [
+        $this->assertDatabaseMissing('wa_messages', [
             'tenant_id' => $this->tenant->id,
             'order_id' => $orderId,
             'template_id' => 'WA_PICKUP_CONFIRM',
-            'status' => 'sent',
-            'created_by' => $this->admin->id,
-            'source_channel' => 'system',
         ]);
+
+        $this->assertSame(0, WaMessage::query()->where('order_id', $orderId)->count());
     }
 
     public function test_send_job_retries_transient_failure_until_failed(): void

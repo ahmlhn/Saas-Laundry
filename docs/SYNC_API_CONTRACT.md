@@ -1,7 +1,7 @@
 # Sync API Contract (MVP) — SaaS Laundry (Mobile Offline-First + Web Online-First)
 Version: 1.0
 Status: DRAFT-FOR-IMPLEMENTATION (mengacu pada BLUEPRINT yang LOCKED)
-Backend: Laravel 12
+Backend: Laravel 13
 Clients:
 - Mobile (Android/iOS): offline-first, outbox mutations
 - Web: online-first (PWA offline kasir opsional)

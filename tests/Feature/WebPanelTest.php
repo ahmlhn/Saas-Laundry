@@ -175,6 +175,50 @@ class WebPanelTest extends TestCase
             'due_amount' => 18000,
         ]);
 
+        OrderItem::query()->create([
+            'order_id' => $this->orderA->id,
+            'service_id' => $this->service->id,
+            'service_name_snapshot' => $this->service->name,
+            'unit_type_snapshot' => 'kg',
+            'qty' => null,
+            'weight_kg' => 2.0,
+            'unit_price_amount' => 12500,
+            'subtotal_amount' => 25000,
+        ]);
+
+        OrderItem::query()->create([
+            'order_id' => $this->courierOrderReady->id,
+            'service_id' => $this->service->id,
+            'service_name_snapshot' => $this->service->name,
+            'unit_type_snapshot' => 'kg',
+            'qty' => null,
+            'weight_kg' => 3.0,
+            'unit_price_amount' => 10000,
+            'subtotal_amount' => 30000,
+        ]);
+
+        OrderItem::query()->create([
+            'order_id' => $this->courierOrderBlocked->id,
+            'service_id' => $this->service->id,
+            'service_name_snapshot' => $this->service->name,
+            'unit_type_snapshot' => 'kg',
+            'qty' => null,
+            'weight_kg' => 3.0,
+            'unit_price_amount' => 10000,
+            'subtotal_amount' => 30000,
+        ]);
+
+        OrderItem::query()->create([
+            'order_id' => $this->walkInOrder->id,
+            'service_id' => $this->service->id,
+            'service_name_snapshot' => $this->service->name,
+            'unit_type_snapshot' => 'kg',
+            'qty' => null,
+            'weight_kg' => 2.0,
+            'unit_price_amount' => 9000,
+            'subtotal_amount' => 18000,
+        ]);
+
         $foreignCustomer = Customer::query()->create([
             'tenant_id' => $this->tenantB->id,
             'name' => 'Customer Foreign',
@@ -1097,9 +1141,9 @@ class WebPanelTest extends TestCase
             'tenant_id' => $tenant,
             'outlet_id' => $this->outletA->id,
             'invoice_no' => 'INV-WEB-TX-001',
-            'total_amount' => 19000,
+            'total_amount' => 17000,
             'paid_amount' => 0,
-            'due_amount' => 19000,
+            'due_amount' => 17000,
             'source_channel' => 'web',
         ]);
 
@@ -1258,8 +1302,8 @@ class WebPanelTest extends TestCase
         $this->assertDatabaseHas('orders', [
             'id' => $order->id,
             'tenant_id' => $tenant,
-            'total_amount' => 31500, // (1.5*9000)+(3*5500)+2000-500
-            'due_amount' => 31500,
+            'total_amount' => 29500, // (1.5*9000)+(3*5500)-500
+            'due_amount' => 29500,
             'paid_amount' => 0,
         ]);
 
