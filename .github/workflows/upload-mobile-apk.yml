@@ -1,0 +1,202 @@
+name: Upload Mobile APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub release tag yang menyimpan asset APK draft.
+        required: true
+        type: string
+      asset_name:
+        description: Nama file APK asset di GitHub release.
+        required: true
+        type: string
+      version:
+        description: Version app Android.
+        required: true
+        type: string
+      build:
+        description: Build number Android.
+        required: true
+        type: string
+      minimum_supported_version:
+        description: Minimum supported version. Kosongkan jika tidak dipaksa.
+        required: false
+        default: ""
+        type: string
+      public_base_url:
+        description: Base URL publik untuk download APK.
+        required: true
+        default: https://saas.daratlaut.com
+        type: string
+      checksum_sha256:
+        description: Checksum SHA256 APK.
+        required: true
+        type: string
+      file_size_bytes:
+        description: Ukuran file APK dalam bytes.
+        required: true
+        type: string
+      release_notes:
+        description: Catatan rilis, satu baris per catatan.
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: upload-mobile-apk-${{ github.event.inputs.version }}-${{ github.event.inputs.build }}
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+
+    steps:
+      - name: Validate deploy credentials
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          [ -n "${DEPLOY_HOST:-}" ] || { echo "Secret DEPLOY_HOST belum diisi."; exit 1; }
+          [ -n "${DEPLOY_PORT:-}" ] || { echo "Secret DEPLOY_PORT belum diisi."; exit 1; }
+          [ -n "${DEPLOY_USER:-}" ] || { echo "Secret DEPLOY_USER belum diisi."; exit 1; }
+          if [ -z "${DEPLOY_SSH_KEY:-}" ] && [ -z "${DEPLOY_PASSWORD:-}" ]; then
+            echo "Isi minimal salah satu: DEPLOY_SSH_KEY atau DEPLOY_PASSWORD."
+            exit 1
+          fi
+
+      - name: Download APK asset from draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          ASSET_NAME: ${{ inputs.asset_name }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$ASSET_NAME" --dir dist
+          [ -f "dist/$ASSET_NAME" ] || { echo "APK asset tidak ditemukan: $ASSET_NAME"; exit 1; }
+          sha256sum "dist/$ASSET_NAME"
+          stat -c%s "dist/$ASSET_NAME"
+
+      - name: Upload APK file to server home temp folder
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          passphrase: ${{ secrets.DEPLOY_SSH_PASSPHRASE }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          source: dist/${{ inputs.asset_name }}
+          target: tmp-mobile-release
+          timeout: 180s
+
+      - name: Publish APK on server and update release metadata
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_PATH: ${{ vars.DEPLOY_PATH }}
+          PHP_BIN: ${{ vars.DEPLOY_PHP_BIN }}
+          PUBLIC_BASE_URL: ${{ inputs.public_base_url }}
+          VERSION: ${{ inputs.version }}
+          BUILD_NUMBER: ${{ inputs.build }}
+          MINIMUM_SUPPORTED_VERSION: ${{ inputs.minimum_supported_version }}
+          CHECKSUM_SHA256: ${{ inputs.checksum_sha256 }}
+          FILE_SIZE_BYTES: ${{ inputs.file_size_bytes }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          APK_ASSET_NAME: ${{ inputs.asset_name }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          passphrase: ${{ secrets.DEPLOY_SSH_PASSPHRASE }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          timeout: 180s
+          command_timeout: 45m
+          envs: APP_PATH,PHP_BIN,PUBLIC_BASE_URL,VERSION,BUILD_NUMBER,MINIMUM_SUPPORTED_VERSION,CHECKSUM_SHA256,FILE_SIZE_BYTES,RELEASE_NOTES,APK_ASSET_NAME
+          script: |
+            set -euo pipefail
+
+            [ -f "$HOME/.bash_profile" ] && . "$HOME/.bash_profile" || true
+            [ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc" || true
+            [ -f "$HOME/.profile" ] && . "$HOME/.profile" || true
+
+            APP_PATH="${APP_PATH:-$HOME/domains/daratlaut.com/public_html/laundry}"
+            PHP_BIN="${PHP_BIN:-php}"
+            PUBLIC_BASE_URL="$(printf '%s' "${PUBLIC_BASE_URL:-https://saas.daratlaut.com}" | sed 's:/*$::')"
+            BUILD_NUMBER="${BUILD_NUMBER:-1}"
+            TMP_FILE="$HOME/tmp-mobile-release/dist/$APK_ASSET_NAME"
+            STORAGE_RELATIVE_PATH="mobile-releases/android/$APK_ASSET_NAME"
+            STORAGE_ABSOLUTE_PATH="$APP_PATH/storage/app/public/$STORAGE_RELATIVE_PATH"
+
+            if [[ "$APP_PATH" == ~* ]]; then
+              APP_PATH="${APP_PATH/#\~/$HOME}"
+              STORAGE_ABSOLUTE_PATH="$APP_PATH/storage/app/public/$STORAGE_RELATIVE_PATH"
+            fi
+
+            [ -f "$TMP_FILE" ] || { echo "APK temp tidak ditemukan di server: $TMP_FILE"; exit 1; }
+
+            mkdir -p "$(dirname "$STORAGE_ABSOLUTE_PATH")"
+            mv -f "$TMP_FILE" "$STORAGE_ABSOLUTE_PATH"
+            rm -rf "$HOME/tmp-mobile-release"
+
+            cd "$APP_PATH"
+            "$PHP_BIN" artisan storage:link || true
+
+            cat > /tmp/update_mobile_release.php <<'PHP'
+            <?php
+
+            declare(strict_types=1);
+
+            use App\Models\MobileReleaseSetting;
+            use Illuminate\Contracts\Console\Kernel;
+            use Illuminate\Support\Carbon;
+
+            $appPath = rtrim((string) getenv('APP_PATH'), DIRECTORY_SEPARATOR);
+
+            require $appPath.'/vendor/autoload.php';
+            $app = require $appPath.'/bootstrap/app.php';
+            $app->make(Kernel::class)->bootstrap();
+
+            $releaseNotesRaw = (string) getenv('RELEASE_NOTES');
+            $releaseNotes = preg_split('/\r\n|\r|\n/', trim($releaseNotesRaw)) ?: [];
+            $releaseNotes = array_values(array_filter(array_map(
+                static fn (string $value): string => trim($value),
+                $releaseNotes
+            ), static fn (string $value): bool => $value !== ''));
+
+            $baseUrl = rtrim((string) getenv('PUBLIC_BASE_URL'), '/');
+            $relativePath = ltrim((string) getenv('STORAGE_RELATIVE_PATH'), '/');
+            $minimumSupportedVersion = trim((string) getenv('MINIMUM_SUPPORTED_VERSION'));
+
+            $setting = MobileReleaseSetting::query()->firstOrNew(['platform' => 'android']);
+            $setting->version = trim((string) getenv('VERSION'));
+            $setting->build = max(1, (int) getenv('BUILD_NUMBER'));
+            $setting->download_url = $baseUrl.'/storage/'.$relativePath;
+            $setting->uploaded_file_disk = 'public';
+            $setting->uploaded_file_path = $relativePath;
+            $setting->uploaded_original_name = trim((string) getenv('APK_ASSET_NAME'));
+            $setting->minimum_supported_version = $minimumSupportedVersion !== '' ? $minimumSupportedVersion : null;
+            $setting->published_at = Carbon::now();
+            $setting->checksum_sha256 = strtolower(trim((string) getenv('CHECKSUM_SHA256')));
+            $setting->file_size_bytes = max(1, (int) getenv('FILE_SIZE_BYTES'));
+            $setting->release_notes = $releaseNotes;
+            $setting->save();
+
+            echo $setting->download_url.PHP_EOL;
+            PHP
+
+            export STORAGE_RELATIVE_PATH
+            "$PHP_BIN" /tmp/update_mobile_release.php
+            rm -f /tmp/update_mobile_release.php
+
+            ls -lh "$STORAGE_ABSOLUTE_PATH"
