@@ -1,6 +1,4 @@
 import Constants from "expo-constants";
-import * as Device from "expo-device";
-import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { EXPO_PROJECT_ID } from "../../config/env";
 import { getOrCreateDeviceId } from "../sync/deviceIdentity";
@@ -8,14 +6,80 @@ import { upsertDevicePushToken } from "./notificationApi";
 
 const ANDROID_CHANNEL_ID = "default";
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+type NotificationsModule = typeof import("expo-notifications");
+type DeviceModule = typeof import("expo-device");
+
+let notificationsModuleCache: NotificationsModule | null | undefined;
+let deviceModuleCache: DeviceModule | null | undefined;
+let notificationHandlerConfigured = false;
+let notificationModuleWarningShown = false;
+let deviceModuleWarningShown = false;
+
+function getNotificationsModule(): NotificationsModule | null {
+  if (notificationsModuleCache !== undefined) {
+    return notificationsModuleCache;
+  }
+
+  try {
+    notificationsModuleCache = require("expo-notifications") as NotificationsModule;
+  } catch (error) {
+    notificationsModuleCache = null;
+    if (!notificationModuleWarningShown) {
+      notificationModuleWarningShown = true;
+      console.warn("[PushNotifications] Native module expo-notifications belum tersedia di build ini.", error);
+    }
+  }
+
+  return notificationsModuleCache;
+}
+
+function getDeviceModule(): DeviceModule | null {
+  if (deviceModuleCache !== undefined) {
+    return deviceModuleCache;
+  }
+
+  try {
+    deviceModuleCache = require("expo-device") as DeviceModule;
+  } catch (error) {
+    deviceModuleCache = null;
+    if (!deviceModuleWarningShown) {
+      deviceModuleWarningShown = true;
+      console.warn("[PushNotifications] Native module expo-device belum tersedia di build ini.", error);
+    }
+  }
+
+  return deviceModuleCache;
+}
+
+function ensureNotificationHandlerConfigured(): NotificationsModule | null {
+  const Notifications = getNotificationsModule();
+  if (!Notifications || notificationHandlerConfigured) {
+    return Notifications;
+  }
+
+  try {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      }),
+    });
+
+    notificationHandlerConfigured = true;
+  } catch (error) {
+    console.warn("[PushNotifications] Gagal menyiapkan notification handler.", error);
+    notificationsModuleCache = null;
+    return null;
+  }
+
+  return Notifications;
+}
+
+export function getAvailableNotificationsModule(): NotificationsModule | null {
+  return ensureNotificationHandlerConfigured();
+}
 
 function resolveProjectId(): string {
   const fromConfig = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
@@ -31,7 +95,8 @@ function normalizePermissionStatus(status: string | null | undefined): string | 
 }
 
 async function ensureAndroidChannelAsync(): Promise<void> {
-  if (Platform.OS !== "android") {
+  const Notifications = ensureNotificationHandlerConfigured();
+  if (!Notifications || Platform.OS !== "android") {
     return;
   }
 
@@ -45,6 +110,12 @@ async function ensureAndroidChannelAsync(): Promise<void> {
 
 export async function registerDeviceForPushNotificationsAsync(): Promise<string | null> {
   const deviceId = await getOrCreateDeviceId();
+  const Notifications = ensureNotificationHandlerConfigured();
+  const Device = getDeviceModule();
+
+  if (!Notifications || !Device) {
+    return null;
+  }
 
   await ensureAndroidChannelAsync();
 

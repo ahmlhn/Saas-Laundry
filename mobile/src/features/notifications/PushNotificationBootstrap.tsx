@@ -1,9 +1,8 @@
-import * as Notifications from "expo-notifications";
 import { useEffect, useRef } from "react";
 import { useConnectivity } from "../connectivity/ConnectivityContext";
 import { useSession } from "../../state/SessionContext";
 import { navigateFromPushPayload } from "./notificationNavigation";
-import { registerDeviceForPushNotificationsAsync } from "./pushNotificationService";
+import { getAvailableNotificationsModule, registerDeviceForPushNotificationsAsync } from "./pushNotificationService";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -16,12 +15,19 @@ export function PushNotificationBootstrap() {
   const handledNotificationIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    const Notifications = getAvailableNotificationsModule();
+    if (!Notifications) {
+      return;
+    }
+
     const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
       handledNotificationIdRef.current = response.notification.request.identifier;
 
       const data = isRecord(response.notification.request.content.data) ? response.notification.request.content.data : {};
       navigateFromPushPayload(data);
-      void Notifications.clearLastNotificationResponseAsync().catch(() => undefined);
+      if (typeof Notifications.clearLastNotificationResponseAsync === "function") {
+        void Notifications.clearLastNotificationResponseAsync().catch(() => undefined);
+      }
     });
 
     return () => {
@@ -31,6 +37,11 @@ export function PushNotificationBootstrap() {
 
   useEffect(() => {
     if (booting || !session) {
+      return;
+    }
+
+    const Notifications = getAvailableNotificationsModule();
+    if (!Notifications || typeof Notifications.getLastNotificationResponseAsync !== "function") {
       return;
     }
 
@@ -50,7 +61,9 @@ export function PushNotificationBootstrap() {
         handledNotificationIdRef.current = identifier;
         const data = isRecord(response.notification.request.content.data) ? response.notification.request.content.data : {};
         navigateFromPushPayload(data);
-        return Notifications.clearLastNotificationResponseAsync();
+        if (typeof Notifications.clearLastNotificationResponseAsync === "function") {
+          return Notifications.clearLastNotificationResponseAsync();
+        }
       })
       .catch(() => undefined);
 
