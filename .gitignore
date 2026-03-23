@@ -23,4 +23,5 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 /.venv-tools
+/.expo
 /tmp/video-frames

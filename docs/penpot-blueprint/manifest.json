@@ -1,0 +1,24 @@
+{
+  "generatedAt": "2026-03-23T15:20:21.816Z",
+  "width": 360,
+  "height": 800,
+  "fonts": [
+    "Manrope"
+  ],
+  "files": [
+    "00-foundations.svg",
+    "01-login.svg",
+    "02-outlet-select.svg",
+    "03-home-default.svg",
+    "04-home-alt-command-center.svg",
+    "05-home-alt-urgent-first.svg",
+    "06-home-alt-role-adaptive.svg",
+    "07-orders.svg",
+    "08-order-create-step-1-customer.svg",
+    "09-order-create-step-2-services.svg",
+    "10-order-create-step-3-review.svg",
+    "11-order-detail.svg",
+    "12-payment.svg",
+    "13-account.svg"
+  ]
+}

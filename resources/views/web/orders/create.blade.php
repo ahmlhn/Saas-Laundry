@@ -195,7 +195,7 @@
                     </div>
                     <div x-show="requiresPickup" x-cloak>
                         <label for="pickup_slot">Slot Jemput</label>
-                        <input id="pickup_slot" type="text" name="pickup_slot" value="{{ old('pickup_slot') }}" maxlength="80" placeholder="contoh: 09:00-11:00" :required="requiresPickup">
+                        <input id="pickup_slot" type="text" name="pickup_slot" value="{{ old('pickup_slot', now()->format('Y-m-d')) }}" maxlength="80" placeholder="default hari ini, bisa diubah" :required="requiresPickup">
                     </div>
                     <div x-show="requiresDelivery" x-cloak>
                         <label for="delivery_address">Alamat Antar</label>
