@@ -1,11 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
+import { useBottomTabBarHeight, type BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Easing, Pressable, RefreshControl, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Animated, Easing, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppPanel } from "../../components/ui/AppPanel";
+import { listNotifications } from "../../features/notifications/notificationApi";
 import { countOrdersByBucket, type OrderBucket } from "../../features/orders/orderBuckets";
 import { listOrders } from "../../features/orders/orderApi";
 import { toDateToken } from "../../lib/dateTime";
@@ -435,7 +437,9 @@ export function HomeDashboardScreen() {
   const minEdge = Math.min(width, height);
   const isLandscape = width > height;
   const isTablet = minEdge >= 600;
-  const styles = useMemo(() => createStyles(theme, isTablet, isLandscape), [theme, isTablet, isLandscape]);
+  const bottomTabBarHeight = useBottomTabBarHeight();
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => createStyles(theme, isTablet, isLandscape, insets.top), [theme, isTablet, isLandscape, insets.top]);
   const navigation = useNavigation<Navigation>();
   const { selectedOutlet, session } = useSession();
   const outletId = selectedOutlet?.id;
@@ -446,6 +450,7 @@ export function HomeDashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const firstFocusHandledRef = useRef(false);
   const entranceProgress = useRef(new Animated.Value(0)).current;
@@ -504,13 +509,32 @@ export function HomeDashboardScreen() {
     [outletId, outletTimezone]
   );
 
+  const loadNotificationSummary = useCallback(async (): Promise<void> => {
+    if (!session) {
+      setNotificationUnreadCount(0);
+      return;
+    }
+
+    try {
+      const payload = await listNotifications({
+        limit: 1,
+      });
+      setNotificationUnreadCount(payload.unread_count);
+    } catch {
+      setNotificationUnreadCount((current) => current);
+    }
+  }, [session]);
+
   useEffect(() => {
     firstFocusHandledRef.current = false;
     void loadDashboard(true, "initial");
-  }, [outletId, loadDashboard]);
+    void loadNotificationSummary();
+  }, [outletId, loadDashboard, loadNotificationSummary]);
 
   useFocusEffect(
     useCallback(() => {
+      void loadNotificationSummary();
+
       if (!outletId) {
         return;
       }
@@ -521,7 +545,7 @@ export function HomeDashboardScreen() {
       }
 
       void loadDashboard(true, orders.length > 0 ? "refresh" : "initial");
-    }, [loadDashboard, orders.length, outletId])
+    }, [loadDashboard, loadNotificationSummary, orders.length, outletId])
   );
 
   const heroAnimatedStyle = useMemo(
@@ -745,225 +769,259 @@ export function HomeDashboardScreen() {
   }
 
   return (
-    <AppScreen
-      contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => {
-            void loadDashboard(true, "refresh");
-          }}
-          colors={[theme.colors.info]}
-          progressBackgroundColor={theme.colors.surface}
-          tintColor={theme.colors.info}
-        />
-      }
-      scroll
-    >
-      <Animated.View style={[styles.heroCard, heroAnimatedStyle]}>
-        <View style={styles.heroGradientBase} />
-        <View style={styles.heroGradientEdge} />
-        <View style={styles.heroRing} />
-        <View style={styles.heroWave} />
-        <View style={styles.heroWaveAccent} />
-
-        <View style={styles.heroTopRow}>
-          <Text style={styles.heroEyebrow}>{heroState.eyebrow}</Text>
-          <View style={styles.liveChip}>
-            <Text style={styles.liveChipText}>{liveLabel}</Text>
+    <AppScreen backgroundColor={theme.mode === "dark" ? theme.colors.background : "#ffffff"} contentContainerStyle={styles.screenRoot} safeAreaEdges={["right", "left"]} showBackdrop={false}>
+      <View style={styles.appHeader}>
+        <View style={styles.heroBrandLockup}>
+          <View style={styles.heroBrandMarkWrap}>
+            <Image source={require("../../../assets/brand-mark.png")} style={styles.heroBrandMark} />
+          </View>
+          <View style={styles.heroBrandCopy}>
+            <Text style={styles.heroBrandName}>cuci</Text>
           </View>
         </View>
+        <Pressable onPress={() => navigation.navigate("AccountTab", { screen: "Notifications" })} style={({ pressed }) => [styles.heroNotificationButton, pressed ? styles.heroNotificationButtonPressed : null]}>
+          <Ionicons color={theme.colors.textMuted} name="notifications-outline" size={24} />
+          {notificationUnreadCount > 0 ? (
+            <View style={styles.notificationBadge}>
+              <Text style={styles.notificationBadgeText}>{notificationUnreadCount > 99 ? "99+" : notificationUnreadCount}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+      </View>
 
-        <Text style={styles.heroTitle}>{heroState.title}</Text>
-        <Text style={styles.heroSubtitle}>{heroState.subtitle}</Text>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: theme.spacing.xl + bottomTabBarHeight }]}
+        keyboardDismissMode="on-drag"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              void loadDashboard(true, "refresh");
+              void loadNotificationSummary();
+            }}
+            colors={[theme.colors.info]}
+            progressBackgroundColor={theme.colors.surface}
+            tintColor={theme.colors.info}
+          />
+        }
+        showsVerticalScrollIndicator={false}
+        style={styles.bodyScroll}
+      >
+        <Animated.View style={[styles.heroCard, heroAnimatedStyle]}>
+          <Text style={styles.heroTitle}>{heroState.title}</Text>
+          <Text style={styles.heroSubtitle}>{heroState.subtitle}</Text>
 
-        <View style={styles.heroModeRow}>
-          <View style={styles.heroModeChip}>
-            <Ionicons color="#ffffff" name={currentModeMeta.icon} size={14} />
-            <Text style={styles.heroModeChipText}>{currentModeMeta.shortLabel}</Text>
+          <View style={styles.heroChipRow}>
+            <View style={styles.heroModeChip}>
+              <Ionicons color={theme.colors.success} name={currentModeMeta.icon} size={14} />
+              <Text style={styles.heroModeChipText}>{currentModeMeta.shortLabel}</Text>
+            </View>
+            <View style={styles.liveChip}>
+              <Text style={styles.liveChipText}>{liveLabel}</Text>
+            </View>
           </View>
-          <Text style={styles.heroModeHint}>{currentModeMeta.hint}</Text>
-        </View>
 
-        <View style={styles.heroStatRow}>
-          <View style={styles.heroStatBlock}>
-            <Text style={styles.heroStatValue}>{heroState.primaryValue}</Text>
-            <Text style={styles.heroStatLabel}>{heroState.primaryLabel}</Text>
+          <View style={styles.heroStatRow}>
+            <Pressable onPress={() => handleOpenOrders(null)} style={({ pressed }) => [styles.heroStatCard, pressed ? styles.heroStatCardPressed : null]}>
+              <Text style={styles.heroStatValue}>{heroState.primaryValue}</Text>
+              <Text style={styles.heroStatLabel}>{heroState.primaryLabel}</Text>
+            </Pressable>
+            <Pressable onPress={() => handleOpenOrders(null)} style={({ pressed }) => [styles.heroStatCard, pressed ? styles.heroStatCardPressed : null]}>
+              <Text style={styles.heroStatValue}>{heroState.secondaryValue}</Text>
+              <Text style={styles.heroStatLabel}>{heroState.secondaryLabel}</Text>
+            </Pressable>
           </View>
-          <View style={styles.heroDivider} />
-          <View style={styles.heroStatBlock}>
-            <Text style={styles.heroStatValue}>{heroState.secondaryValue}</Text>
-            <Text style={styles.heroStatLabel}>{heroState.secondaryLabel}</Text>
-          </View>
-        </View>
-      </Animated.View>
-
-      {errorMessage ? (
-        <Animated.View style={[styles.errorBox, bodyAnimatedStyle]}>
-          <Text style={styles.errorTitle}>Sinkronisasi ringkasan bermasalah</Text>
-          <Text style={styles.errorText}>{errorMessage}</Text>
         </Animated.View>
-      ) : null}
 
-      <Animated.View style={bodyAnimatedStyle}>
-        <AppPanel style={styles.modePanel}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Mode kerja</Text>
-            <Text style={styles.sectionHint}>Beranda berubah mengikuti fokus kerja aktif.</Text>
-          </View>
-          <View style={styles.modeChipGrid}>
-            {availableModes.map((mode) => {
-              const meta = MODE_META[mode];
-              const active = activeMode === mode;
+        {errorMessage ? (
+          <Animated.View style={[styles.errorBox, bodyAnimatedStyle]}>
+            <Text style={styles.errorTitle}>Sinkronisasi ringkasan bermasalah</Text>
+            <Text style={styles.errorText}>{errorMessage}</Text>
+          </Animated.View>
+        ) : null}
 
-              return (
-                <Pressable key={mode} onPress={() => setActiveMode(mode)} style={({ pressed }) => [styles.modeChip, active ? styles.modeChipActive : null, pressed ? styles.modeChipPressed : null]}>
-                  <Ionicons color={active ? "#ffffff" : theme.colors.textSecondary} name={meta.icon} size={16} />
-                  <Text style={[styles.modeChipText, active ? styles.modeChipTextActive : null]}>{meta.label}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </AppPanel>
-      </Animated.View>
-
-      {loading && orders.length === 0 ? (
         <Animated.View style={bodyAnimatedStyle}>
-          <AppPanel style={styles.loadingPanel}>
-            <ActivityIndicator color={theme.colors.info} />
-            <Text style={styles.loadingText}>Memuat command center outlet...</Text>
+          <AppPanel style={styles.modePanel}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Mode kerja</Text>
+              <Text style={styles.sectionHint}>Beranda berubah mengikuti fokus kerja aktif.</Text>
+            </View>
+            <View style={styles.modeChipGrid}>
+              {availableModes.map((mode) => {
+                const meta = MODE_META[mode];
+                const active = activeMode === mode;
+
+                return (
+                  <Pressable key={mode} onPress={() => setActiveMode(mode)} style={({ pressed }) => [styles.modeChip, active ? styles.modeChipActive : null, pressed ? styles.modeChipPressed : null]}>
+                    <Ionicons color={active ? "#ffffff" : theme.colors.textSecondary} name={meta.icon} size={16} />
+                    <Text style={[styles.modeChipText, active ? styles.modeChipTextActive : null]}>{meta.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </AppPanel>
         </Animated.View>
-      ) : null}
 
-      <Animated.View style={bodyAnimatedStyle}>
-        <AppPanel style={styles.commandPanel}>
-          <View style={styles.sectionHeaderRow}>
-            <View style={styles.sectionHeaderCompact}>
-              <Text style={styles.sectionTitle}>Butuh tindakan sekarang</Text>
-              <Text style={styles.sectionHint}>Tiga fokus teratas untuk mode kerja yang sedang aktif.</Text>
-            </View>
-            <Pressable onPress={() => handleOpenOrders(null)} style={({ pressed }) => [styles.sectionActionButton, pressed ? styles.sectionActionButtonPressed : null]}>
-              <Text style={styles.sectionActionText}>Buka board</Text>
-            </Pressable>
-          </View>
+        {loading && orders.length === 0 ? (
+          <Animated.View style={bodyAnimatedStyle}>
+            <AppPanel style={styles.loadingPanel}>
+              <ActivityIndicator color={theme.colors.info} />
+              <Text style={styles.loadingText}>Memuat command center outlet...</Text>
+            </AppPanel>
+          </Animated.View>
+        ) : null}
 
-          <View style={styles.focusList}>
-            {focusItems.map((item) => {
-              const tone = toneStyles(item.tone);
-
-              return (
-                <Pressable key={item.key} onPress={() => handleActionTarget(item.target)} style={({ pressed }) => [styles.focusRow, { backgroundColor: tone.softBackground, borderColor: tone.border }, pressed ? styles.focusRowPressed : null]}>
-                  <View style={[styles.focusIconWrap, { backgroundColor: tone.strongBackground }]}>
-                    <Ionicons color="#ffffff" name={item.icon} size={18} />
-                  </View>
-                  <View style={styles.focusCopy}>
-                    <Text style={styles.focusTitle}>{item.title}</Text>
-                    <Text style={styles.focusSubtitle}>{item.subtitle}</Text>
-                  </View>
-                  <View style={[styles.focusCtaPill, { borderColor: tone.border }]}>
-                    <Text style={[styles.focusCtaText, { color: tone.foreground }]}>{item.cta}</Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
-        </AppPanel>
-      </Animated.View>
-
-      <Animated.View style={[styles.metricGrid, bodyAnimatedStyle]}>
-        {metricCards.map((item) => {
-          const tone = toneStyles(item.tone);
-
-          return (
-            <Pressable key={item.key} onPress={() => handleActionTarget(item.target)} style={({ pressed }) => [styles.metricCard, { borderColor: tone.border }, pressed ? styles.metricCardPressed : null]}>
-              <View style={styles.metricTopRow}>
-                <View style={[styles.metricIconWrap, { backgroundColor: tone.softBackground }]}>
-                  <Ionicons color={tone.foreground} name={item.icon} size={16} />
-                </View>
-                <Text style={[styles.metricBadgeText, { color: tone.foreground }]}>{item.badge}</Text>
+        <Animated.View style={bodyAnimatedStyle}>
+          <AppPanel style={styles.commandPanel}>
+            <View style={styles.sectionHeaderRow}>
+              <View style={styles.sectionHeaderCompact}>
+                <Text style={styles.sectionTitle}>Butuh tindakan sekarang</Text>
+                <Text style={styles.sectionHint}>Tiga fokus teratas untuk mode kerja yang sedang aktif.</Text>
               </View>
-              <Text style={styles.metricValue}>{item.value}</Text>
-              <Text style={styles.metricLabel}>{item.label}</Text>
-            </Pressable>
-          );
-        })}
-      </Animated.View>
-
-      <Animated.View style={bodyAnimatedStyle}>
-        <AppPanel style={styles.lanePanel}>
-          <View style={styles.laneBackdropPrimary} />
-          <View style={styles.laneBackdropSecondary} />
-
-          <View style={styles.sectionHeaderRow}>
-            <View style={styles.sectionHeaderCompact}>
-              <Text style={styles.laneTitle}>Lane kerja hari ini</Text>
-              <Text style={styles.laneHint}>Antrian, proses, dan order siap yang sedang hidup sekarang.</Text>
+              <Pressable onPress={() => handleOpenOrders(null)} style={({ pressed }) => [styles.sectionActionButton, pressed ? styles.sectionActionButtonPressed : null]}>
+                <Text style={styles.sectionActionText}>Buka board</Text>
+              </Pressable>
             </View>
-            <Text style={styles.laneLiveLabel}>Live</Text>
-          </View>
 
-          <View style={styles.laneGrid}>
-            {laneCards.map((lane) => {
-              const tone = toneStyles(lane.tone);
+            <View style={styles.focusList}>
+              {focusItems.map((item) => {
+                const tone = toneStyles(item.tone);
 
-              return (
-                <Pressable key={lane.key} onPress={() => handleActionTarget(lane.target)} style={({ pressed }) => [styles.laneCard, pressed ? styles.laneCardPressed : null]}>
-                  <Text style={styles.laneLabel}>{lane.label}</Text>
-                  <Text style={styles.laneValue}>{lane.value}</Text>
-                  <View style={[styles.laneDot, { backgroundColor: tone.strongBackground }]} />
-                </Pressable>
-              );
-            })}
-          </View>
-        </AppPanel>
-      </Animated.View>
+                return (
+                  <Pressable key={item.key} onPress={() => handleActionTarget(item.target)} style={({ pressed }) => [styles.focusRow, { backgroundColor: tone.softBackground, borderColor: tone.border }, pressed ? styles.focusRowPressed : null]}>
+                    <View style={[styles.focusIconWrap, { backgroundColor: tone.strongBackground }]}>
+                      <Ionicons color="#ffffff" name={item.icon} size={18} />
+                    </View>
+                    <View style={styles.focusCopy}>
+                      <Text style={styles.focusTitle}>{item.title}</Text>
+                      <Text style={styles.focusSubtitle}>{item.subtitle}</Text>
+                    </View>
+                    <View style={[styles.focusCtaPill, { borderColor: tone.border }]}>
+                      <Text style={[styles.focusCtaText, { color: tone.foreground }]}>{item.cta}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </AppPanel>
+        </Animated.View>
 
-      <Animated.View style={bodyAnimatedStyle}>
-        <Pressable onPress={() => handleOpenOrders(null)} style={({ pressed }) => [styles.receivableStrip, pressed ? styles.receivableStripPressed : null]}>
-          <View style={styles.receivableCopy}>
-            <Text style={styles.receivableTitle}>{dueAmountTotal > 0 ? `Piutang aktif ${formatMoney(dueAmountTotal)}` : "Tidak ada piutang aktif"}</Text>
-            <Text style={styles.receivableSubtitle}>
-              {quotaLimit && quotaRemaining !== null
-                ? `Kuota ${formatCount(quotaUsed)} / ${formatCount(quotaLimit)} order periode ini`
-                : "Pantau invoice dan progres pembayaran langsung dari board pesanan."}
-            </Text>
-          </View>
-          <View style={styles.receivablePill}>
-            <Text style={styles.receivablePillText}>{`${formatCount(dueCount)} invoice`}</Text>
-          </View>
-        </Pressable>
-      </Animated.View>
+        <Animated.View style={[styles.metricGrid, bodyAnimatedStyle]}>
+          {metricCards.map((item) => {
+            const tone = toneStyles(item.tone);
+
+            return (
+              <Pressable key={item.key} onPress={() => handleActionTarget(item.target)} style={({ pressed }) => [styles.metricCard, { borderColor: tone.border }, pressed ? styles.metricCardPressed : null]}>
+                <View style={styles.metricTopRow}>
+                  <View style={[styles.metricIconWrap, { backgroundColor: tone.softBackground }]}>
+                    <Ionicons color={tone.foreground} name={item.icon} size={16} />
+                  </View>
+                  <Text style={[styles.metricBadgeText, { color: tone.foreground }]}>{item.badge}</Text>
+                </View>
+                <Text style={styles.metricValue}>{item.value}</Text>
+                <Text style={styles.metricLabel}>{item.label}</Text>
+              </Pressable>
+            );
+          })}
+        </Animated.View>
+
+        <Animated.View style={bodyAnimatedStyle}>
+          <AppPanel style={styles.lanePanel}>
+            <View style={styles.laneBackdropPrimary} />
+            <View style={styles.laneBackdropSecondary} />
+
+            <View style={styles.sectionHeaderRow}>
+              <View style={styles.sectionHeaderCompact}>
+                <Text style={styles.laneTitle}>Lane kerja hari ini</Text>
+                <Text style={styles.laneHint}>Antrian, proses, dan order siap yang sedang hidup sekarang.</Text>
+              </View>
+              <Text style={styles.laneLiveLabel}>Live</Text>
+            </View>
+
+            <View style={styles.laneGrid}>
+              {laneCards.map((lane) => {
+                const tone = toneStyles(lane.tone);
+
+                return (
+                  <Pressable key={lane.key} onPress={() => handleActionTarget(lane.target)} style={({ pressed }) => [styles.laneCard, pressed ? styles.laneCardPressed : null]}>
+                    <Text style={styles.laneLabel}>{lane.label}</Text>
+                    <Text style={styles.laneValue}>{lane.value}</Text>
+                    <View style={[styles.laneDot, { backgroundColor: tone.strongBackground }]} />
+                  </Pressable>
+                );
+              })}
+            </View>
+          </AppPanel>
+        </Animated.View>
+
+        <Animated.View style={bodyAnimatedStyle}>
+          <Pressable onPress={() => handleOpenOrders(null)} style={({ pressed }) => [styles.receivableStrip, pressed ? styles.receivableStripPressed : null]}>
+            <View style={styles.receivableCopy}>
+              <Text style={styles.receivableTitle}>{dueAmountTotal > 0 ? `Piutang aktif ${formatMoney(dueAmountTotal)}` : "Tidak ada piutang aktif"}</Text>
+              <Text style={styles.receivableSubtitle}>
+                {quotaLimit && quotaRemaining !== null
+                  ? `Kuota ${formatCount(quotaUsed)} / ${formatCount(quotaLimit)} order periode ini`
+                  : "Pantau invoice dan progres pembayaran langsung dari board pesanan."}
+              </Text>
+            </View>
+            <View style={styles.receivablePill}>
+              <Text style={styles.receivablePillText}>{`${formatCount(dueCount)} invoice`}</Text>
+            </View>
+          </Pressable>
+        </Animated.View>
+      </ScrollView>
     </AppScreen>
   );
 }
 
-function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) {
+function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, topInset: number) {
   const horizontalPadding = isTablet ? theme.spacing.xl : theme.spacing.lg;
   const heroHeight = isTablet ? 258 : isLandscape ? 228 : 248;
   const metricWidth = isTablet ? "24%" : "48.2%";
   const laneCardWidth = isTablet || isLandscape ? "31.4%" : "31.2%";
 
   return StyleSheet.create({
+    screenRoot: {
+      flex: 1,
+      backgroundColor: theme.mode === "dark" ? theme.colors.background : "#ffffff",
+    },
+    bodyScroll: {
+      flex: 1,
+      width: "100%",
+      backgroundColor: theme.mode === "dark" ? theme.colors.background : "#f7fbff",
+    },
     content: {
-      flexGrow: 1,
       paddingHorizontal: horizontalPadding,
       paddingTop: theme.spacing.md,
-      paddingBottom: theme.spacing.xl,
       gap: theme.spacing.md,
+    },
+    appHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.md,
+      paddingHorizontal: horizontalPadding,
+      paddingTop: topInset + (isTablet ? theme.spacing.sm : 8),
+      paddingBottom: theme.spacing.sm,
+      backgroundColor: theme.mode === "dark" ? theme.colors.background : "#ffffff",
     },
     heroCard: {
       position: "relative",
-      minHeight: heroHeight,
-      borderRadius: 30,
-      overflow: "hidden",
+      minHeight: heroHeight - (isTablet ? 18 : 24),
+      borderRadius: 28,
       paddingHorizontal: theme.spacing.lg,
-      paddingTop: theme.spacing.md,
+      paddingTop: theme.spacing.lg,
       paddingBottom: theme.spacing.lg,
       borderWidth: 1,
-      borderColor: "rgba(255,255,255,0.12)",
-      justifyContent: "space-between",
+      borderColor: theme.mode === "dark" ? theme.colors.borderStrong : "#ebeff2",
+      backgroundColor: theme.mode === "dark" ? theme.colors.surface : "#ffffff",
+      justifyContent: "flex-start",
       gap: theme.spacing.sm,
+      shadowColor: "#0b1218",
+      shadowOpacity: theme.mode === "dark" ? 0.2 : 0.05,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
     heroGradientBase: {
       ...StyleSheet.absoluteFillObject,
@@ -1012,6 +1070,73 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
       justifyContent: "space-between",
       gap: theme.spacing.sm,
     },
+    heroBrandRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
+    },
+    heroBrandLockup: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      flex: 1,
+      minWidth: 0,
+    },
+    heroBrandMarkWrap: {
+      width: 28,
+      height: 28,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    heroBrandMark: {
+      width: 28,
+      height: 28,
+      resizeMode: "contain",
+    },
+    heroBrandCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    heroBrandName: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.heavy,
+      fontSize: 19,
+      lineHeight: 23,
+      textTransform: "lowercase",
+    },
+    heroNotificationButton: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: "center",
+      justifyContent: "center",
+      position: "relative",
+    },
+    heroNotificationButtonPressed: {
+      opacity: 0.72,
+      transform: [{ scale: 0.97 }],
+    },
+    notificationBadge: {
+      position: "absolute",
+      top: -3,
+      right: -7,
+      minWidth: 18,
+      height: 18,
+      paddingHorizontal: 4,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: theme.colors.danger,
+      borderWidth: 2,
+      borderColor: theme.mode === "dark" ? theme.colors.background : "#ffffff",
+    },
+    notificationBadgeText: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.bold,
+      fontSize: 9,
+      lineHeight: 11,
+    },
     heroEyebrow: {
       color: "rgba(255,255,255,0.84)",
       fontFamily: theme.fonts.heavy,
@@ -1020,34 +1145,37 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
     },
     liveChip: {
       borderWidth: 1,
-      borderColor: "rgba(255,255,255,0.18)",
-      backgroundColor: "rgba(255,255,255,0.14)",
+      borderColor: theme.mode === "dark" ? theme.colors.borderStrong : "#dff1e8",
+      backgroundColor: theme.mode === "dark" ? "#173326" : "#f4fbf7",
       borderRadius: theme.radii.pill,
       paddingHorizontal: 12,
-      paddingVertical: 8,
-      minWidth: 82,
+      paddingVertical: 7,
+      minWidth: 90,
       alignItems: "center",
     },
     liveChipText: {
-      color: "#ffffff",
+      color: theme.colors.success,
       fontFamily: theme.fonts.semibold,
       fontSize: 11,
     },
     heroTitle: {
-      color: "#ffffff",
+      color: theme.colors.textPrimary,
       fontFamily: theme.fonts.heavy,
-      fontSize: isTablet ? 29 : 24,
-      lineHeight: isTablet ? 34 : 29,
-      maxWidth: "84%",
+      fontSize: isTablet ? 27 : 22,
+      lineHeight: isTablet ? 32 : 27,
+      maxWidth: "92%",
     },
     heroSubtitle: {
-      color: "rgba(255,255,255,0.82)",
+      color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 18,
       maxWidth: "92%",
     },
-    heroModeRow: {
+    heroChipRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
       gap: theme.spacing.xs,
     },
     heroModeChip: {
@@ -1056,14 +1184,14 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
       alignItems: "center",
       gap: 6,
       borderWidth: 1,
-      borderColor: "rgba(255,255,255,0.18)",
-      backgroundColor: "rgba(255,255,255,0.12)",
+      borderColor: theme.mode === "dark" ? theme.colors.borderStrong : "#dff1e8",
+      backgroundColor: theme.mode === "dark" ? "#173326" : "#f4fbf7",
       borderRadius: theme.radii.pill,
       paddingHorizontal: 11,
       paddingVertical: 7,
     },
     heroModeChipText: {
-      color: "#ffffff",
+      color: theme.colors.success,
       fontFamily: theme.fonts.bold,
       fontSize: 11,
     },
@@ -1077,11 +1205,27 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
     heroStatRow: {
       flexDirection: "row",
       alignItems: "center",
-      gap: theme.spacing.md,
+      gap: theme.spacing.sm,
     },
     heroStatBlock: {
       minWidth: 0,
       gap: 2,
+    },
+    heroStatCard: {
+      flex: 1,
+      minHeight: isTablet ? 88 : 82,
+      borderRadius: 22,
+      paddingHorizontal: theme.spacing.md,
+      paddingVertical: theme.spacing.md,
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? theme.colors.borderStrong : "#edf1f4",
+      backgroundColor: theme.mode === "dark" ? theme.colors.surfaceSoft : "#fbfcfd",
+      justifyContent: "center",
+      gap: 4,
+    },
+    heroStatCardPressed: {
+      opacity: 0.78,
+      transform: [{ scale: 0.985 }],
     },
     heroDivider: {
       width: 1,
@@ -1089,13 +1233,13 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) 
       backgroundColor: "rgba(255,255,255,0.22)",
     },
     heroStatValue: {
-      color: "#ffffff",
+      color: theme.colors.textPrimary,
       fontFamily: theme.fonts.heavy,
-      fontSize: isTablet ? 36 : 32,
-      lineHeight: isTablet ? 40 : 36,
+      fontSize: isTablet ? 28 : 24,
+      lineHeight: isTablet ? 32 : 28,
     },
     heroStatLabel: {
-      color: "rgba(255,255,255,0.8)",
+      color: theme.colors.textSecondary,
       fontFamily: theme.fonts.semibold,
       fontSize: 11,
       lineHeight: 15,

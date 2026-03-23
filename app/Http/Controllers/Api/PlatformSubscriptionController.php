@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Domain\Audit\AuditEventKeys;
 use App\Domain\Audit\AuditTrailService;
+use App\Domain\Notifications\AppNotificationService;
 use App\Http\Controllers\Api\Concerns\EnsuresApiAccess;
 use App\Http\Controllers\Controller;
 use App\Models\SubscriptionCycle;
@@ -21,6 +22,7 @@ class PlatformSubscriptionController extends Controller
 
     public function __construct(
         private readonly AuditTrailService $auditTrail,
+        private readonly AppNotificationService $notificationService,
     ) {
     }
 
@@ -315,6 +317,8 @@ class PlatformSubscriptionController extends Controller
             channel: 'api',
             request: $request,
         );
+
+        $this->notificationService->notifySubscriptionInvoiceReviewed($invoice, $decision === 'approve');
 
         return response()->json([
             'data' => [

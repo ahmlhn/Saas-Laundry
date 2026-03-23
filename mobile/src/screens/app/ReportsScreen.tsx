@@ -451,9 +451,10 @@ export function ReportsScreen() {
         setLoading(true);
       }
       setErrorMessage(null);
+      setActionMessage(null);
 
       try {
-        const [ordersResult, financeResult] = await Promise.all([
+        const [ordersResult, financeResult] = await Promise.allSettled([
           listOrders({
             outletId,
             limit: REPORT_PAGE_SIZE,
@@ -474,11 +475,32 @@ export function ReportsScreen() {
             : Promise.resolve(null),
         ]);
 
-        setOrders(ordersResult);
-        setFinanceSummary(financeResult?.summary ?? null);
-        setLastUpdatedAt(new Date());
-      } catch (error) {
-        setErrorMessage(getApiErrorMessage(error));
+        let nextErrorMessage: string | null = null;
+
+        if (ordersResult.status === "fulfilled") {
+          setOrders(ordersResult.value);
+        } else {
+          setOrders([]);
+          nextErrorMessage =
+            financeResult.status === "fulfilled"
+              ? "Data order belum tersedia di lokal. Ringkasan keuangan tetap ditampilkan."
+              : getApiErrorMessage(ordersResult.reason);
+        }
+
+        if (financeResult.status === "fulfilled") {
+          setFinanceSummary(financeResult.value?.summary ?? null);
+        } else {
+          setFinanceSummary(null);
+          if (!nextErrorMessage) {
+            nextErrorMessage =
+              ordersResult.status === "fulfilled"
+                ? "Ringkasan keuangan belum tersedia di lokal. Laporan sementara hanya menampilkan data order."
+                : getApiErrorMessage(financeResult.reason);
+          }
+        }
+
+        setLastUpdatedAt(ordersResult.status === "fulfilled" || financeResult.status === "fulfilled" ? new Date() : null);
+        setErrorMessage(nextErrorMessage);
       } finally {
         setLoading(false);
         setRefreshing(false);

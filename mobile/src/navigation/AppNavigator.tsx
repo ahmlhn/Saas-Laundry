@@ -1,9 +1,7 @@
-import { createBottomTabNavigator, type BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
+import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator, type NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
-import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
-import { Pressable, StyleSheet, View, useWindowDimensions, type GestureResponderEvent } from "react-native";
+import { useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { HomeDashboardScreen } from "../screens/app/HomeDashboardScreen";
 import { OrderDetailScreen } from "../screens/app/OrderDetailScreen";
@@ -24,6 +22,7 @@ import { PaymentGatewayScreen } from "../screens/app/PaymentGatewayScreen";
 import { PrinterNoteScreen } from "../screens/app/PrinterNoteScreen";
 import { HelpInfoScreen } from "../screens/app/HelpInfoScreen";
 import { WhatsAppToolsScreen } from "../screens/app/WhatsAppToolsScreen";
+import { NotificationInboxScreen } from "../screens/app/NotificationInboxScreen";
 import { ServicesScreen } from "../screens/app/ServicesScreen";
 import { ServiceCatalogScreen } from "../screens/app/ServiceCatalogScreen";
 import { ServiceFormScreen } from "../screens/app/ServiceFormScreen";
@@ -89,120 +88,13 @@ function AccountTabNavigator() {
       <AccountStack.Screen name="PrinterNote" component={PrinterNoteScreen} />
       <AccountStack.Screen name="HelpInfo" component={HelpInfoScreen} />
       <AccountStack.Screen name="WhatsAppTools" component={WhatsAppToolsScreen} />
+      <AccountStack.Screen name="Notifications" component={NotificationInboxScreen} />
     </AccountStack.Navigator>
   );
 }
 
 function QuickActionLauncherPlaceholderScreen() {
   return null;
-}
-
-function QuickActionTabButton(props: BottomTabBarButtonProps) {
-  const theme = useAppTheme();
-  const navigation = useNavigation<BottomTabNavigationProp<AppTabParamList>>();
-  const rootNavigation = navigation.getParent<NativeStackNavigationProp<AppRootStackParamList>>();
-  const { width, height } = useWindowDimensions();
-  const isLandscape = width > height;
-  const minEdge = Math.min(width, height);
-  const isTablet = minEdge >= 600;
-  const buttonSize = isTablet ? 54 : isLandscape ? 50 : 52;
-  const haloSize = buttonSize + (isTablet ? 16 : 14);
-  const focusRingSize = haloSize + (isTablet ? 10 : 8);
-  const isActive = Boolean(props.accessibilityState?.selected);
-
-  function handlePress(event: GestureResponderEvent): void {
-    event.preventDefault();
-    rootNavigation?.navigate("OrderCreate", {
-      openCreateStamp: Date.now(),
-    });
-  }
-
-  return (
-    <Pressable
-      accessibilityHint="Buka halaman aksi cepat untuk membuat pesanan baru"
-      accessibilityLabel="Tambah Pesanan"
-      accessibilityRole="button"
-      onLongPress={props.onLongPress}
-      onPress={handlePress}
-      style={({ pressed }) => [
-        styles.quickActionButtonWrap,
-        {
-          top: 0,
-          transform: [{ scale: pressed ? 0.93 : 1 }],
-          opacity: pressed ? 0.9 : 1,
-        },
-      ]}
-    >
-      {isActive ? (
-        <View
-          style={[
-            styles.quickActionFocusRing,
-            {
-              width: focusRingSize,
-              height: focusRingSize,
-              borderColor: theme.mode === "dark" ? "rgba(133,206,255,0.65)" : "rgba(31,163,232,0.5)",
-            },
-          ]}
-        />
-      ) : null}
-      <View
-        style={[
-          styles.quickActionHalo,
-          {
-            width: haloSize,
-            height: haloSize,
-            borderColor: theme.mode === "dark" ? (isActive ? "rgba(133,206,255,0.7)" : "rgba(255,255,255,0.18)") : isActive ? "rgba(31,163,232,0.58)" : "rgba(255,255,255,0.92)",
-            backgroundColor: theme.mode === "dark" ? (isActive ? "rgba(35,130,201,0.48)" : "rgba(13,77,123,0.22)") : isActive ? "rgba(31,163,232,0.3)" : "rgba(31,163,232,0.14)",
-            opacity: isActive ? 1 : 0.7,
-            transform: [{ scale: isActive ? 1.1 : 1 }],
-          },
-        ]}
-      />
-      <View
-        style={[
-          styles.quickActionButton,
-          {
-            borderColor: isActive ? theme.colors.info : theme.colors.surface,
-            backgroundColor: isActive ? theme.colors.surface : theme.colors.primaryStrong,
-            width: buttonSize,
-            height: buttonSize,
-            borderWidth: isActive ? 4 : 4,
-            shadowColor: theme.mode === "dark" ? "#000" : "#0d2f45",
-            shadowOpacity: theme.mode === "dark" ? (isActive ? 0.3 : 0.18) : isActive ? 0.18 : 0.1,
-            shadowRadius: isActive ? 8 : 4,
-            shadowOffset: { width: 0, height: isActive ? 4 : 2 },
-            elevation: isActive ? 5 : 2,
-          },
-        ]}
-      >
-        {isActive ? (
-          <View style={[styles.quickActionActivePlus, { width: isTablet ? 42 : 38, height: isTablet ? 42 : 38 }]}>
-            <View
-              style={[
-                styles.quickActionPlusBarHorizontal,
-                {
-                  backgroundColor: theme.colors.info,
-                  height: isTablet ? 10 : 9,
-                },
-              ]}
-            />
-            <View
-              style={[
-                styles.quickActionPlusBarVertical,
-                {
-                  backgroundColor: theme.colors.info,
-                  width: isTablet ? 10 : 9,
-                },
-              ]}
-            />
-          </View>
-        ) : (
-          <Ionicons color={theme.colors.primaryContrast} name="add" size={isTablet ? 30 : 28} />
-        )}
-      </View>
-      {isActive ? <View style={[styles.quickActionActiveDot, { backgroundColor: theme.colors.info }]} /> : null}
-    </Pressable>
-  );
 }
 
 function MainTabsNavigator() {
@@ -212,13 +104,13 @@ function MainTabsNavigator() {
   const isLandscape = width > height;
   const minEdge = Math.min(width, height);
   const isTablet = minEdge >= 600;
-  const baseTabBarHeight = isTablet ? 86 : isLandscape ? 68 : 74;
-  const baseTabBarPaddingTop = isLandscape ? 6 : 8;
-  const baseTabBarPaddingBottom = isLandscape ? 6 : 8;
+  const baseTabBarHeight = isTablet ? 74 : isLandscape ? 60 : 66;
+  const baseTabBarPaddingTop = isLandscape ? 4 : 6;
+  const baseTabBarPaddingBottom = isLandscape ? 4 : 6;
   const bottomInset = Math.max(insets.bottom, 0);
   const tabBarHeight = baseTabBarHeight + bottomInset;
-  const labelSize = isTablet ? 12 : 11;
-  const iconSize = isTablet ? 21 : 19;
+  const labelSize = isTablet ? 12 : 10;
+  const iconSize = isTablet ? 22 : 20;
   const { session } = useSession();
   const roles = session?.roles ?? [];
   const showQuickAction = canSeeQuickActionTab(roles);
@@ -230,22 +122,27 @@ function MainTabsNavigator() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: theme.colors.surface,
-          borderTopColor: theme.colors.border,
+          backgroundColor: theme.mode === "dark" ? theme.colors.surface : "#ffffff",
+          borderTopColor: theme.mode === "dark" ? theme.colors.borderStrong : "#e7ebee",
           borderTopWidth: 1,
           height: tabBarHeight,
           paddingTop: baseTabBarPaddingTop,
           paddingBottom: baseTabBarPaddingBottom + bottomInset,
+          shadowColor: "#000000",
+          shadowOpacity: theme.mode === "dark" ? 0.18 : 0.05,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: -3 },
+          elevation: 10,
         },
-        tabBarActiveTintColor: theme.colors.info,
-        tabBarInactiveTintColor: theme.colors.textMuted,
+        tabBarActiveTintColor: theme.colors.success,
+        tabBarInactiveTintColor: theme.mode === "dark" ? theme.colors.textMuted : "#98a1ad",
         tabBarLabelStyle: {
-          fontFamily: theme.fonts.semibold,
+          fontFamily: theme.fonts.medium,
           fontSize: labelSize,
-          marginBottom: 2,
+          marginBottom: 0,
         },
         tabBarItemStyle: {
-          paddingTop: isLandscape ? 0 : 2,
+          paddingTop: 0,
         },
         tabBarHideOnKeyboard: true,
       }}
@@ -270,16 +167,18 @@ function MainTabsNavigator() {
         <Tab.Screen
           name="QuickActionTab"
           component={QuickActionLauncherPlaceholderScreen}
-          listeners={{
+          listeners={({ navigation }) => ({
             tabPress: (event) => {
               event.preventDefault();
+              navigation.getParent<NativeStackNavigationProp<AppRootStackParamList>>()?.navigate("OrderCreate", {
+                openCreateStamp: Date.now(),
+              });
             },
-          }}
+          })}
           options={{
-            tabBarLabel: "",
+            tabBarLabel: "Tambah",
             tabBarAccessibilityLabel: "Tambah Pesanan",
-            tabBarIcon: () => null,
-            tabBarButton: (props) => <QuickActionTabButton {...props} />,
+            tabBarIcon: ({ color, focused }) => <Ionicons color={color} name={focused ? "add-circle" : "add-circle-outline"} size={iconSize + 1} />,
           }}
         />
       ) : null}
@@ -298,7 +197,7 @@ function MainTabsNavigator() {
         component={AccountTabNavigator}
         options={{
           tabBarLabel: "Akun",
-          tabBarIcon: ({ color, focused }) => <Ionicons color={color} name={focused ? "grid" : "grid-outline"} size={iconSize} />,
+          tabBarIcon: ({ color, focused }) => <Ionicons color={color} name={focused ? "person" : "person-outline"} size={iconSize} />,
         }}
       />
     </Tab.Navigator>
@@ -345,46 +244,3 @@ export function AppNavigator() {
     </RootStack.Navigator>
   );
 }
-
-const styles = StyleSheet.create({
-  quickActionButtonWrap: {
-    justifyContent: "center",
-    alignItems: "center",
-    position: "relative",
-  },
-  quickActionHalo: {
-    position: "absolute",
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  quickActionFocusRing: {
-    position: "absolute",
-    borderRadius: 999,
-    borderWidth: 1.5,
-  },
-  quickActionButton: {
-    borderRadius: 999,
-    borderWidth: 4,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  quickActionActivePlus: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  quickActionPlusBarHorizontal: {
-    width: "100%",
-    borderRadius: 999,
-  },
-  quickActionPlusBarVertical: {
-    position: "absolute",
-    height: "100%",
-    borderRadius: 999,
-  },
-  quickActionActiveDot: {
-    marginTop: 6,
-    width: 6,
-    height: 6,
-    borderRadius: 999,
-  },
-});

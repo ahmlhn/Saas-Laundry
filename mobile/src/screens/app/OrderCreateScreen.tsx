@@ -24,6 +24,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
+import { useConnectivity } from "../../features/connectivity/ConnectivityContext";
 import { listCustomers, listCustomersPage } from "../../features/customers/customerApi";
 import { readCustomerDeviceCache, writeCustomerDeviceCache } from "../../features/customers/customerDeviceCache";
 import { formatCustomerPhoneDisplay } from "../../features/customers/customerPhone";
@@ -557,8 +558,10 @@ export function OrderCreateScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AppRootStackParamList, "OrderCreate">>();
   const route = useRoute<RouteProp<AppRootStackParamList, "OrderCreate">>();
   const isFocused = useIsFocused();
+  const connectivity = useConnectivity();
   const { session, selectedOutlet, refreshSession } = useSession();
   const tenantId = session?.user.tenant_id ?? null;
+  const shouldAvoidNetworkRefresh = !connectivity.hasResolvedState || connectivity.isOffline;
 
   const roles = session?.roles ?? [];
   const canCreateOrder = hasAnyRole(roles, ["owner", "admin", "cashier"]);
@@ -688,16 +691,16 @@ export function OrderCreateScreen() {
       return;
     }
 
-    void loadServices(true);
-  }, [selectedOutlet?.id, canCreateOrder]);
+    void loadServices(!shouldAvoidNetworkRefresh);
+  }, [selectedOutlet?.id, canCreateOrder, shouldAvoidNetworkRefresh]);
 
   useEffect(() => {
     if (!isFocused || !selectedOutlet || !canCreateOrder) {
       return;
     }
 
-    void loadServices(true);
-  }, [isFocused, selectedOutlet?.id, canCreateOrder]);
+    void loadServices(!shouldAvoidNetworkRefresh);
+  }, [isFocused, selectedOutlet?.id, canCreateOrder, shouldAvoidNetworkRefresh]);
 
   useEffect(() => {
     if (!route.params?.openCreateStamp || !canCreateOrder) {
@@ -735,12 +738,12 @@ export function OrderCreateScreen() {
     setPendingAutoSelectCustomerId(preselectCustomerId);
     const existsInClientCache = customerListClientCache.some((item) => item.id === preselectCustomerId);
     if (!existsInClientCache) {
-      void loadCustomers(true, {
+      void loadCustomers(!shouldAvoidNetworkRefresh, {
         fetchAll: true,
         keyword: "",
       });
     }
-  }, [route.params?.preselectCustomerId, canCreateOrder]);
+  }, [route.params?.preselectCustomerId, canCreateOrder, shouldAvoidNetworkRefresh]);
 
   useEffect(() => {
     const editOrderId = route.params?.editOrderId;
@@ -795,8 +798,13 @@ export function OrderCreateScreen() {
       return;
     }
 
+    if (shouldAvoidNetworkRefresh) {
+      setPromoErrorMessage(null);
+      return;
+    }
+
     void loadPromotions();
-  }, [showCreateForm, canCreateOrder, selectedOutlet?.id]);
+  }, [showCreateForm, canCreateOrder, selectedOutlet?.id, shouldAvoidNetworkRefresh]);
 
   useEffect(() => {
     if (!showCreateForm || !canCreateOrder || step !== "customer" || selectedCustomerId) {
@@ -808,7 +816,7 @@ export function OrderCreateScreen() {
     }
 
     const timeoutId = setTimeout(() => {
-      void loadCustomers(true, {
+      void loadCustomers(!shouldAvoidNetworkRefresh, {
         fetchAll: true,
         hydrateDeviceCache: true,
         keyword: "",
@@ -816,7 +824,7 @@ export function OrderCreateScreen() {
     }, CUSTOMER_SEARCH_DEBOUNCE_MS);
 
     return () => clearTimeout(timeoutId);
-  }, [showCreateForm, canCreateOrder, step, selectedCustomerId, customerKeyword, customers.length]);
+  }, [showCreateForm, canCreateOrder, step, selectedCustomerId, customerKeyword, customers.length, shouldAvoidNetworkRefresh]);
 
   async function loadServices(forceRefresh = false): Promise<void> {
     if (!selectedOutlet) {
@@ -908,6 +916,11 @@ export function OrderCreateScreen() {
           applyCustomerState(cachedCustomers);
           setLoadingCustomers(false);
           setLoadingMoreCustomers(true);
+
+          if (shouldAvoidNetworkRefresh) {
+            customerListAutoLoadedOnce = true;
+            return;
+          }
         }
       }
 
@@ -986,6 +999,12 @@ export function OrderCreateScreen() {
 
   async function loadPromotions(forceRefresh = false): Promise<void> {
     if (loadingPromotions) {
+      return;
+    }
+
+    if (shouldAvoidNetworkRefresh) {
+      setLoadingPromotions(false);
+      setPromoErrorMessage(null);
       return;
     }
 
@@ -2735,7 +2754,7 @@ export function OrderCreateScreen() {
     }
 
     if (panel === "promo") {
-      void loadPromotions(true);
+      void loadPromotions(!shouldAvoidNetworkRefresh);
     }
 
     setActiveReviewPanel(panel);

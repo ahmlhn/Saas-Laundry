@@ -97,6 +97,7 @@ export type AccountStackParamList = {
   PrinterNote: undefined;
   HelpInfo: undefined;
   WhatsAppTools: undefined;
+  Notifications: undefined;
 };
 
 export type OrderCreateRouteParams = {

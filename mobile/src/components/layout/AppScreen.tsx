@@ -10,12 +10,15 @@ interface AppScreenProps {
   overlay?: ReactNode;
   scroll?: boolean;
   style?: StyleProp<ViewStyle>;
+  backgroundColor?: string;
   contentContainerStyle?: StyleProp<ViewStyle>;
   refreshControl?: ScrollViewProps["refreshControl"];
   keyboardShouldPersistTaps?: ScrollViewProps["keyboardShouldPersistTaps"];
   scrollRef?: RefObject<ScrollView | null>;
   onScroll?: ScrollViewProps["onScroll"];
   scrollEventThrottle?: number;
+  showBackdrop?: boolean;
+  stickyHeaderIndices?: number[];
   safeAreaEdges?: Edge[];
 }
 
@@ -24,12 +27,15 @@ export function AppScreen({
   overlay,
   scroll = false,
   style,
+  backgroundColor,
   contentContainerStyle,
   refreshControl,
   keyboardShouldPersistTaps = "handled",
   scrollRef,
   onScroll,
   scrollEventThrottle = 16,
+  showBackdrop = true,
+  stickyHeaderIndices,
   safeAreaEdges,
 }: AppScreenProps) {
   const theme = useAppTheme();
@@ -40,31 +46,34 @@ export function AppScreen({
   const isTablet = minEdge >= 600;
   const maxContentWidth = isTablet ? (isLandscape ? 1100 : 840) : isLandscape ? 760 : 540;
   const resolvedSafeAreaEdges = safeAreaEdges ?? (bottomTabBarHeight === undefined ? ["top", "right", "bottom", "left"] : ["top", "right", "left"]);
+  const resolvedBackgroundColor = backgroundColor ?? theme.colors.background;
 
   return (
-    <SafeAreaView edges={resolvedSafeAreaEdges} style={[styles.safeArea, { backgroundColor: theme.colors.background }]}>
-      <View style={styles.backdropLayer} pointerEvents="none">
-        <View
-          style={[
-            styles.blobLarge,
-            isLandscape ? styles.blobLargeLandscape : null,
-            {
-              backgroundColor: theme.colors.primarySoft,
-              opacity: isLandscape ? 0.5 : 0.62,
-            },
-          ]}
-        />
-        <View
-          style={[
-            styles.blobSmall,
-            isLandscape ? styles.blobSmallLandscape : null,
-            {
-              backgroundColor: theme.colors.backgroundStrong,
-              opacity: isLandscape ? 0.34 : 0.45,
-            },
-          ]}
-        />
-      </View>
+    <SafeAreaView edges={resolvedSafeAreaEdges} style={[styles.safeArea, { backgroundColor: resolvedBackgroundColor }]}>
+      {showBackdrop ? (
+        <View style={styles.backdropLayer} pointerEvents="none">
+          <View
+            style={[
+              styles.blobLarge,
+              isLandscape ? styles.blobLargeLandscape : null,
+              {
+                backgroundColor: theme.colors.primarySoft,
+                opacity: isLandscape ? 0.5 : 0.62,
+              },
+            ]}
+          />
+          <View
+            style={[
+              styles.blobSmall,
+              isLandscape ? styles.blobSmallLandscape : null,
+              {
+                backgroundColor: theme.colors.backgroundStrong,
+                opacity: isLandscape ? 0.34 : 0.45,
+              },
+            ]}
+          />
+        </View>
+      ) : null}
 
       {scroll ? (
         <ScrollView
@@ -75,6 +84,7 @@ export function AppScreen({
           refreshControl={refreshControl}
           ref={scrollRef}
           scrollEventThrottle={scrollEventThrottle}
+          stickyHeaderIndices={stickyHeaderIndices}
           style={[styles.flex, styles.contentLayer, style]}
           showsVerticalScrollIndicator={false}
         >

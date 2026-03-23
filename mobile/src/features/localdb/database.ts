@@ -1,7 +1,7 @@
 import { openDatabaseAsync, type SQLiteDatabase } from "expo-sqlite";
 
 const MOBILE_DATABASE_NAME = "saas-laundry-mobile.db";
-const MOBILE_DATABASE_SCHEMA_VERSION = 3;
+const MOBILE_DATABASE_SCHEMA_VERSION = 4;
 
 let databasePromise: Promise<SQLiteDatabase> | null = null;
 
@@ -196,6 +196,32 @@ async function migrateDatabase(db: SQLiteDatabase): Promise<void> {
 
       CREATE INDEX IF NOT EXISTS invoice_leases_outlet_date_idx ON invoice_leases(outlet_id, lease_date);
       CREATE INDEX IF NOT EXISTS invoice_leases_expiry_idx ON invoice_leases(expires_at);
+    `);
+  }
+
+  if (currentVersion < 4) {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS billing_entries (
+        id TEXT PRIMARY KEY NOT NULL,
+        tenant_id TEXT NOT NULL,
+        outlet_id TEXT NOT NULL,
+        entry_date TEXT NOT NULL,
+        type TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        category TEXT NOT NULL,
+        notes TEXT,
+        created_by INTEGER,
+        created_by_name TEXT,
+        source_channel TEXT NOT NULL,
+        created_at TEXT,
+        updated_at TEXT,
+        payload_json TEXT NOT NULL,
+        synced_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS billing_entries_outlet_date_idx ON billing_entries(outlet_id, entry_date DESC);
+      CREATE INDEX IF NOT EXISTS billing_entries_outlet_type_idx ON billing_entries(outlet_id, type, entry_date DESC);
+      CREATE INDEX IF NOT EXISTS billing_entries_updated_idx ON billing_entries(updated_at DESC, created_at DESC);
     `);
   }
 

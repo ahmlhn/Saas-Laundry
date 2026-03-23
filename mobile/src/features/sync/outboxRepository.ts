@@ -1,5 +1,6 @@
 import { getAppMetaString, setAppMetaString } from "../localdb/appMetaStorage";
 import { getLocalDatabase } from "../localdb/database";
+import { createUuid } from "../../lib/randomId";
 import { nowIsoString, safeJsonParse } from "../repositories/repositoryShared";
 import { writeRejectedCount, writeUnsyncedCount } from "./syncStateStorage";
 
@@ -206,6 +207,107 @@ export async function listVisibleOutboxMutations(limit = 20): Promise<OutboxMuta
   );
 
   return rows.map((row) => mapRow(row));
+}
+
+export async function retryRejectedOutboxMutation<TPayload = Record<string, unknown>>(
+  mutationId: string
+): Promise<OutboxMutationRecord<TPayload> | null> {
+  const db = await getLocalDatabase();
+  const existingRow = await db.getFirstAsync<OutboxMutationRow>(
+    "SELECT * FROM outbox_mutations WHERE mutation_id = ? AND status = 'rejected' LIMIT 1;",
+    [mutationId]
+  );
+
+  if (!existingRow) {
+    return null;
+  }
+
+  const createdAt = nowIsoString();
+  const nextMutationId = createUuid();
+  const nextSeq = await readNextOutboxSequence();
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `
+        INSERT INTO outbox_mutations (
+          mutation_id,
+          seq,
+          type,
+          outlet_id,
+          entity_type,
+          entity_id,
+          client_time,
+          payload_json,
+          status,
+          reason_code,
+          message,
+          server_cursor,
+          attempt_count,
+          last_attempt_at,
+          synced_at,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, NULL, 0, NULL, NULL, ?, ?);
+      `,
+      [
+        nextMutationId,
+        nextSeq,
+        existingRow.type,
+        existingRow.outlet_id ?? null,
+        existingRow.entity_type ?? null,
+        existingRow.entity_id ?? null,
+        existingRow.client_time,
+        existingRow.payload_json,
+        createdAt,
+        createdAt,
+      ]
+    );
+
+    await db.runAsync("DELETE FROM outbox_mutations WHERE mutation_id = ?;", [mutationId]);
+  });
+
+  await writeNextOutboxSequence(nextSeq);
+  await refreshOutboxTelemetrySnapshot();
+
+  return mapRow<TPayload>({
+    ...existingRow,
+    mutation_id: nextMutationId,
+    seq: nextSeq,
+    status: "pending",
+    reason_code: null,
+    message: null,
+    server_cursor: null,
+    attempt_count: 0,
+    last_attempt_at: null,
+    synced_at: null,
+    created_at: createdAt,
+    updated_at: createdAt,
+  });
+}
+
+export async function retryRejectedOutboxMutations(limit = 20): Promise<OutboxMutationRecord[]> {
+  const db = await getLocalDatabase();
+  const rows = await db.getAllAsync<OutboxMutationRow>(
+    `
+      SELECT *
+      FROM outbox_mutations
+      WHERE status = 'rejected'
+      ORDER BY seq ASC
+      LIMIT ?;
+    `,
+    [Math.max(limit, 1)]
+  );
+
+  const retried: OutboxMutationRecord[] = [];
+
+  for (const row of rows) {
+    const next = await retryRejectedOutboxMutation(row.mutation_id);
+    if (next) {
+      retried.push(next);
+    }
+  }
+
+  return retried;
 }
 
 export async function markOutboxMutationAttempted(mutationId: string, attemptedAt = nowIsoString()): Promise<void> {

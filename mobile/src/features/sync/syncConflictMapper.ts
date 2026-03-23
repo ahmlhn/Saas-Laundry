@@ -2,6 +2,8 @@ import type { OutboxMutationRecord } from "./outboxRepository";
 
 export function describeSyncReason(reasonCode: string | null | undefined, fallbackMessage?: string | null): string {
   const normalized = (reasonCode ?? "").trim().toUpperCase();
+  const trimmedFallback = fallbackMessage?.trim() ?? "";
+  const fallbackLower = trimmedFallback.toLowerCase();
 
   if (normalized === "QUOTA_EXCEEDED") {
     return "Kuota order tenant sudah habis. Sinkronisasi butuh plan atau kuota baru.";
@@ -36,15 +38,23 @@ export function describeSyncReason(reasonCode: string | null | undefined, fallba
   }
 
   if (normalized === "VALIDATION_FAILED") {
-    return fallbackMessage?.trim() || "Data lokal tidak lolos validasi server.";
+    if (fallbackLower.includes("items field is required")) {
+      return "Server masih menganggap order ini butuh item layanan. Ini biasanya terjadi saat backend server belum memakai logika sync pickup terbaru.";
+    }
+
+    if (fallbackLower.includes("pickup slot is required")) {
+      return "Server masih membutuhkan jadwal jemput pada payload order ini.";
+    }
+
+    return trimmedFallback || "Data lokal tidak lolos validasi server.";
   }
 
   if (normalized === "INVOICE_RANGE_INVALID" || normalized === "INVOICE_INVALID") {
     return "Nomor invoice lokal tidak valid untuk range device ini.";
   }
 
-  if (fallbackMessage?.trim()) {
-    return fallbackMessage.trim();
+  if (trimmedFallback) {
+    return trimmedFallback;
   }
 
   return "Sinkronisasi gagal dan butuh koreksi data lokal.";

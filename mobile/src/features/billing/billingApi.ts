@@ -1,4 +1,5 @@
 import { httpClient } from "../../lib/httpClient";
+import { readLocalBillingEntries, storeBillingEntriesSnapshot, upsertLocalBillingEntries } from "../repositories/billingRepository";
 import type { BillingEntriesFilters, BillingEntriesPayload, BillingEntriesSummary, BillingEntry, BillingEntryType, BillingQuotaPayload } from "../../types/billing";
 
 interface BillingQuotaResponse {
@@ -36,21 +37,37 @@ export interface BillingEntriesParams {
 }
 
 export async function listBillingEntries(params: BillingEntriesParams): Promise<BillingEntriesPayload> {
-  const response = await httpClient.get<BillingEntriesResponse>("/billing/entries", {
-    params: {
-      outlet_id: params.outletId,
-      type: params.type || undefined,
-      start_date: params.startDate || undefined,
-      end_date: params.endDate || undefined,
-      limit: params.limit ?? 50,
-    },
-  });
+  try {
+    const response = await httpClient.get<BillingEntriesResponse>("/billing/entries", {
+      params: {
+        outlet_id: params.outletId,
+        type: params.type || undefined,
+        start_date: params.startDate || undefined,
+        end_date: params.endDate || undefined,
+        limit: params.limit ?? 50,
+      },
+    });
 
-  return {
-    data: response.data.data,
-    summary: response.data.meta.summary,
-    filters: response.data.meta.filters,
-  };
+    const payload = {
+      data: response.data.data,
+      summary: response.data.meta.summary,
+      filters: response.data.meta.filters,
+    };
+
+    await Promise.all([
+      upsertLocalBillingEntries(payload.data),
+      storeBillingEntriesSnapshot(params, payload),
+    ]);
+
+    return payload;
+  } catch (error) {
+    const localPayload = await readLocalBillingEntries(params);
+    if (localPayload) {
+      return localPayload;
+    }
+
+    throw error;
+  }
 }
 
 export interface BillingEntryCreatePayload {
@@ -76,5 +93,6 @@ export async function createBillingEntry(payload: BillingEntryCreatePayload): Pr
     entry_date: payload.entryDate || undefined,
   });
 
+  await upsertLocalBillingEntries([response.data.data]);
   return response.data.data;
 }

@@ -13,13 +13,15 @@ import { Alert, Animated, Easing, Linking, Platform, StyleSheet, View } from "re
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { APP_VERSION } from "./src/config/appVersion";
 import { AppLaunchLoader } from "./src/components/system/AppLaunchLoader";
-import { SyncStatusHud } from "./src/components/system/SyncStatusHud";
 import { AppUpdateRequiredScreen } from "./src/components/system/AppUpdateRequiredScreen";
 import { checkAndroidAppUpdate, resolveAndroidUpdateUrl } from "./src/features/appUpdate/updateChecker";
 import { ConnectivityProvider } from "./src/features/connectivity/ConnectivityContext";
+import { PushNotificationBootstrap } from "./src/features/notifications/PushNotificationBootstrap";
+import { flushPendingNotificationNavigation } from "./src/features/notifications/notificationNavigation";
 import { SyncProvider } from "./src/features/sync/SyncContext";
 import { AppNavigator } from "./src/navigation/AppNavigator";
 import { AuthNavigator } from "./src/navigation/AuthNavigator";
+import { navigationRef } from "./src/navigation/navigationRef";
 import { SessionProvider, useSession } from "./src/state/SessionContext";
 import { useAppTheme } from "./src/theme/useAppTheme";
 
@@ -166,7 +168,6 @@ function RootRouter({ fontsLoaded }: { fontsLoaded: boolean }) {
               ? <AppNavigator />
               : <AuthNavigator />
           : null}
-        {startupReady && session ? <SyncStatusHud /> : null}
       </Animated.View>
 
       {showLoader ? (
@@ -193,7 +194,8 @@ export default function App() {
       <ConnectivityProvider>
         <SessionProvider>
           <SyncProvider>
-            <NavigationContainer>
+            <NavigationContainer onReady={flushPendingNotificationNavigation} ref={navigationRef}>
+              <PushNotificationBootstrap />
               <RootRouter fontsLoaded={fontsLoaded} />
               <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
             </NavigationContainer>

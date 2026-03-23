@@ -8,6 +8,7 @@ use App\Domain\Billing\QuotaExceededException;
 use App\Domain\Billing\QuotaService;
 use App\Domain\Billing\TenantWriteAccessException;
 use App\Domain\Messaging\WaDispatchService;
+use App\Domain\Notifications\AppNotificationService;
 use App\Domain\Orders\OrderStatusTransitionValidator;
 use App\Domain\Orders\OrderPaymentGatewayService;
 use App\Http\Controllers\Controller;
@@ -34,6 +35,7 @@ class OrderController extends Controller
         private readonly WaDispatchService $waDispatchService,
         private readonly AuditTrailService $auditTrail,
         private readonly OrderPaymentGatewayService $orderPaymentGatewayService,
+        private readonly AppNotificationService $notificationService,
     ) {
     }
 
@@ -861,6 +863,8 @@ class OrderController extends Controller
             request: $request,
         );
 
+        $this->notificationService->notifyOrderPaymentRecorded($order->fresh() ?? $order, $payment);
+
         return response()->json([
             'data' => $payment,
             'order' => $order->fresh(['payments']),
@@ -1045,6 +1049,10 @@ class OrderController extends Controller
             request: $request,
         );
 
+        if ($validated['status'] === 'ready') {
+            $this->notificationService->notifyLaundryReady($order->fresh() ?? $order);
+        }
+
         return response()->json([
             'data' => $order->fresh(),
         ]);
@@ -1169,8 +1177,18 @@ class OrderController extends Controller
             request: $request,
         );
 
+        $freshOrder = $order->fresh() ?? $order;
+
+        if ($next === 'delivery_pending') {
+            $this->notificationService->notifyDeliveryPending($freshOrder);
+        }
+
+        if ($next === 'delivered') {
+            $this->notificationService->notifyDelivered($freshOrder);
+        }
+
         return response()->json([
-            'data' => $order->fresh(),
+            'data' => $freshOrder,
         ]);
     }
 

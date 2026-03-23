@@ -8,7 +8,7 @@ import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { StatusPill } from "../../components/ui/StatusPill";
 import { useConnectivity } from "../../features/connectivity/ConnectivityContext";
-import { listVisibleOutboxMutations, type OutboxMutationRecord } from "../../features/sync/outboxRepository";
+import { listVisibleOutboxMutations, retryRejectedOutboxMutations, type OutboxMutationRecord } from "../../features/sync/outboxRepository";
 import { describeSyncReason, formatMutationTypeLabel, formatOutboxMutationEntityLabel } from "../../features/sync/syncConflictMapper";
 import { useSync } from "../../features/sync/SyncContext";
 import {
@@ -82,6 +82,7 @@ export function AccountHubScreen() {
   const connectivity = useConnectivity();
   const { isSyncing, pendingCount, rejectedCount, unsyncedCount, lastSyncAt, lastErrorMessage, syncNow, refreshSnapshot } = useSync();
   const [biometricSaving, setBiometricSaving] = useState(false);
+  const [retryingRejected, setRetryingRejected] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [syncQueue, setSyncQueue] = useState<OutboxMutationRecord[]>([]);
@@ -282,6 +283,45 @@ export function AccountHubScreen() {
     }
   }
 
+  async function handleRetryRejected(): Promise<void> {
+    if (retryingRejected || rejectedCount === 0) {
+      return;
+    }
+
+    setRetryingRejected(true);
+    setActionMessage(null);
+    setErrorMessage(null);
+
+    try {
+      const retried = await retryRejectedOutboxMutations(20);
+      setSyncQueue(await listVisibleOutboxMutations(6));
+
+      if (retried.length === 0) {
+        setActionMessage("Tidak ada antrean gagal yang bisa dicoba ulang.");
+        return;
+      }
+
+      const result = await syncNow();
+      setSyncQueue(await listVisibleOutboxMutations(6));
+
+      if (!result) {
+        setActionMessage(`Antrean gagal diantrikan ulang (${retried.length}). Pilih outlet aktif lalu jalankan sync lagi.`);
+        return;
+      }
+
+      if (result.rejected.length > 0) {
+        setErrorMessage(`Antrean gagal dicoba ulang (${retried.length}), tetapi ${result.rejected.length} perubahan masih ditolak server.`);
+        return;
+      }
+
+      setActionMessage(`Antrean gagal berhasil diantrikan ulang (${retried.length}) dan sinkronisasi dijalankan.`);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Antrean sync gagal belum bisa dicoba ulang.");
+    } finally {
+      setRetryingRejected(false);
+    }
+  }
+
   return (
     <AppScreen contentContainerStyle={styles.content} scroll>
       <AppPanel style={styles.profilePanel}>
@@ -369,13 +409,23 @@ export function AccountHubScreen() {
         {lastErrorMessage ? <Text style={styles.syncErrorInline}>{lastErrorMessage}</Text> : null}
         <View style={styles.syncActionWrap}>
           <AppButton
-            disabled={isSyncing}
+            disabled={isSyncing || retryingRejected}
             leftElement={<Ionicons color={theme.colors.info} name="sync-outline" size={18} />}
-            loading={isSyncing}
+            loading={isSyncing && !retryingRejected}
             onPress={() => void handleSyncNow()}
             title={isSyncing ? "Menyinkronkan..." : "Sync Sekarang"}
             variant="secondary"
           />
+          {rejectedCount > 0 ? (
+            <AppButton
+              disabled={isSyncing || retryingRejected}
+              leftElement={<Ionicons color={theme.colors.textPrimary} name="refresh-outline" size={18} />}
+              loading={retryingRejected}
+              onPress={() => void handleRetryRejected()}
+              title={retryingRejected ? "Mencoba Ulang..." : "Coba Ulang Gagal"}
+              variant="ghost"
+            />
+          ) : null}
         </View>
         {syncQueue.length > 0 ? (
           <View style={styles.syncQueueWrap}>
@@ -607,7 +657,11 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       lineHeight: 17,
     },
     syncActionWrap: {
-      alignSelf: "flex-start",
+      alignSelf: "stretch",
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 8,
     },
     syncQueueWrap: {
       gap: 8,

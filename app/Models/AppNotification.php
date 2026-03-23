@@ -6,9 +6,8 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Device extends Model
+class AppNotification extends Model
 {
     use HasFactory, HasUuids;
 
@@ -17,24 +16,25 @@ class Device extends Model
     protected $keyType = 'string';
 
     protected $fillable = [
-        'id',
         'tenant_id',
         'user_id',
-        'last_seen_at',
-        'push_provider',
-        'push_platform',
-        'push_token',
-        'push_permission_status',
-        'push_enabled',
-        'push_token_updated_at',
+        'outlet_id',
+        'type',
+        'priority',
+        'title',
+        'body',
+        'action_type',
+        'action_payload',
+        'meta',
+        'read_at',
     ];
 
     protected function casts(): array
     {
         return [
-            'last_seen_at' => 'datetime',
-            'push_enabled' => 'boolean',
-            'push_token_updated_at' => 'datetime',
+            'action_payload' => 'array',
+            'meta' => 'array',
+            'read_at' => 'datetime',
         ];
     }
 
@@ -48,13 +48,8 @@ class Device extends Model
         return $this->belongsTo(User::class);
     }
 
-    public function mutations(): HasMany
+    public function outlet(): BelongsTo
     {
-        return $this->hasMany(SyncMutation::class);
-    }
-
-    public function leases(): HasMany
-    {
-        return $this->hasMany(InvoiceLease::class);
+        return $this->belongsTo(Outlet::class);
     }
 }

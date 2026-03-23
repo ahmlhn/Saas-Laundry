@@ -50,4 +50,11 @@ return [
         'timeout_seconds' => (int) env('MPWA_TIMEOUT_SECONDS', 15),
     ],
 
+    'expo_push' => [
+        'enabled' => filter_var(env('EXPO_PUSH_ENABLED', true), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? true,
+        'endpoint' => env('EXPO_PUSH_ENDPOINT', 'https://exp.host/--/api/v2/push/send'),
+        'access_token' => env('EXPO_PUSH_ACCESS_TOKEN', ''),
+        'timeout_seconds' => (int) env('EXPO_PUSH_TIMEOUT_SECONDS', 10),
+    ],
+
 ];

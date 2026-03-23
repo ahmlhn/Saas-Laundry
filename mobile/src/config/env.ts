@@ -79,6 +79,7 @@ export const API_BASE_URL_CANDIDATES = Array.from(
 );
 
 export const MOBILE_DEVICE_NAME = process.env.EXPO_PUBLIC_DEVICE_NAME?.trim() || "mobile-app";
+export const EXPO_PROJECT_ID = readPublicEnv("EXPO_PUBLIC_EXPO_PROJECT_ID");
 export const GOOGLE_EXPO_CLIENT_ID = readPublicEnv("EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID");
 export const GOOGLE_ANDROID_CLIENT_ID = readPublicEnv("EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID");
 export const GOOGLE_IOS_CLIENT_ID = readPublicEnv("EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID");

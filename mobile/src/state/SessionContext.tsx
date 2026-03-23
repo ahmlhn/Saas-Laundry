@@ -3,6 +3,7 @@ import { createContext, type ReactNode, useContext, useEffect, useMemo, useState
 import { MOBILE_DEVICE_NAME } from "../config/env";
 import { fetchMeContext, loginWithCredential, loginWithGoogleIdToken, logoutCurrentSession, registerAccount } from "../features/auth/authApi";
 import { initializeLocalDatabase } from "../features/localdb/database";
+import { unregisterDevicePushTokenAsync } from "../features/notifications/pushNotificationService";
 import { clearSessionSnapshot, readSessionSnapshot, writeSessionSnapshot } from "../features/session/sessionSnapshotStorage";
 import { getOrCreateDeviceId } from "../features/sync/deviceIdentity";
 import { ensureSyncStateInitialized } from "../features/sync/syncStateStorage";
@@ -387,6 +388,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout(): Promise<void> {
+    try {
+      await unregisterDevicePushTokenAsync();
+    } catch {
+      // best effort: token push lama dibersihkan sebelum sesi logout.
+    }
+
     try {
       await logoutCurrentSession();
     } catch {
