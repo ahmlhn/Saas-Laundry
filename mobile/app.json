@@ -3,7 +3,7 @@
     "name": "Cuci",
     "slug": "saas-laundry-mobile",
     "scheme": "saaslaundry",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -46,7 +46,8 @@
     "plugins": [
       "expo-secure-store",
       "expo-font",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-sqlite"
     ]
   }
 }

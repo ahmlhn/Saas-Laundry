@@ -296,6 +296,7 @@ class SyncController extends Controller
         $payload = $mutation['payload'] ?? [];
 
         $validator = validator($payload, [
+            'id' => ['nullable', 'uuid'],
             'outlet_id' => ['nullable', 'uuid'],
             'order_code' => ['nullable', 'string', 'max:32'],
             'invoice_no' => ['nullable', 'string', 'max:50'],
@@ -312,15 +313,15 @@ class SyncController extends Controller
             'customer.phone' => ['required', 'string', 'max:30'],
             'customer.notes' => ['nullable', 'string'],
             'customer.client_id' => ['nullable', 'string', 'max:80'],
-            'items' => ['required', 'array', 'min:1'],
-            'items.*.service_id' => ['required', 'uuid'],
+            'items' => ['nullable', 'array'],
+            'items.*.service_id' => ['nullable', 'uuid'],
             'items.*.qty' => ['nullable', 'numeric', 'min:0.01'],
             'items.*.weight_kg' => ['nullable', 'numeric', 'min:0.01'],
         ]);
         $validated = $validator->validate();
-        $requiresPickup = (bool) ($validated['requires_pickup'] ?? ($validated['is_pickup_delivery'] ?? false));
-        $requiresDelivery = (bool) ($validated['requires_delivery'] ?? ($validated['is_pickup_delivery'] ?? false));
+        [$requiresPickup, $requiresDelivery, $isLegacyPickupMode] = $this->resolveCourierModeFlagsFromSyncValidated($validated);
         $isCourierFlow = $requiresPickup || $requiresDelivery;
+        $items = $this->normalizeSubmittedSyncItems($validated['items'] ?? []);
 
         $outletId = $mutation['outlet_id'] ?? $validated['outlet_id'] ?? null;
 
@@ -330,6 +331,35 @@ class SyncController extends Controller
 
         $outlet = $this->assertOutletAccess($user, $outletId);
         $orderTime = isset($mutation['client_time']) ? Carbon::parse($mutation['client_time']) : now();
+
+        if (! $requiresPickup && count($items) === 0) {
+            throw new SyncRejectException('VALIDATION_FAILED', 'items is required for non-pickup orders.');
+        }
+
+        if ($requiresPickup && ! $isLegacyPickupMode && count($items) > 0) {
+            throw new SyncRejectException(
+                'VALIDATION_FAILED',
+                'For pickup mode, submit order first and input items after pickup is completed.',
+            );
+        }
+
+        if ($requiresPickup && ! $isLegacyPickupMode && ! $this->hasScheduleSlot($validated['pickup'] ?? null)) {
+            throw new SyncRejectException(
+                'VALIDATION_FAILED',
+                'pickup slot is required when requires_pickup is true.',
+            );
+        }
+
+        if (! empty($validated['id'])) {
+            $existingById = Order::query()
+                ->where('tenant_id', $user->tenant_id)
+                ->where('id', $validated['id'])
+                ->exists();
+
+            if ($existingById) {
+                throw new SyncRejectException('VALIDATION_FAILED', 'order id already exists.');
+            }
+        }
 
         if (! empty($validated['order_code'])) {
             $exists = Order::query()
@@ -342,7 +372,7 @@ class SyncController extends Controller
             }
         }
 
-        $result = DB::transaction(function () use ($validated, $user, $device, $outlet, $orderTime, $sourceChannel, $requiresPickup, $requiresDelivery, $isCourierFlow): array {
+        $result = DB::transaction(function () use ($validated, $items, $user, $device, $outlet, $orderTime, $sourceChannel, $requiresPickup, $requiresDelivery, $isLegacyPickupMode, $isCourierFlow): array {
             try {
                 $this->quotaService->consumeOrderSlot($user->tenant_id, $orderTime->format('Y-m'));
             } catch (TenantWriteAccessException $e) {
@@ -382,7 +412,7 @@ class SyncController extends Controller
                 ? $this->withoutScheduleSlot(is_array($validated['delivery'] ?? null) ? $validated['delivery'] : null)
                 : null;
 
-            $order = Order::query()->create([
+            $order = new Order([
                 'tenant_id' => $user->tenant_id,
                 'outlet_id' => $outlet->id,
                 'customer_id' => $customer->id,
@@ -406,6 +436,12 @@ class SyncController extends Controller
                 'source_channel' => $sourceChannel,
             ]);
 
+            if (! empty($validated['id'])) {
+                $order->id = $validated['id'];
+            }
+
+            $order->save();
+
             $order->forceFill([
                 'created_at' => $orderTime,
                 'updated_at' => $orderTime,
@@ -417,7 +453,7 @@ class SyncController extends Controller
             $maxDurationMinutes = 0;
             $lastCursor = null;
 
-            foreach ($validated['items'] as $item) {
+            foreach ($items as $item) {
                 $service = Service::query()
                     ->where('id', $item['service_id'])
                     ->where('tenant_id', $user->tenant_id)
@@ -475,7 +511,7 @@ class SyncController extends Controller
             }
 
             $resolvedDelivery = $initialDelivery;
-            if ($requiresDelivery && count($validated['items']) > 0) {
+            if ($requiresDelivery && count($items) > 0) {
                 $resolvedDelivery = $this->withAutoDeliverySchedule(
                     payload: is_array($resolvedDelivery) ? $resolvedDelivery : null,
                     longestDurationMinutes: $maxDurationMinutes,
@@ -568,6 +604,7 @@ class SyncController extends Controller
 
         $payload = $mutation['payload'] ?? [];
         $validator = validator($payload, [
+            'id' => ['nullable', 'uuid'],
             'order_id' => ['nullable', 'uuid'],
             'amount' => ['required', 'integer', 'min:1'],
             'method' => ['required', 'string', 'max:30'],
@@ -591,8 +628,16 @@ class SyncController extends Controller
 
         $this->assertOutletAccess($user, $order->outlet_id);
 
-        return DB::transaction(function () use ($user, $order, $validated): array {
-            $payment = Payment::query()->create([
+        if (! empty($validated['id'])) {
+            $existingPayment = Payment::query()->where('id', $validated['id'])->exists();
+
+            if ($existingPayment) {
+                throw new SyncRejectException('VALIDATION_FAILED', 'payment id already exists.');
+            }
+        }
+
+        return DB::transaction(function () use ($user, $order, $validated, $sourceChannel): array {
+            $payment = new Payment([
                 'order_id' => $order->id,
                 'amount' => (int) $validated['amount'],
                 'method' => $validated['method'],
@@ -602,6 +647,12 @@ class SyncController extends Controller
                 'updated_by' => $user->id,
                 'source_channel' => $sourceChannel,
             ]);
+
+            if (! empty($validated['id'])) {
+                $payment->id = $validated['id'];
+            }
+
+            $payment->save();
 
             $paidAmount = (int) Payment::query()->where('order_id', $order->id)->sum('amount');
             $dueAmount = max($order->total_amount - $paidAmount, 0);
@@ -1057,6 +1108,79 @@ class SyncController extends Controller
         unset($next['slot'], $next['schedule_slot'], $next['date']);
 
         return $next;
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array{0: bool, 1: bool, 2: bool}
+     */
+    private function resolveCourierModeFlagsFromSyncValidated(array $validated): array
+    {
+        $explicitPickup = array_key_exists('requires_pickup', $validated);
+        $explicitDelivery = array_key_exists('requires_delivery', $validated);
+        $isLegacy = ! $explicitPickup && ! $explicitDelivery;
+
+        if ($explicitPickup || $explicitDelivery) {
+            return [
+                (bool) ($validated['requires_pickup'] ?? false),
+                (bool) ($validated['requires_delivery'] ?? false),
+                false,
+            ];
+        }
+
+        if (array_key_exists('is_pickup_delivery', $validated)) {
+            $legacyPickupDelivery = (bool) ($validated['is_pickup_delivery'] ?? false);
+
+            return [$legacyPickupDelivery, $legacyPickupDelivery, true];
+        }
+
+        return [false, false, $isLegacy];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $rawItems
+     * @return array<int, array{service_id: string, qty: float|null, weight_kg: float|null}>
+     */
+    private function normalizeSubmittedSyncItems(array $rawItems): array
+    {
+        $rows = [];
+
+        foreach ($rawItems as $index => $item) {
+            $serviceId = trim((string) ($item['service_id'] ?? ''));
+            $qtyRaw = $item['qty'] ?? null;
+            $weightRaw = $item['weight_kg'] ?? null;
+            $hasQty = $qtyRaw !== null && $qtyRaw !== '';
+            $hasWeight = $weightRaw !== null && $weightRaw !== '';
+
+            if ($serviceId === '') {
+                if ($hasQty || $hasWeight) {
+                    throw ValidationException::withMessages([
+                        "items.{$index}.service_id" => ['service_id is required when qty or weight_kg is provided.'],
+                    ]);
+                }
+
+                continue;
+            }
+
+            $rows[] = [
+                'service_id' => $serviceId,
+                'qty' => $hasQty ? (float) $qtyRaw : null,
+                'weight_kg' => $hasWeight ? (float) $weightRaw : null,
+            ];
+        }
+
+        return $rows;
+    }
+
+    private function hasScheduleSlot(mixed $schedule): bool
+    {
+        if (! is_array($schedule)) {
+            return false;
+        }
+
+        $slot = trim((string) ($schedule['slot'] ?? $schedule['schedule_slot'] ?? $schedule['date'] ?? ''));
+
+        return $slot !== '';
     }
 
     private function normalizePhone(string $phone): ?string

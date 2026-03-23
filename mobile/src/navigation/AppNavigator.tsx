@@ -1,5 +1,5 @@
 import { createBottomTabNavigator, type BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
-import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { createNativeStackNavigator, type NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
@@ -13,7 +13,7 @@ import { OutletSelectScreen } from "../screens/app/OutletSelectScreen";
 import { useSession } from "../state/SessionContext";
 import { useAppTheme } from "../theme/useAppTheme";
 import type { AccountStackParamList, AppRootStackParamList, AppTabParamList, OrdersStackParamList } from "./types";
-import { QuickActionScreen } from "../screens/app/QuickActionScreen";
+import { OrderCreateScreen } from "../screens/app/OrderCreateScreen";
 import { ReportsScreen } from "../screens/app/ReportsScreen";
 import { AccountHubScreen } from "../screens/app/AccountHubScreen";
 import { CustomersScreen } from "../screens/app/CustomersScreen";
@@ -93,9 +93,14 @@ function AccountTabNavigator() {
   );
 }
 
+function QuickActionLauncherPlaceholderScreen() {
+  return null;
+}
+
 function QuickActionTabButton(props: BottomTabBarButtonProps) {
   const theme = useAppTheme();
   const navigation = useNavigation<BottomTabNavigationProp<AppTabParamList>>();
+  const rootNavigation = navigation.getParent<NativeStackNavigationProp<AppRootStackParamList>>();
   const { width, height } = useWindowDimensions();
   const isLandscape = width > height;
   const minEdge = Math.min(width, height);
@@ -106,8 +111,8 @@ function QuickActionTabButton(props: BottomTabBarButtonProps) {
   const isActive = Boolean(props.accessibilityState?.selected);
 
   function handlePress(event: GestureResponderEvent): void {
-    props.onPress?.(event);
-    navigation.navigate("QuickActionTab", {
+    event.preventDefault();
+    rootNavigation?.navigate("OrderCreate", {
       openCreateStamp: Date.now(),
     });
   }
@@ -264,7 +269,12 @@ function MainTabsNavigator() {
       {showQuickAction ? (
         <Tab.Screen
           name="QuickActionTab"
-          component={QuickActionScreen}
+          component={QuickActionLauncherPlaceholderScreen}
+          listeners={{
+            tabPress: (event) => {
+              event.preventDefault();
+            },
+          }}
           options={{
             tabBarLabel: "",
             tabBarAccessibilityLabel: "Tambah Pesanan",
@@ -312,6 +322,14 @@ export function AppNavigator() {
       ) : selectedOutlet ? (
         <>
           <RootStack.Screen name="MainTabs" component={MainTabsNavigator} />
+          <RootStack.Screen
+            name="OrderCreate"
+            component={OrderCreateScreen}
+            options={{
+              presentation: "fullScreenModal",
+              animation: "slide_from_bottom",
+            }}
+          />
           <RootStack.Screen
             name="OrderPayment"
             component={OrderPaymentScreen}

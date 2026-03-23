@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
-import type { NavigationProp, RouteProp } from "@react-navigation/native";
+import type { RouteProp } from "@react-navigation/native";
 import { useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -33,7 +33,7 @@ import { listPromotionSections } from "../../features/promotions/promoApi";
 import { listServices } from "../../features/services/serviceApi";
 import { hasAnyRole } from "../../lib/accessControl";
 import { getApiErrorMessage } from "../../lib/httpClient";
-import type { AppRootStackParamList, AppTabParamList } from "../../navigation/types";
+import type { AppRootStackParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
@@ -460,6 +460,73 @@ function formatScheduleDisplayValue(dateToken: string): string {
   return `${weekday}, ${normalizedDay}-${normalizedMonth}-${year}`;
 }
 
+function buildDateToken(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getStepDisplayLabel(step: Step): string {
+  if (step === "customer") {
+    return "Pelanggan";
+  }
+
+  if (step === "services") {
+    return "Layanan";
+  }
+
+  if (step === "review") {
+    return "Review";
+  }
+
+  return "Pembayaran";
+}
+
+function getStepDisplayIcon(step: Step): keyof typeof Ionicons.glyphMap {
+  if (step === "customer") {
+    return "person-outline";
+  }
+
+  if (step === "services") {
+    return "shirt-outline";
+  }
+
+  if (step === "review") {
+    return "receipt-outline";
+  }
+
+  return "wallet-outline";
+}
+
+function getRoleSummaryLabel(roles: string[]): string {
+  const uniqueRoles = Array.from(new Set(roles));
+  const labels = uniqueRoles
+    .map((role) => {
+      if (role === "owner") {
+        return "Owner";
+      }
+
+      if (role === "admin") {
+        return "Admin";
+      }
+
+      if (role === "cashier") {
+        return "Kasir";
+      }
+
+      if (role === "worker") {
+        return "Pekerja";
+      }
+
+      if (role === "courier") {
+        return "Kurir";
+      }
+
+      return role.charAt(0).toUpperCase() + role.slice(1);
+    })
+    .filter((label) => label !== "");
+
+  return labels.length > 0 ? labels.join(" / ") : "Tanpa role";
+}
+
 function parseScheduleSelection(raw: string): { dateToken: string } | null {
   const normalized = raw.trim();
   if (!normalized) {
@@ -477,7 +544,7 @@ function parseScheduleSelection(raw: string): { dateToken: string } | null {
   };
 }
 
-export function QuickActionScreen() {
+export function OrderCreateScreen() {
   const theme = useAppTheme();
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -487,8 +554,8 @@ export function QuickActionScreen() {
   const isCompactLandscape = isLandscape && !isTablet;
   const styles = useMemo(() => createStyles(theme, isTablet, isCompactLandscape), [theme, isTablet, isCompactLandscape]);
 
-  const navigation = useNavigation<NavigationProp<AppTabParamList>>();
-  const route = useRoute<RouteProp<AppTabParamList, "QuickActionTab">>();
+  const navigation = useNavigation<NativeStackNavigationProp<AppRootStackParamList, "OrderCreate">>();
+  const route = useRoute<RouteProp<AppRootStackParamList, "OrderCreate">>();
   const isFocused = useIsFocused();
   const { session, selectedOutlet, refreshSession } = useSession();
   const tenantId = session?.user.tenant_id ?? null;
@@ -555,7 +622,11 @@ export function QuickActionScreen() {
   const [viewportHeight, setViewportHeight] = useState(0);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [keyboardTopY, setKeyboardTopY] = useState<number | null>(null);
+  const [createFormFooterDockHeight, setCreateFormFooterDockHeight] = useState(0);
   const [focusedMetricServiceId, setFocusedMetricServiceId] = useState<string | null>(null);
+  const [highlightedServiceId, setHighlightedServiceId] = useState<string | null>(null);
+  const [pendingSearchRevealServiceId, setPendingSearchRevealServiceId] = useState<string | null>(null);
+  const [pendingSearchFocusServiceId, setPendingSearchFocusServiceId] = useState<string | null>(null);
   const [focusedReviewInputKey, setFocusedReviewInputKey] = useState<ReviewFocusableInputKey | null>(null);
   const [visibleServiceLimit, setVisibleServiceLimit] = useState(SERVICE_RENDER_BATCH);
   const [showServiceItemValidation, setShowServiceItemValidation] = useState(false);
@@ -569,7 +640,10 @@ export function QuickActionScreen() {
   const customerCacheTenantRef = useRef<string | null>(null);
   const contentScrollRef = useRef<ScrollView | null>(null);
   const serviceInputRefs = useRef<Record<string, TextInput | null>>({});
+  const serviceItemRefs = useRef<Record<string, View | null>>({});
   const serviceSearchInputRef = useRef<TextInput | null>(null);
+  const pendingServiceSearchFocusRef = useRef(false);
+  const metricVisibilityRequestSeqRef = useRef(0);
   const reviewInputRefs = useRef<Record<ReviewFocusableInputKey, TextInput | null>>({
     voucher: null,
     shippingFee: null,
@@ -1304,6 +1378,59 @@ export function QuickActionScreen() {
     setErrorMessage(null);
   }
 
+  function dismissOrderCreate(): void {
+    closeCreateFlow();
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    resetToOrdersToday();
+  }
+
+  function resetToMainTabs(target?: AppRootStackParamList["MainTabs"]): void {
+    navigation.reset({
+      index: 0,
+      routes: [
+        {
+          name: "MainTabs",
+          params: target,
+        },
+      ],
+    });
+  }
+
+  function resetToOrdersToday(): void {
+    resetToMainTabs({
+      screen: "OrdersTab",
+      params: {
+        screen: "OrdersToday",
+      },
+    });
+  }
+
+  function resetToOrderDetail(orderId: string, returnToOrders = false): void {
+    resetToMainTabs({
+      screen: "OrdersTab",
+      params: {
+        screen: "OrderDetail",
+        params: {
+          orderId,
+          returnToOrders,
+        },
+      },
+    });
+  }
+
+  function requestExitCreateFlow(): void {
+    if (!canPersistDraft) {
+      dismissOrderCreate();
+      return;
+    }
+
+    setExitDraftModalVisible(true);
+  }
+
   function toggleCreateFlow(): void {
     if (showCreateForm) {
       closeCreateFlow();
@@ -1314,11 +1441,18 @@ export function QuickActionScreen() {
   }
 
   function openCreateCustomerForm(): void {
-    navigation.navigate("AccountTab", {
-      screen: "CustomerForm",
+    if (hasDraftChanges) {
+      saveDraftSnapshot();
+    }
+
+    resetToMainTabs({
+      screen: "AccountTab",
       params: {
-        mode: "create",
-        returnToQuickAction: true,
+        screen: "CustomerForm",
+        params: {
+          mode: "create",
+          returnToQuickAction: true,
+        },
       },
     });
   }
@@ -1360,7 +1494,7 @@ export function QuickActionScreen() {
   function openSchedulePicker(): void {
     const parsed = parseScheduleSelection(pickupScheduleInput);
     const now = new Date();
-    const fallbackDateToken = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const fallbackDateToken = buildDateToken(now);
 
     setSchedulePickerField("pickup");
     setSchedulePickerDateToken(parsed?.dateToken ?? fallbackDateToken);
@@ -1394,6 +1528,14 @@ export function QuickActionScreen() {
       setSchedulePickerField(null);
     }
   }, [requiresPickup, schedulePickerField]);
+
+  useEffect(() => {
+    if (!requiresPickup || editingOrderId !== null || pickupScheduleInput.trim() !== "") {
+      return;
+    }
+
+    setPickupScheduleInput(formatScheduleDisplayValue(buildDateToken(new Date())));
+  }, [editingOrderId, pickupScheduleInput, requiresPickup]);
 
   useEffect(() => {
     if (!pendingAutoSelectCustomerId || loadingCustomers) {
@@ -1765,7 +1907,9 @@ export function QuickActionScreen() {
       return groupedServices;
     }
 
-    return groupedServices.filter((group) => group.label.toLowerCase().includes(keyword));
+    return groupedServices.filter((group) =>
+      group.label.toLowerCase().includes(keyword) || group.items.some((service) => service.name.toLowerCase().includes(keyword)),
+    );
   }, [groupedServices, serviceKeyword]);
 
   const activeServiceGroup = useMemo(() => {
@@ -1789,6 +1933,42 @@ export function QuickActionScreen() {
     return activeServiceGroup.items.filter((service) => service.name.toLowerCase().includes(keyword));
   }, [activeServiceGroup, serviceKeyword]);
 
+  const crossGroupServiceSearchResults = useMemo(() => {
+    const keyword = serviceKeyword.trim().toLowerCase();
+    if (!keyword || activeServiceGroup) {
+      return [];
+    }
+
+    const results: Array<{
+      service: ServiceCatalogItem;
+      groupKey: string;
+      groupLabel: string;
+      groupIcon: string | null;
+    }> = [];
+    const seenServiceIds = new Set<string>();
+
+    for (const group of groupedServices) {
+      const groupMatches = group.label.toLowerCase().includes(keyword);
+      const matchedServices = groupMatches ? group.items : group.items.filter((service) => service.name.toLowerCase().includes(keyword));
+
+      for (const service of matchedServices) {
+        if (seenServiceIds.has(service.id)) {
+          continue;
+        }
+
+        seenServiceIds.add(service.id);
+        results.push({
+          service,
+          groupKey: group.key,
+          groupLabel: group.label,
+          groupIcon: group.imageIcon,
+        });
+      }
+    }
+
+    return results;
+  }, [activeServiceGroup, groupedServices, serviceKeyword]);
+
   useEffect(() => {
     if (!activeServiceGroup) {
       setVisibleServiceLimit(SERVICE_RENDER_BATCH);
@@ -1796,15 +1976,19 @@ export function QuickActionScreen() {
     }
 
     let highestSelectedIndex = -1;
+    let revealIndex = -1;
     for (let index = 0; index < activeServiceGroup.items.length; index += 1) {
       const service = activeServiceGroup.items[index];
       if (selectedServiceIdSet.has(service.id)) {
         highestSelectedIndex = index;
       }
+      if (service.id === pendingSearchRevealServiceId) {
+        revealIndex = index;
+      }
     }
 
-    setVisibleServiceLimit(Math.max(SERVICE_RENDER_BATCH, highestSelectedIndex + 1));
-  }, [activeServiceGroupKey, serviceKeyword]);
+    setVisibleServiceLimit(Math.max(SERVICE_RENDER_BATCH, highestSelectedIndex + 1, revealIndex + 1));
+  }, [activeServiceGroup, pendingSearchRevealServiceId, selectedServiceIdSet, serviceKeyword]);
 
   const visibleServicesInActiveGroupLimited = useMemo(() => {
     if (visibleServiceLimit >= visibleServicesInActiveGroup.length) {
@@ -1886,6 +2070,73 @@ export function QuickActionScreen() {
       setActiveServiceGroupKey(null);
     }
   }, [activeServiceGroupKey, groupedServices]);
+
+  useEffect(() => {
+    if (!pendingSearchRevealServiceId || !activeServiceGroup) {
+      return;
+    }
+
+    const existsInActiveGroup = activeServiceGroup.items.some((service) => service.id === pendingSearchRevealServiceId);
+    if (!existsInActiveGroup) {
+      return;
+    }
+
+    const targetServiceId = pendingSearchRevealServiceId;
+    const retryDelays = [40, 120, 220, 360];
+    const timeoutIds = retryDelays.map((delay) =>
+      setTimeout(() => {
+        scrollServiceItemIntoView(targetServiceId);
+      }, delay),
+    );
+    const cleanupId = setTimeout(() => {
+      setPendingSearchRevealServiceId((current) => (current === targetServiceId ? null : current));
+    }, 420);
+
+    return () => {
+      timeoutIds.forEach((timeoutId) => clearTimeout(timeoutId));
+      clearTimeout(cleanupId);
+    };
+  }, [activeServiceGroup, pendingSearchRevealServiceId, visibleServiceLimit]);
+
+  useEffect(() => {
+    if (!pendingSearchFocusServiceId || !activeServiceGroup) {
+      return;
+    }
+
+    const existsInActiveGroup = activeServiceGroup.items.some((service) => service.id === pendingSearchFocusServiceId);
+    if (!existsInActiveGroup) {
+      return;
+    }
+
+    const targetServiceId = pendingSearchFocusServiceId;
+    const timeoutIds = [120, 260].map((delay) =>
+      setTimeout(() => {
+        setFocusedMetricServiceId(targetServiceId);
+        focusServiceMetricInput(targetServiceId, { focus: true });
+      }, delay),
+    );
+    const cleanupId = setTimeout(() => {
+      setPendingSearchFocusServiceId((current) => (current === targetServiceId ? null : current));
+    }, 520);
+
+    return () => {
+      timeoutIds.forEach((timeoutId) => clearTimeout(timeoutId));
+      clearTimeout(cleanupId);
+    };
+  }, [activeServiceGroup, pendingSearchFocusServiceId, visibleServiceLimit]);
+
+  useEffect(() => {
+    if (!highlightedServiceId) {
+      return;
+    }
+
+    const targetServiceId = highlightedServiceId;
+    const timeoutId = setTimeout(() => {
+      setHighlightedServiceId((current) => (current === targetServiceId ? null : current));
+    }, 1800);
+
+    return () => clearTimeout(timeoutId);
+  }, [highlightedServiceId]);
 
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -2198,7 +2449,6 @@ export function QuickActionScreen() {
   const effectiveShippingFee = hasCourierFlow ? shippingFee : 0;
   const discountLimitBaseAmount = subtotal + effectiveShippingFee;
   const total = useMemo(() => Math.max(discountLimitBaseAmount - totalDiscountAmount, 0), [discountLimitBaseAmount, totalDiscountAmount]);
-  const paymentFlowSummaryLabel = paymentFlowType === "now" ? "Bayar Sekarang" : "Bayar Nanti";
   const discountExceedsLimit = totalDiscountAmount > discountLimitBaseAmount;
   const appliedPromoNote = useMemo(() => {
     if (appliedPromoDrafts.length === 0) {
@@ -2312,7 +2562,8 @@ export function QuickActionScreen() {
 
     const fallbackKeyboardTop = height - (keyboardHeight > 0 ? keyboardHeight : Math.round(height * 0.42));
     const keyboardTop = keyboardTopY ?? fallbackKeyboardTop;
-    const visibleBottom = keyboardTop - theme.spacing.md;
+    const footerReserve = mode === "comfort" ? Math.max(createFormFooterDockHeight + theme.spacing.sm, theme.spacing.xl) : theme.spacing.md;
+    const visibleBottom = keyboardTop - footerReserve;
     const visibleTop = insets.top + theme.spacing.lg;
 
     inputRef.measureInWindow((_x, y, _w, inputHeight) => {
@@ -2357,13 +2608,70 @@ export function QuickActionScreen() {
   }
 
   function ensureFocusedMetricVisible(serviceId: string): void {
-    ensureTextInputVisible(serviceInputRefs.current[serviceId]);
+    ensureTextInputVisible(serviceInputRefs.current[serviceId], "comfort");
   }
 
-  function focusServiceMetricInput(serviceId: string): void {
-    const retryDelays = [0, 80, 160, 260, 360];
-    for (const delay of retryDelays) {
-      setTimeout(() => ensureFocusedMetricVisible(serviceId), delay);
+  function focusServiceMetricInput(serviceId: string, options?: { focus?: boolean }): void {
+    const shouldFocus = options?.focus === true;
+    const requestSeq = metricVisibilityRequestSeqRef.current + 1;
+    metricVisibilityRequestSeqRef.current = requestSeq;
+
+    if (shouldFocus) {
+      serviceInputRefs.current[serviceId]?.focus();
+    }
+
+    if (keyboardHeight > 0) {
+      const settleDelay = Platform.OS === "ios" ? 70 : 100;
+      setTimeout(() => {
+        if (metricVisibilityRequestSeqRef.current !== requestSeq) {
+          return;
+        }
+
+        ensureFocusedMetricVisible(serviceId);
+      }, settleDelay);
+    }
+  }
+
+  function scrollServiceItemIntoView(serviceId: string): void {
+    const scrollRef = contentScrollRef.current;
+    const itemRef = serviceItemRefs.current[serviceId];
+    if (!scrollRef || !itemRef) {
+      return;
+    }
+
+    const targetTop = insets.top + 132;
+    itemRef.measureInWindow((_x, y) => {
+      const delta = y - targetTop;
+      if (Math.abs(delta) <= 10) {
+        return;
+      }
+
+      const nextY = Math.max(scrollYRef.current + delta, 0);
+      scrollRef.scrollTo({ y: nextY, animated: true });
+    });
+  }
+
+  function openServiceSearchResult(serviceId: string, groupKey: string): void {
+    const targetGroup = groupedServices.find((group) => group.key === groupKey);
+    if (!targetGroup) {
+      return;
+    }
+
+    const serviceIndex = targetGroup.items.findIndex((service) => service.id === serviceId);
+    setShowServiceItemValidation(false);
+    setFocusedMetricServiceId(serviceId);
+    setPendingSearchFocusServiceId(serviceId);
+    if (!selectedServiceIdSet.has(serviceId)) {
+      setSelectedServiceIds((previous) => (previous.includes(serviceId) ? previous : [...previous, serviceId]));
+    }
+    setActiveServiceGroupKey(groupKey);
+    setPendingSearchRevealServiceId(serviceId);
+    setHighlightedServiceId(serviceId);
+    setShowServiceSearch(false);
+    setServiceKeyword("");
+    serviceSearchInputRef.current?.blur();
+    if (serviceIndex >= 0) {
+      setVisibleServiceLimit(Math.max(SERVICE_RENDER_BATCH, serviceIndex + 1));
     }
   }
 
@@ -2445,9 +2753,26 @@ export function QuickActionScreen() {
       return;
     }
 
-    const timeoutId = setTimeout(() => ensureFocusedMetricVisible(focusedMetricServiceId), 40);
+    const requestSeq = metricVisibilityRequestSeqRef.current + 1;
+    metricVisibilityRequestSeqRef.current = requestSeq;
+    const settleDelay = Platform.OS === "ios" ? 110 : 150;
+    const timeoutId = setTimeout(() => {
+      if (metricVisibilityRequestSeqRef.current !== requestSeq) {
+        return;
+      }
+
+      ensureFocusedMetricVisible(focusedMetricServiceId);
+    }, settleDelay);
     return () => clearTimeout(timeoutId);
-  }, [focusedMetricServiceId, keyboardHeight, keyboardTopY]);
+  }, [focusedMetricServiceId, keyboardHeight, keyboardTopY, createFormFooterDockHeight]);
+
+  useEffect(() => {
+    if (focusedMetricServiceId !== null) {
+      return;
+    }
+
+    metricVisibilityRequestSeqRef.current += 1;
+  }, [focusedMetricServiceId]);
 
   useEffect(() => {
     if (!focusedReviewInputKey || step !== "review" || keyboardHeight <= 0) {
@@ -2457,6 +2782,26 @@ export function QuickActionScreen() {
     const timeoutId = setTimeout(() => ensureTextInputVisible(reviewInputRefs.current[focusedReviewInputKey], "comfort"), 90);
     return () => clearTimeout(timeoutId);
   }, [focusedReviewInputKey, step, keyboardHeight, keyboardTopY]);
+
+  useEffect(() => {
+    if (!showCreateForm || step !== "services" || !showServiceSearch || !pendingServiceSearchFocusRef.current) {
+      return;
+    }
+
+    const focusSearchInput = () => {
+      serviceSearchInputRef.current?.focus();
+    };
+
+    pendingServiceSearchFocusRef.current = false;
+    const retryDelays = Platform.OS === "ios" ? [30, 110] : [60, 160];
+    const animationFrameId = requestAnimationFrame(focusSearchInput);
+    const timeoutIds = retryDelays.map((delay) => setTimeout(focusSearchInput, delay));
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      timeoutIds.forEach((timeoutId) => clearTimeout(timeoutId));
+    };
+  }, [showCreateForm, showServiceSearch, step]);
 
   async function refreshServicesFromServer(): Promise<void> {
     if (loadingServices) {
@@ -2468,13 +2813,12 @@ export function QuickActionScreen() {
   }
 
   function openServiceSearch(): void {
+    pendingServiceSearchFocusRef.current = true;
     setShowServiceSearch(true);
-    setTimeout(() => {
-      serviceSearchInputRef.current?.focus();
-    }, 0);
   }
 
   function closeServiceSearch(): void {
+    pendingServiceSearchFocusRef.current = false;
     setShowServiceSearch(false);
     setServiceKeyword("");
     serviceSearchInputRef.current?.blur();
@@ -2545,10 +2889,7 @@ export function QuickActionScreen() {
   }
 
   function exitCreateFlow(): void {
-    closeCreateFlow();
-    navigation.navigate("OrdersTab", {
-      screen: "OrdersToday",
-    });
+    dismissOrderCreate();
   }
 
   function closeExitDraftModal(): void {
@@ -2581,12 +2922,7 @@ export function QuickActionScreen() {
 
   function previousStep(): void {
     if (step === "customer") {
-      if (!canPersistDraft) {
-        exitCreateFlow();
-        return;
-      }
-
-      setExitDraftModalVisible(true);
+      requestExitCreateFlow();
       return;
     }
 
@@ -2665,6 +3001,7 @@ export function QuickActionScreen() {
         isPickupDelivery: hasCourierFlow,
         pickup: pickupPayload,
         delivery: deliveryPayload,
+        customerId: selectedCustomerId ?? undefined,
         customer: {
           name: customerName.trim(),
           phone: customerPhone.trim(),
@@ -2705,31 +3042,41 @@ export function QuickActionScreen() {
       resetDraft();
 
       if (editingOrderId) {
-        navigation.navigate("OrdersTab", {
-          screen: "OrderDetail",
-          params: {
-            orderId: savedOrder.id,
-          },
-        });
+        resetToOrderDetail(savedOrder.id);
         return;
       }
 
       if (isPickupBookingFlow) {
-        navigation.navigate("OrdersTab", {
-          screen: "OrderDetail",
-          params: {
-            orderId: savedOrder.id,
-          },
-        });
+        resetToOrderDetail(savedOrder.id);
         return;
       }
 
-      const rootNavigation = navigation.getParent<NativeStackNavigationProp<AppRootStackParamList>>();
-      rootNavigation?.navigate("OrderPayment", {
-        orderId: savedOrder.id,
-        source: "create",
-        flow: "payment",
-        initialAmount: savedTotalAmount > 0 ? 0 : undefined,
+      navigation.reset({
+        index: 1,
+        routes: [
+          {
+            name: "MainTabs",
+            params: {
+              screen: "OrdersTab",
+              params: {
+                screen: "OrderDetail",
+                params: {
+                  orderId: savedOrder.id,
+                  returnToOrders: true,
+                },
+              },
+            },
+          },
+          {
+            name: "OrderPayment",
+            params: {
+              orderId: savedOrder.id,
+              source: "create",
+              flow: "payment",
+              initialAmount: savedTotalAmount > 0 ? 0 : undefined,
+            },
+          },
+        ],
       });
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error));
@@ -2755,6 +3102,8 @@ export function QuickActionScreen() {
         : step === "review"
           ? !canServicesNext || discountExceedsLimit || voucherCodeRejected
           : submitting || !canServicesNext || discountExceedsLimit || voucherCodeRejected;
+  const primaryButtonBusy = submitting && (step === "review" || step === "payment");
+  const primaryActionDisabled = primaryDisabled || primaryButtonBusy;
   const secondaryButtonTitle = step === "customer" ? "Keluar" : "Kembali";
   const secondaryButtonIconName: keyof typeof Ionicons.glyphMap = step === "customer" ? "close-outline" : "arrow-back-outline";
   const primaryButtonTitle =
@@ -2769,8 +3118,16 @@ export function QuickActionScreen() {
           ? "Simpan Perubahan"
           : "Simpan & Ke Pembayaran"
         : "Lanjut";
+  const primaryButtonIconName: keyof typeof Ionicons.glyphMap =
+    step === "customer" || step === "services"
+      ? "arrow-forward-outline"
+      : editingOrderId
+        ? "save-outline"
+        : paymentFlowType === "now"
+          ? "card-outline"
+          : "checkmark-outline";
   const primaryDisabledHint = useMemo(() => {
-    if (!primaryDisabled) {
+    if (!primaryActionDisabled) {
       return "";
     }
 
@@ -2811,23 +3168,47 @@ export function QuickActionScreen() {
     }
 
     return isPickupBookingFlow ? "Simpan pesanan jemput dulu." : "Simpan pesanan dulu untuk lanjut ke halaman pembayaran.";
-  }, [discountExceedsLimit, editingOrderId, isPickupBookingFlow, primaryDisabled, step, submitting, voucherCodeRejected]);
+  }, [discountExceedsLimit, editingOrderId, isPickupBookingFlow, primaryActionDisabled, primaryDisabled, step, submitting, voucherCodeRejected]);
   const startCreateTitle = hasSavedDraft ? "Lanjutkan Draft" : "Buat Pesanan Baru";
   const startCreateIconName: keyof typeof Ionicons.glyphMap = hasSavedDraft ? "document-text-outline" : "bag-add-outline";
 
-  const currentStepIndex = STEP_ORDER.indexOf(step);
-  const stepProgressPercent = ((currentStepIndex + 1) / STEP_ORDER.length) * 100;
+  const currentStepIndex = step === "payment" ? STEP_ORDER.length - 1 : Math.max(STEP_ORDER.indexOf(step), 0);
   const createFormPanelMinHeight = viewportHeight > 0 ? Math.max(viewportHeight - (isCompactLandscape ? theme.spacing.md : theme.spacing.lg) - theme.spacing.sm, 0) : 0;
   const serviceSearchVisible = showServiceSearch || serviceKeyword.trim().length > 0;
   const keyboardVisible = keyboardHeight > 0;
   const scrollKeyboardDismissMode = step === "review" || step === "payment" ? "none" : "on-drag";
   const isEditingOrder = editingOrderId !== null;
+  const currentStepLabel = getStepDisplayLabel(step);
+  const currentStepIconName = getStepDisplayIcon(step);
+  const roleSummaryLabel = getRoleSummaryLabel(roles);
+  const quotaSummaryLabel = session?.quota.orders_remaining === null ? "Kuota fleksibel" : `${session?.quota.orders_remaining ?? 0} order tersisa`;
+  const serviceAvailabilityLabel = loadingServices ? "Memuat layanan..." : `${groupedServices.length} grup layanan aktif`;
+  const launchIntroSummary = hasSavedDraft
+    ? "Draft pesanan masih tersimpan. Lanjutkan tanpa kehilangan item, promo, dan catatan sebelumnya."
+    : "Quick Action ini dipakai untuk entry order operasional tercepat: pelanggan, layanan, lalu review total.";
+  const launchHighlights = [
+    {
+      icon: "git-branch-outline" as const,
+      label: "Alur",
+      value: "3 langkah ringkas",
+    },
+    {
+      icon: "grid-outline" as const,
+      label: "Layanan",
+      value: serviceAvailabilityLabel,
+    },
+    {
+      icon: hasSavedDraft ? ("document-text-outline" as const) : ("speedometer-outline" as const),
+      label: hasSavedDraft ? "Draft" : "Status",
+      value: hasSavedDraft ? "Siap dilanjutkan" : quotaSummaryLabel,
+    },
+  ];
   const scheduleDateOptions = useMemo(() => {
     return Array.from({ length: SCHEDULE_DAY_OPTION_COUNT }, (_, index) => {
       const date = new Date();
       date.setHours(0, 0, 0, 0);
       date.setDate(date.getDate() + index);
-      const token = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const token = buildDateToken(date);
       const dayLabel = new Intl.DateTimeFormat("id-ID", { weekday: "short" }).format(date);
       const dateLabel = `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`;
 
@@ -2846,23 +3227,68 @@ export function QuickActionScreen() {
     }
   }
 
-  const bodyHeader = (
+  function handleCreateFormFooterDockLayout(event: LayoutChangeEvent): void {
+    const nextHeight = Math.round(event.nativeEvent.layout.height);
+    if (nextHeight !== createFormFooterDockHeight) {
+      setCreateFormFooterDockHeight(nextHeight);
+    }
+  }
+
+  const launchHeader = (
     <View style={styles.bodyHeader}>
-      <View style={styles.titleRow}>
-        <View style={styles.titleIconWrap}>
-          <Ionicons color={theme.colors.info} name={isEditingOrder ? "create-outline" : "bag-handle-outline"} size={14} />
+      <Text style={styles.titleEyebrow}>{isEditingOrder ? "Mode edit pesanan" : "Transaksi baru"}</Text>
+      <Text style={styles.title}>{isEditingOrder ? "Edit Pesanan" : "Tambah Pesanan Baru"}</Text>
+      <Text style={styles.titleSubtitle}>{launchIntroSummary}</Text>
+      <View style={styles.headerMetaRow}>
+        {isEditingOrder && editingOrderReference ? (
+          <View style={styles.headerMetaChip}>
+            <Ionicons color={theme.colors.textMuted} name="document-text-outline" size={13} />
+            <Text numberOfLines={1} style={styles.headerMetaChipText}>
+              {editingOrderReference}
+            </Text>
+          </View>
+        ) : null}
+        <View style={styles.headerMetaChip}>
+          <Ionicons color={theme.colors.textMuted} name="person-circle-outline" size={13} />
+          <Text numberOfLines={1} style={styles.headerMetaChipText}>
+            {roleSummaryLabel}
+          </Text>
         </View>
-        <Text style={styles.title}>
-          {isEditingOrder ? (
-            <>
-              Edit Pesanan <Text style={styles.titleEmphasis}>{editingOrderReference ?? ""}</Text>
-            </>
-          ) : (
-            <>
-              Buat Pesanan <Text style={styles.titleEmphasis}>Baru</Text>
-            </>
-          )}
-        </Text>
+        {hasSavedDraft ? (
+          <View style={[styles.headerMetaChip, styles.headerMetaChipSuccess]}>
+            <Ionicons color={theme.colors.success} name="save-outline" size={13} />
+            <Text numberOfLines={1} style={styles.headerMetaChipSuccessText}>
+              Draft tersedia
+            </Text>
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+
+  const screenTopBar = (
+    <View style={styles.screenTopBar}>
+      <Pressable accessibilityRole="button" onPress={showCreateForm ? requestExitCreateFlow : dismissOrderCreate} style={({ pressed }) => [styles.screenTopBarButton, pressed ? styles.pressed : null]}>
+        <Ionicons color={theme.colors.textPrimary} name="close-outline" size={20} />
+      </Pressable>
+      <View style={styles.screenTopBarTitleSlot}>
+        {showCreateForm ? (
+          <Text numberOfLines={1} style={styles.screenTopBarTitle}>
+            {isEditingOrder ? "Edit Pesanan" : "Tambah Pesanan Baru"}
+          </Text>
+        ) : null}
+      </View>
+      <View style={showCreateForm ? styles.screenTopBarSideSlot : styles.screenTopBarMeta}>
+        {!showCreateForm && hasSavedDraft ? (
+          <View style={[styles.screenTopBarChip, styles.screenTopBarChipSuccess]}>
+            <Ionicons color={theme.colors.success} name="save-outline" size={13} />
+            <Text numberOfLines={1} style={[styles.screenTopBarChipText, styles.screenTopBarChipTextSuccess]}>
+              Draft
+            </Text>
+          </View>
+        ) : null}
+        {!showCreateForm && !hasSavedDraft ? <View style={styles.screenTopBarSpacer} /> : null}
+        {showCreateForm ? <View style={styles.screenTopBarSpacer} /> : null}
       </View>
     </View>
   );
@@ -2902,8 +3328,20 @@ export function QuickActionScreen() {
             style={styles.scroll}
           >
             {messageBanners}
-            <AppPanel style={styles.panel}>
-              {bodyHeader}
+            <View style={styles.launchShell}>
+              {screenTopBar}
+              {launchHeader}
+              <View style={styles.launchHighlightsGrid}>
+                {launchHighlights.map((item) => (
+                  <View key={item.label} style={styles.launchHighlightCard}>
+                    <View style={styles.launchHighlightIconWrap}>
+                      <Ionicons color={theme.colors.info} name={item.icon} size={15} />
+                    </View>
+                    <Text style={styles.launchHighlightLabel}>{item.label}</Text>
+                    <Text style={styles.launchHighlightValue}>{item.value}</Text>
+                  </View>
+                ))}
+              </View>
               <View style={styles.actionList}>
                 <AppButton
                   disabled={!canCreateOrder || loadingServices || services.length === 0}
@@ -2914,8 +3352,11 @@ export function QuickActionScreen() {
                 <AppButton
                   leftElement={<Ionicons color={theme.colors.info} name="person-add-outline" size={18} />}
                   onPress={() =>
-                    navigation.navigate("AccountTab", {
-                      screen: "Customers",
+                    resetToMainTabs({
+                      screen: "AccountTab",
+                      params: {
+                        screen: "Customers",
+                      },
                     })
                   }
                   title="Tambah Pelanggan"
@@ -2924,18 +3365,37 @@ export function QuickActionScreen() {
               </View>
               {!canCreateOrder ? <Text style={styles.infoText}>Role Anda tidak memiliki akses membuat order.</Text> : null}
               {!loadingServices && canCreateOrder && services.length === 0 ? <Text style={styles.infoText}>Belum ada layanan aktif untuk outlet ini.</Text> : null}
-              {hasSavedDraft ? <Text style={styles.infoText}>Draft tersimpan tersedia. Ketuk Lanjutkan Draft untuk melanjutkan.</Text> : null}
               {loadingServices ? <ActivityIndicator color={theme.colors.info} size="small" /> : null}
-            </AppPanel>
+            </View>
           </ScrollView>
         ) : (
           <View style={[styles.content, styles.contentCreateForm, styles.createFormViewport]}>
-            <AppPanel style={[styles.panel, styles.createFormPanel, createFormPanelMinHeight > 0 ? { minHeight: createFormPanelMinHeight } : null]}>
+            <View style={[styles.createFormShell, createFormPanelMinHeight > 0 ? { minHeight: createFormPanelMinHeight } : null]}>
               <View style={styles.createFormHeaderDock}>
-                {bodyHeader}
-                <View style={[styles.stepProgressTrack, styles.stepProgressTrackCompact]}>
-                  <View style={[styles.stepProgressFill, { width: `${stepProgressPercent}%` }]} />
+                {screenTopBar}
+                <View style={styles.stepLegendRow}>
+                  {STEP_ORDER.map((stepKey, index) => {
+                    const active = index === currentStepIndex;
+                    const done = index < currentStepIndex;
+
+                    return (
+                      <View key={stepKey} style={[styles.stepLegendChip, active ? styles.stepLegendChipActive : null, done ? styles.stepLegendChipDone : null]}>
+                        <View style={[styles.stepLegendNumberWrap, active ? styles.stepLegendNumberWrapActive : null, done ? styles.stepLegendNumberWrapDone : null]}>
+                          <Text style={[styles.stepLegendNumber, active ? styles.stepLegendNumberActive : null, done ? styles.stepLegendNumberDone : null]}>{index + 1}</Text>
+                        </View>
+                        <Text style={[styles.stepLegendLabel, active ? styles.stepLegendLabelActive : null, done ? styles.stepLegendLabelDone : null]}>
+                          {getStepDisplayLabel(stepKey)}
+                        </Text>
+                      </View>
+                    );
+                  })}
                 </View>
+                {step === "payment" ? (
+                  <View style={styles.stepModeBanner}>
+                    <Ionicons color={theme.colors.info} name="wallet-outline" size={14} />
+                    <Text style={styles.stepModeBannerText}>Tahap pembayaran aktif setelah review final.</Text>
+                  </View>
+                ) : null}
               </View>
 
               <ScrollView
@@ -2951,7 +3411,7 @@ export function QuickActionScreen() {
                 style={styles.panelBodyScroll}
               >
                 <View style={styles.panelBody}>
-                {step === "customer" ? (
+              {step === "customer" ? (
                   <View style={styles.sectionWrap}>
                   <View style={styles.customerTopBar}>
                     <View style={styles.customerTopTitleWrap}>
@@ -2972,6 +3432,26 @@ export function QuickActionScreen() {
                       <View style={styles.selectedCustomerHeadRow}>
                         <Text style={styles.selectedCustomerBadge}>Konsumen terpilih</Text>
                         <Ionicons color={theme.colors.success} name="checkmark-circle" size={14} />
+                      </View>
+                      <View style={styles.selectedCustomerTagRow}>
+                        <View style={styles.selectedCustomerTag}>
+                          <Ionicons color={theme.colors.info} name="sparkles-outline" size={12} />
+                          <Text style={styles.selectedCustomerTagText}>{courierModeLabel}</Text>
+                        </View>
+                        {customerPackageSummary ? (
+                          <View style={styles.selectedCustomerTag}>
+                            <Ionicons color={theme.colors.success} name="cube-outline" size={12} />
+                            <Text style={styles.selectedCustomerTagText}>{customerPackageSummary.activeCount} paket aktif</Text>
+                          </View>
+                        ) : null}
+                        {customerTransactionSummary.unpaidCount > 0 ? (
+                          <View style={[styles.selectedCustomerTag, styles.selectedCustomerTagWarning]}>
+                            <Ionicons color={theme.colors.warning} name="alert-circle-outline" size={12} />
+                            <Text style={[styles.selectedCustomerTagText, styles.selectedCustomerTagWarningText]}>
+                              {customerTransactionSummary.unpaidCount} order belum lunas
+                            </Text>
+                          </View>
+                        ) : null}
                       </View>
                       <View style={styles.selectedCustomerInfoRow}>
                         <View style={styles.selectedCustomerInfoIconWrap}>
@@ -3253,7 +3733,7 @@ export function QuickActionScreen() {
                       <Ionicons color={theme.colors.textMuted} name="search-outline" size={16} />
                       <TextInput
                         onChangeText={setServiceKeyword}
-                        placeholder={activeServiceGroup ? "Cari layanan di group ini" : "Cari group layanan"}
+                        placeholder={activeServiceGroup ? "Cari layanan di group ini" : "Cari group atau varian layanan"}
                         placeholderTextColor={theme.colors.textMuted}
                         ref={serviceSearchInputRef}
                         style={styles.serviceSearchInput}
@@ -3269,36 +3749,100 @@ export function QuickActionScreen() {
 
                   {!activeServiceGroup ? (
                     <>
-                      {visibleServiceGroups.length === 0 ? <Text style={styles.infoText}>Group layanan tidak ditemukan.</Text> : null}
-                      <View style={styles.serviceGroupList}>
-                        {visibleServiceGroups.map((group) => {
-                          const validCount = validSelectedCountByGroup[group.key] ?? 0;
-                          const groupMeta = validCount > 0 ? `${group.items.length} layanan • ${validCount} aktif` : `${group.items.length} layanan`;
-                          return (
-                            <Pressable
-                              key={group.key}
-                              onPress={() => {
-                                setActiveServiceGroupKey(group.key);
-                                closeServiceSearch();
-                              }}
-                              style={({ pressed }) => [styles.serviceGroupPickerItem, pressed ? styles.pressed : null]}
-                            >
-                              <View style={styles.serviceGroupPickerLead}>
-                                <View style={styles.serviceGroupPickerIconWrap}>
-                                  <Ionicons color={theme.colors.textSecondary} name={resolveServiceIcon(group.imageIcon, "grid-outline")} size={16} />
-                                </View>
-                                <View style={styles.serviceGroupPickerMain}>
-                                  <Text numberOfLines={1} style={styles.serviceGroupPickerName}>
-                                    {group.label}
-                                  </Text>
-                                  <Text style={styles.serviceGroupPickerMeta}>{groupMeta}</Text>
-                                </View>
-                              </View>
-                              <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={16} />
-                            </Pressable>
-                          );
-                        })}
-                      </View>
+                      {serviceKeyword.trim() ? (
+                        <>
+                          <View style={styles.serviceSearchResultsHeader}>
+                            <Text style={styles.serviceSearchResultsTitle}>Hasil layanan</Text>
+                            <Text style={styles.serviceSearchResultsMeta}>{crossGroupServiceSearchResults.length} cocok</Text>
+                          </View>
+                          {crossGroupServiceSearchResults.length === 0 ? <Text style={styles.infoText}>Layanan atau group tidak ditemukan.</Text> : null}
+                          <View style={styles.serviceGroupList}>
+                            {crossGroupServiceSearchResults.map(({ service, groupIcon, groupKey, groupLabel }) => {
+                              const selectedDraft = selectedServiceDraftById[service.id];
+                              const selected = selectedServiceIdSet.has(service.id);
+                              const hasValidMetric = selectedDraft?.hasValidMetric ?? false;
+
+                              return (
+                                <Pressable
+                                  key={service.id}
+                                  onPress={() => openServiceSearchResult(service.id, groupKey)}
+                                  style={({ pressed }) => [styles.serviceSearchResultItem, selected ? styles.serviceSearchResultItemSelected : null, pressed ? styles.pressed : null]}
+                                >
+                                  <View style={styles.serviceSearchResultLead}>
+                                    <View style={styles.serviceSearchResultIconWrap}>
+                                      <Ionicons color={theme.colors.textSecondary} name={resolveServiceIcon(service.image_icon, "search-outline")} size={16} />
+                                    </View>
+                                    <View style={styles.serviceSearchResultMain}>
+                                      <Text numberOfLines={1} style={styles.serviceSearchResultName}>
+                                        {service.name}
+                                      </Text>
+                                      <View style={styles.serviceSearchResultMetaRow}>
+                                        <Text style={styles.serviceSearchResultPrice}>
+                                          {formatMoney(service.effective_price_amount)} / {service.unit_type.toUpperCase()}
+                                        </Text>
+                                        <View style={styles.serviceSearchResultGroupBadge}>
+                                          <Ionicons color={theme.colors.textMuted} name={resolveServiceIcon(groupIcon, "grid-outline")} size={11} />
+                                          <Text numberOfLines={1} style={styles.serviceSearchResultGroupBadgeText}>
+                                            {groupLabel}
+                                          </Text>
+                                        </View>
+                                        {selected ? (
+                                          <View style={[styles.serviceSearchResultStateBadge, hasValidMetric ? styles.serviceSearchResultStateBadgeActive : null]}>
+                                            <Text style={[styles.serviceSearchResultStateBadgeText, hasValidMetric ? styles.serviceSearchResultStateBadgeTextActive : null]}>
+                                              {hasValidMetric ? "Dipilih" : "Belum lengkap"}
+                                            </Text>
+                                          </View>
+                                        ) : null}
+                                      </View>
+                                    </View>
+                                  </View>
+                                  <Ionicons color={theme.colors.textMuted} name="arrow-forward" size={16} />
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+                        </>
+                      ) : (
+                        <>
+                          {visibleServiceGroups.length === 0 ? <Text style={styles.infoText}>Group/varian layanan tidak ditemukan.</Text> : null}
+                          <View style={styles.serviceGroupList}>
+                            {visibleServiceGroups.map((group) => {
+                              const validCount = validSelectedCountByGroup[group.key] ?? 0;
+                              const groupMeta = `${group.items.length} layanan`;
+                              return (
+                                <Pressable
+                                  key={group.key}
+                                  onPress={() => {
+                                    setActiveServiceGroupKey(group.key);
+                                    closeServiceSearch();
+                                  }}
+                                  style={({ pressed }) => [styles.serviceGroupPickerItem, pressed ? styles.pressed : null]}
+                                >
+                                  <View style={styles.serviceGroupPickerLead}>
+                                    <View style={styles.serviceGroupPickerIconWrap}>
+                                      <Ionicons color={theme.colors.textSecondary} name={resolveServiceIcon(group.imageIcon, "grid-outline")} size={16} />
+                                    </View>
+                                    <View style={styles.serviceGroupPickerMain}>
+                                      <Text numberOfLines={1} style={styles.serviceGroupPickerName}>
+                                        {group.label}
+                                      </Text>
+                                      <View style={styles.serviceGroupPickerMetaRow}>
+                                        <Text style={styles.serviceGroupPickerMeta}>{groupMeta}</Text>
+                                        {validCount > 0 ? (
+                                          <View style={[styles.serviceGroupPickerCountBadge, styles.serviceGroupPickerCountBadgeActive]}>
+                                            <Text style={[styles.serviceGroupPickerCountBadgeText, styles.serviceGroupPickerCountBadgeTextActive]}>{validCount} dipilih</Text>
+                                          </View>
+                                        ) : null}
+                                      </View>
+                                    </View>
+                                  </View>
+                                  <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={16} />
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+                        </>
+                      )}
                     </>
                   ) : (
                     <>
@@ -3311,8 +3855,59 @@ export function QuickActionScreen() {
                           style={({ pressed }) => [styles.activeGroupBackLink, pressed ? styles.pressed : null]}
                         >
                           <Ionicons color={theme.colors.info} name="chevron-back" size={17} />
-                          <Text style={styles.activeGroupBackLinkText}>Kembali ke daftar group</Text>
+                          <Text style={styles.activeGroupBackLinkText}>Semua group</Text>
                         </Pressable>
+                        <ScrollView
+                          contentContainerStyle={styles.activeGroupSwitchRow}
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                        >
+                          {groupedServices.map((group) => {
+                            const active = group.key === activeServiceGroup.key;
+                            const validCount = validSelectedCountByGroup[group.key] ?? 0;
+
+                            return (
+                              <Pressable
+                                key={group.key}
+                                onPress={() => {
+                                  setActiveServiceGroupKey(group.key);
+                                  closeServiceSearch();
+                                }}
+                                style={({ pressed }) => [
+                                  styles.activeGroupSwitchChip,
+                                  active ? styles.activeGroupSwitchChipActive : null,
+                                  pressed ? styles.pressed : null,
+                                ]}
+                              >
+                                <Text
+                                  numberOfLines={1}
+                                  style={[styles.activeGroupSwitchLabel, active ? styles.activeGroupSwitchLabelActive : null]}
+                                >
+                                  {group.label}
+                                </Text>
+                                {validCount > 0 ? (
+                                  <View
+                                    style={[
+                                      styles.activeGroupSwitchBadge,
+                                      styles.activeGroupSwitchBadgeSelected,
+                                      active ? styles.activeGroupSwitchBadgeActive : null,
+                                    ]}
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.activeGroupSwitchBadgeText,
+                                        styles.activeGroupSwitchBadgeTextSelected,
+                                        active ? styles.activeGroupSwitchBadgeTextActive : null,
+                                      ]}
+                                    >
+                                      {validCount} dipilih
+                                    </Text>
+                                  </View>
+                                ) : null}
+                              </Pressable>
+                            );
+                          })}
+                        </ScrollView>
                       </View>
 
                       {visibleServicesInActiveGroup.length === 0 ? <Text style={styles.infoText}>Layanan di group ini tidak ditemukan.</Text> : null}
@@ -3325,14 +3920,24 @@ export function QuickActionScreen() {
                             {activeServiceGroup.items.length} layanan • {validSelectedCountByGroup[activeServiceGroup.key] ?? 0} aktif
                           </Text>
                         </View>
-                        <View style={styles.serviceGroupList}>
-                          {visibleServicesInActiveGroupLimited.map((service) => {
-                            const selected = selectedServiceIdSet.has(service.id);
-                            const selectedDraft = selectedServiceDraftById[service.id];
-                            const showInlineValidationError = showServiceItemValidation && selected && !selectedDraft?.hasValidMetric;
+                          <View style={styles.serviceGroupList}>
+                            {visibleServicesInActiveGroupLimited.map((service) => {
+                              const selected = selectedServiceIdSet.has(service.id);
+                              const selectedDraft = selectedServiceDraftById[service.id];
+                              const showInlineValidationError = showServiceItemValidation && selected && !selectedDraft?.hasValidMetric;
 
-                            return (
-                              <View key={service.id} style={[styles.servicePickerBlock, selected ? styles.servicePickerItemSelected : null]}>
+                              return (
+                              <View
+                                key={service.id}
+                                ref={(ref) => {
+                                  serviceItemRefs.current[service.id] = ref;
+                                }}
+                                style={[
+                                  styles.servicePickerBlock,
+                                  selected ? styles.servicePickerItemSelected : null,
+                                  highlightedServiceId === service.id ? styles.servicePickerBlockHighlighted : null,
+                                ]}
+                              >
                                 <Pressable
                                   onPress={() => toggleServiceSelection(service.id)}
                                   style={({ pressed }) => [styles.servicePickerItem, pressed ? styles.pressed : null]}
@@ -3456,6 +4061,14 @@ export function QuickActionScreen() {
                   </AppPanel>
 
                   <AppPanel style={[styles.summaryPanel, styles.summaryTotalPanel]}>
+                    <View style={styles.summaryHeroRow}>
+                      <View style={styles.summaryHeroTextWrap}>
+                        <Text style={styles.summaryHeroEyebrow}>Ringkasan akhir</Text>
+                        <Text style={styles.summaryHeroHeadline}>
+                          {paymentFlowType === "now" ? "Siap diteruskan ke pembayaran" : "Siap disimpan sebagai bayar nanti"}
+                        </Text>
+                      </View>
+                    </View>
                     <View style={styles.summarySectionHeader}>
                       <Text style={styles.summaryTitle}>Item Layanan</Text>
                       <Text style={styles.summarySectionMeta}>{selectedReviewItemCount} item</Text>
@@ -3898,10 +4511,6 @@ export function QuickActionScreen() {
                       <Text style={styles.summaryTotal}>Total Tagihan</Text>
                       <Text style={styles.summaryTotalValue}>{formatMoney(total)}</Text>
                     </View>
-                    <View style={styles.summaryRow}>
-                      <Text style={styles.summaryText}>Status Pembayaran</Text>
-                      <Text style={styles.summaryValue}>{paymentFlowSummaryLabel}</Text>
-                    </View>
                   </AppPanel>
 
                   <AppPanel style={styles.summaryPanel}>
@@ -3953,25 +4562,48 @@ export function QuickActionScreen() {
                 </View>
               </ScrollView>
 
-              <View style={styles.createFormFooterDock}>
-                <View style={styles.panelFooterDivider} />
-                {primaryDisabledHint ? <Text style={styles.panelFooterHint}>{primaryDisabledHint}</Text> : null}
-                <View style={[styles.panelFooterActions, step === "review" || step === "payment" ? styles.panelFooterActionsReview : null]}>
-                  <View style={styles.panelFooterActionItem}>
-                    <AppButton leftElement={<Ionicons color={theme.colors.textPrimary} name={secondaryButtonIconName} size={18} />} onPress={previousStep} title={secondaryButtonTitle} variant="ghost" />
+              <View onLayout={handleCreateFormFooterDockLayout} style={styles.createFormFooterDock}>
+                {primaryDisabledHint ? (
+                  <View style={styles.panelFooterHintBox}>
+                    <Ionicons color={theme.colors.warning} name="alert-circle-outline" size={15} />
+                    <Text style={styles.panelFooterHint}>{primaryDisabledHint}</Text>
                   </View>
-                  <View style={styles.panelFooterActionItem}>
-                    <AppButton
-                      disabled={primaryDisabled}
-                      leftElement={<Ionicons color={theme.colors.primaryContrast} name={step === "payment" ? "save-outline" : "arrow-forward-outline"} size={18} />}
-                      loading={submitting && step === "payment"}
+                ) : null}
+                <View style={[styles.panelFooterActions, step === "review" || step === "payment" ? styles.panelFooterActionsReview : null]}>
+                  <View style={styles.panelFooterActionItemSecondary}>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={previousStep}
+                      style={({ pressed }) => [styles.footerSecondaryButton, pressed ? styles.footerSecondaryButtonPressed : null]}
+                    >
+                      <Ionicons color={theme.colors.textPrimary} name={secondaryButtonIconName} size={18} />
+                      <Text style={styles.footerSecondaryTitle}>{secondaryButtonTitle}</Text>
+                    </Pressable>
+                  </View>
+                  <View style={styles.panelFooterActionItemPrimary}>
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={primaryActionDisabled}
                       onPress={handlePrimaryAction}
-                      title={primaryButtonTitle}
-                    />
+                      style={({ pressed }) => [
+                        styles.footerPrimaryButton,
+                        primaryActionDisabled ? styles.footerPrimaryButtonDisabled : null,
+                        pressed && !primaryActionDisabled ? styles.footerPrimaryButtonPressed : null,
+                      ]}
+                    >
+                      <Text numberOfLines={1} style={[styles.footerPrimaryTitle, primaryActionDisabled ? styles.footerPrimaryTitleDisabled : null]}>
+                        {primaryButtonTitle}
+                      </Text>
+                      {primaryButtonBusy ? (
+                        <ActivityIndicator color={theme.colors.primaryContrast} size="small" />
+                      ) : (
+                        <Ionicons color={theme.colors.primaryContrast} name={primaryButtonIconName} size={18} />
+                      )}
+                    </Pressable>
                   </View>
                 </View>
               </View>
-            </AppPanel>
+            </View>
           </View>
         )}
 
@@ -4088,6 +4720,10 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     createFormViewport: {
       flex: 1,
     },
+    launchShell: {
+      gap: theme.spacing.lg,
+      paddingTop: theme.spacing.xs,
+    },
     createFormFloatingAlertDock: {
       position: "absolute",
       top: contentTop,
@@ -4097,49 +4733,205 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       zIndex: 8,
     },
     bodyHeader: {
-      gap: 0,
+      gap: 2,
     },
-    titleRow: {
+    screenTopBar: {
+      minHeight: 48,
       flexDirection: "row",
       alignItems: "center",
-      gap: 8,
+      gap: theme.spacing.sm,
     },
-    titleIconWrap: {
-      width: 26,
-      height: 26,
-      borderRadius: 13,
+    screenTopBarButton: {
+      width: 42,
+      height: 42,
+      borderRadius: theme.radii.pill,
       borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
-      backgroundColor: theme.colors.surfaceSoft,
+      borderColor: theme.mode === "dark" ? "rgba(57,89,116,0.78)" : "rgba(201,220,236,0.96)",
+      backgroundColor: theme.mode === "dark" ? "rgba(12,33,50,0.82)" : "rgba(255,255,255,0.86)",
       alignItems: "center",
       justifyContent: "center",
+      shadowColor: theme.shadows.color,
+      shadowOpacity: theme.mode === "dark" ? 0.16 : 0.07,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 2,
+    },
+    screenTopBarTitleSlot: {
+      flex: 1,
+      minHeight: 42,
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    screenTopBarTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: isTablet ? 16 : 15,
+      lineHeight: isTablet ? 20 : 18,
+      letterSpacing: 0.12,
+      textAlign: "center",
+    },
+    screenTopBarMeta: {
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 8,
+      flexShrink: 0,
+    },
+    screenTopBarSideSlot: {
+      minWidth: 42,
+      minHeight: 42,
+      alignItems: "flex-end",
+      justifyContent: "center",
+      flexShrink: 0,
+    },
+    screenTopBarSpacer: {
+      width: 42,
+      height: 42,
+    },
+    screenTopBarChip: {
+      maxWidth: "58%",
+      minHeight: 32,
+      borderRadius: theme.radii.pill,
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? "rgba(57,89,116,0.7)" : "rgba(201,220,236,0.92)",
+      backgroundColor: theme.mode === "dark" ? "rgba(12,33,50,0.7)" : "rgba(255,255,255,0.82)",
+      paddingHorizontal: 11,
+      paddingVertical: 6,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 5,
+    },
+    screenTopBarChipSuccess: {
+      borderColor: theme.mode === "dark" ? "rgba(56,211,133,0.34)" : "rgba(31,158,99,0.22)",
+      backgroundColor: theme.mode === "dark" ? "rgba(18,58,42,0.78)" : "rgba(237,249,241,0.94)",
+    },
+    screenTopBarChipText: {
+      flexShrink: 1,
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11.5,
+      lineHeight: 13,
+    },
+    screenTopBarChipTextSuccess: {
+      color: theme.colors.success,
+    },
+    titleEyebrow: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11.5,
+      lineHeight: 14,
+      letterSpacing: 0.9,
+      textTransform: "uppercase",
     },
     title: {
       color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.heavy,
-      fontSize: isTablet ? 25 : 21,
-      lineHeight: isTablet ? 31 : 27,
-      letterSpacing: 0.15,
+      fontFamily: theme.fonts.bold,
+      fontSize: isTablet ? 23 : 20,
+      lineHeight: isTablet ? 28 : 24,
+      letterSpacing: 0.08,
     },
-    titleEmphasis: {
-      color: theme.colors.info,
+    titleSubtitle: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 13,
+      lineHeight: 18,
+      marginTop: 4,
     },
-    panel: {
-      gap: theme.spacing.md,
+    headerMetaRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 6,
+      marginTop: theme.spacing.sm,
     },
-    createFormPanel: {
+    headerMetaChip: {
+      minHeight: 28,
+      maxWidth: "100%",
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+    },
+    headerMetaChipSuccess: {
+      borderColor: theme.mode === "dark" ? "#2f7054" : "#bfe7cf",
+      backgroundColor: theme.mode === "dark" ? "#123a2a" : "#edf9f1",
+    },
+    headerMetaChipText: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+      lineHeight: 14,
+      flexShrink: 1,
+    },
+    headerMetaChipSuccessText: {
+      color: theme.colors.success,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+      lineHeight: 14,
+    },
+    createFormShell: {
       minHeight: 0,
       flex: 1,
       gap: 0,
     },
     createFormHeaderDock: {
       gap: theme.spacing.xs,
-      paddingBottom: theme.spacing.sm,
+      paddingTop: theme.spacing.xs,
+      paddingHorizontal: 2,
+      paddingBottom: theme.spacing.xs,
+      marginBottom: theme.spacing.xs,
       borderBottomWidth: 1,
-      borderBottomColor: theme.colors.border,
+      borderBottomColor: "transparent",
     },
     actionList: {
       gap: theme.spacing.sm,
+    },
+    launchHighlightsGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: theme.spacing.sm,
+    },
+    launchHighlightCard: {
+      flexGrow: 1,
+      minWidth: isTablet ? 160 : 140,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.lg,
+      backgroundColor: theme.mode === "dark" ? "#123149" : "#f3faff",
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+      gap: 4,
+    },
+    launchHighlightIconWrap: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      backgroundColor: theme.colors.surface,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 2,
+    },
+    launchHighlightLabel: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 14,
+      textTransform: "uppercase",
+      letterSpacing: 0.25,
+    },
+    launchHighlightValue: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 13,
+      lineHeight: 16,
     },
     infoText: {
       color: theme.colors.textMuted,
@@ -4147,61 +4939,211 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontSize: 14,
       lineHeight: 18,
     },
-    stepProgressTrack: {
-      height: 5,
-      borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.border,
-      overflow: "hidden",
-      marginTop: 2,
-      marginBottom: 4,
+    stepLegendRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 6,
     },
-    stepProgressTrackCompact: {
-      height: 4,
-      marginTop: 0,
-    },
-    stepProgressFill: {
-      height: "100%",
+    stepLegendChip: {
+      flex: 1,
+      minWidth: 86,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
       borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.info,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+    },
+    stepLegendChipActive: {
+      borderColor: theme.colors.info,
+      backgroundColor: theme.colors.primarySoft,
+    },
+    stepLegendChipDone: {
+      borderColor: theme.mode === "dark" ? "#2f7054" : "#bfe7cf",
+      backgroundColor: theme.mode === "dark" ? "#123a2a" : "#edf9f1",
+    },
+    stepLegendNumberWrap: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      backgroundColor: theme.colors.surface,
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
+    },
+    stepLegendNumberWrapActive: {
+      borderColor: theme.colors.info,
+      backgroundColor: theme.colors.surface,
+    },
+    stepLegendNumberWrapDone: {
+      borderColor: theme.colors.success,
+      backgroundColor: theme.colors.success,
+    },
+    stepLegendNumber: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.bold,
+      fontSize: 11,
+      lineHeight: 12,
+    },
+    stepLegendNumberActive: {
+      color: theme.colors.info,
+    },
+    stepLegendNumberDone: {
+      color: theme.colors.primaryContrast,
+    },
+    stepLegendLabel: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+      lineHeight: 14,
+      flexShrink: 1,
+    },
+    stepLegendLabelActive: {
+      color: theme.colors.info,
+    },
+    stepLegendLabelDone: {
+      color: theme.colors.success,
+    },
+    stepModeBanner: {
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.mode === "dark" ? "#11334d" : "#eef7ff",
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+    },
+    stepModeBannerText: {
+      flex: 1,
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12.5,
+      lineHeight: 16,
     },
     panelBody: {
-      gap: theme.spacing.xs,
+      gap: theme.spacing.sm,
     },
     panelBodyScroll: {
       flex: 1,
       marginTop: theme.spacing.sm,
     },
     panelBodyScrollContent: {
-      paddingBottom: theme.spacing.sm,
+      paddingBottom: theme.spacing.lg,
     },
     createFormFooterDock: {
       gap: theme.spacing.xs,
-      paddingTop: theme.spacing.sm,
-      borderTopWidth: 1,
-      borderTopColor: theme.colors.border,
-      backgroundColor: theme.colors.surface,
+      marginTop: theme.spacing.sm,
+      paddingTop: theme.spacing.xs,
+      paddingHorizontal: theme.spacing.xs,
+      paddingBottom: theme.spacing.xs,
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? "rgba(47,80,111,0.62)" : "rgba(208,224,238,0.9)",
+      borderRadius: theme.radii.lg,
+      backgroundColor: theme.mode === "dark" ? "rgba(12,31,47,0.9)" : "rgba(255,255,255,0.94)",
+      shadowColor: theme.shadows.color,
+      shadowOpacity: theme.mode === "dark" ? 0.1 : 0.04,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 1,
     },
-    panelFooterDivider: {
-      height: 1,
-      backgroundColor: theme.colors.border,
-      marginTop: 0,
+    panelFooterHintBox: {
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.mode === "dark" ? "rgba(57,39,10,0.55)" : "rgba(255,247,230,0.88)",
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
     },
     panelFooterHint: {
+      flex: 1,
       color: theme.colors.warning,
       fontFamily: theme.fonts.medium,
-      fontSize: 13,
+      fontSize: 12,
       lineHeight: 15,
     },
     panelFooterActions: {
       flexDirection: "row",
-      alignItems: "center",
-      gap: theme.spacing.xs,
-    },
-    panelFooterActionsReview: {
+      alignItems: "stretch",
+      justifyContent: "flex-end",
       gap: theme.spacing.sm,
     },
-    panelFooterActionItem: {
+    panelFooterActionsReview: {
+      gap: theme.spacing.md,
+    },
+    panelFooterActionItemSecondary: {
+      flexGrow: 0,
+      flexShrink: 0,
+      minWidth: isTablet ? 148 : 112,
+      maxWidth: isTablet ? 176 : 132,
+    },
+    panelFooterActionItemPrimary: {
       flex: 1,
+    },
+    footerSecondaryButton: {
+      minHeight: isTablet ? 54 : 50,
+      borderRadius: theme.radii.lg,
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? "rgba(53,86,113,0.82)" : "rgba(212,227,241,0.96)",
+      backgroundColor: theme.mode === "dark" ? "rgba(17,43,65,0.92)" : "rgba(247,251,255,0.96)",
+      paddingHorizontal: isTablet ? 16 : 14,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+    },
+    footerSecondaryButtonPressed: {
+      opacity: 0.9,
+      transform: [{ translateY: 1 }, { scale: 0.992 }],
+    },
+    footerSecondaryTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: isTablet ? 14 : 13.5,
+      lineHeight: isTablet ? 17 : 16,
+    },
+    footerPrimaryButton: {
+      minHeight: isTablet ? 54 : 50,
+      borderRadius: theme.radii.lg,
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? "#55c4ff" : "#1396c7",
+      backgroundColor: theme.colors.primaryStrong,
+      paddingHorizontal: isTablet ? 18 : 16,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      shadowColor: theme.mode === "dark" ? "#031824" : theme.colors.primaryStrong,
+      shadowOpacity: theme.mode === "dark" ? 0.24 : 0.2,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 4,
+    },
+    footerPrimaryButtonDisabled: {
+      backgroundColor: theme.mode === "dark" ? "#2a627e" : "#8fc8dc",
+      borderColor: theme.mode === "dark" ? "#3b7592" : "#a3d1e1",
+      shadowOpacity: 0,
+      elevation: 0,
+    },
+    footerPrimaryButtonPressed: {
+      transform: [{ translateY: 1 }, { scale: 0.995 }],
+    },
+    footerPrimaryTitle: {
+      color: theme.colors.primaryContrast,
+      fontFamily: theme.fonts.bold,
+      fontSize: isTablet ? 15 : 14,
+      lineHeight: isTablet ? 18 : 16,
+    },
+    footerPrimaryTitleDisabled: {
+      color: theme.mode === "dark" ? "rgba(3,24,36,0.82)" : "rgba(255,255,255,0.86)",
     },
     sectionWrap: {
       gap: theme.spacing.xs,
@@ -4533,6 +5475,37 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       justifyContent: "space-between",
       gap: theme.spacing.xs,
     },
+    selectedCustomerTagRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 6,
+    },
+    selectedCustomerTag: {
+      minHeight: 28,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 9,
+      paddingVertical: 5,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+    },
+    selectedCustomerTagWarning: {
+      borderColor: theme.mode === "dark" ? "#8b6330" : "#f4d39b",
+      backgroundColor: theme.mode === "dark" ? "#3b2a18" : "#fff7e8",
+    },
+    selectedCustomerTagText: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+      lineHeight: 14,
+    },
+    selectedCustomerTagWarningText: {
+      color: theme.colors.warning,
+    },
     selectedCustomerBadge: {
       color: theme.colors.info,
       fontFamily: theme.fonts.semibold,
@@ -4854,7 +5827,7 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
     serviceGroupPickerMain: {
       flex: 1,
-      gap: 1,
+      gap: 3,
     },
     serviceGroupPickerName: {
       color: theme.colors.textPrimary,
@@ -4862,11 +5835,155 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontSize: 14,
       lineHeight: 17,
     },
+    serviceGroupPickerMetaRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 6,
+    },
     serviceGroupPickerMeta: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 14,
+    },
+    serviceGroupPickerCountBadge: {
+      minHeight: 22,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 8,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    serviceGroupPickerCountBadgeActive: {
+      borderColor: theme.mode === "dark" ? "rgba(28,211,226,0.42)" : "rgba(42,124,226,0.28)",
+      backgroundColor: theme.mode === "dark" ? "rgba(28,211,226,0.12)" : "rgba(42,124,226,0.12)",
+    },
+    serviceGroupPickerCountBadgeText: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
+      lineHeight: 13,
+    },
+    serviceGroupPickerCountBadgeTextActive: {
+      color: theme.colors.info,
+    },
+    serviceSearchResultsHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
+      paddingHorizontal: 2,
+    },
+    serviceSearchResultsTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 14,
+      lineHeight: 17,
+    },
+    serviceSearchResultsMeta: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 14,
+    },
+    serviceSearchResultItem: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
+    },
+    serviceSearchResultItemSelected: {
+      borderColor: theme.colors.borderStrong,
+      backgroundColor: theme.colors.surfaceSoft,
+    },
+    serviceSearchResultLead: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      minWidth: 0,
+    },
+    serviceSearchResultIconWrap: {
+      width: 32,
+      height: 32,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surfaceSoft,
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
+    },
+    serviceSearchResultMain: {
+      flex: 1,
+      gap: 4,
+      minWidth: 0,
+    },
+    serviceSearchResultName: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 14,
+      lineHeight: 17,
+    },
+    serviceSearchResultMetaRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 6,
+    },
+    serviceSearchResultPrice: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 14,
+    },
+    serviceSearchResultGroupBadge: {
+      minHeight: 22,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surfaceSoft,
+      paddingHorizontal: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      maxWidth: isTablet ? 220 : 170,
+    },
+    serviceSearchResultGroupBadgeText: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
+      lineHeight: 13,
+      flexShrink: 1,
+    },
+    serviceSearchResultStateBadge: {
+      minHeight: 22,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.mode === "dark" ? "rgba(222,180,67,0.16)" : "rgba(191,138,26,0.12)",
+      paddingHorizontal: 8,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    serviceSearchResultStateBadgeActive: {
+      backgroundColor: theme.mode === "dark" ? "rgba(28,211,226,0.16)" : "rgba(42,124,226,0.12)",
+    },
+    serviceSearchResultStateBadgeText: {
+      color: theme.colors.warning,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
+      lineHeight: 13,
+    },
+    serviceSearchResultStateBadgeTextActive: {
+      color: theme.colors.info,
     },
     activeGroupBar: {
       gap: 6,
@@ -4876,19 +5993,75 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       alignItems: "center",
       gap: 4,
       alignSelf: "flex-start",
-      minHeight: 34,
-      borderWidth: 1,
-      borderColor: theme.colors.info,
-      borderRadius: theme.radii.pill,
-      backgroundColor: theme.colors.primarySoft,
-      paddingHorizontal: 11,
-      paddingVertical: 5,
+      minHeight: 28,
+      paddingRight: 4,
+      paddingVertical: 2,
     },
     activeGroupBackLinkText: {
       color: theme.colors.info,
       fontFamily: theme.fonts.semibold,
-      fontSize: 13,
-      lineHeight: 16,
+      fontSize: 12.5,
+      lineHeight: 15,
+    },
+    activeGroupSwitchRow: {
+      gap: 8,
+      paddingTop: 2,
+      paddingRight: 2,
+    },
+    activeGroupSwitchChip: {
+      minHeight: 34,
+      maxWidth: isTablet ? 240 : 208,
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.pill,
+      backgroundColor: theme.colors.surface,
+      paddingLeft: 12,
+      paddingRight: 8,
+      paddingVertical: 6,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    activeGroupSwitchChipActive: {
+      borderColor: theme.colors.info,
+      backgroundColor: theme.colors.primarySoft,
+    },
+    activeGroupSwitchLabel: {
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12.5,
+      lineHeight: 15,
+      flexShrink: 1,
+    },
+    activeGroupSwitchLabelActive: {
+      color: theme.colors.info,
+    },
+    activeGroupSwitchBadge: {
+      minHeight: 22,
+      borderRadius: 11,
+      backgroundColor: theme.colors.surfaceSoft,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 8,
+      flexShrink: 0,
+    },
+    activeGroupSwitchBadgeSelected: {
+      backgroundColor: theme.mode === "dark" ? "rgba(28,211,226,0.12)" : "rgba(42,124,226,0.12)",
+    },
+    activeGroupSwitchBadgeActive: {
+      backgroundColor: theme.mode === "dark" ? "rgba(28,211,226,0.2)" : "rgba(42,124,226,0.18)",
+    },
+    activeGroupSwitchBadgeText: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
+      lineHeight: 13,
+    },
+    activeGroupSwitchBadgeTextSelected: {
+      color: theme.colors.info,
+    },
+    activeGroupSwitchBadgeTextActive: {
+      color: theme.colors.info,
     },
     servicePickerBlock: {
       borderWidth: 1,
@@ -4898,6 +6071,10 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       paddingHorizontal: 10,
       paddingVertical: 8,
       gap: 6,
+    },
+    servicePickerBlockHighlighted: {
+      borderColor: theme.colors.info,
+      backgroundColor: theme.mode === "dark" ? "rgba(28,211,226,0.12)" : "rgba(42,124,226,0.08)",
     },
     servicePickerItemSelected: {
       borderColor: theme.colors.info,
@@ -5062,6 +6239,30 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontFamily: theme.fonts.semibold,
       fontSize: 13,
       lineHeight: 15,
+    },
+    summaryHeroRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
+    },
+    summaryHeroTextWrap: {
+      flex: 1,
+      gap: 2,
+    },
+    summaryHeroEyebrow: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 14,
+      textTransform: "uppercase",
+      letterSpacing: 0.25,
+    },
+    summaryHeroHeadline: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 15,
+      lineHeight: 19,
     },
     summaryTitle: {
       color: theme.colors.textPrimary,
@@ -5813,5 +7014,3 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
   });
 }
-
-

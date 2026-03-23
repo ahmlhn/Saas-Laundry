@@ -18,7 +18,7 @@ import {
 } from "../../features/customers/customerPhone";
 import { hasAnyRole } from "../../lib/accessControl";
 import { getApiErrorMessage } from "../../lib/httpClient";
-import type { AccountStackParamList, AppTabParamList } from "../../navigation/types";
+import type { AccountStackParamList, AppRootStackParamList, AppTabParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
@@ -69,7 +69,8 @@ export function CustomerFormScreen() {
 
   function navigateToQuickAction(preselectCustomerId?: string): void {
     const tabNavigation = navigation.getParent<NavigationProp<AppTabParamList>>();
-    if (!tabNavigation) {
+    const rootNavigation = tabNavigation?.getParent<NativeStackNavigationProp<AppRootStackParamList>>();
+    if (!tabNavigation || !rootNavigation) {
       if (navigation.canGoBack()) {
         navigation.goBack();
       } else {
@@ -82,7 +83,7 @@ export function CustomerFormScreen() {
       index: 0,
       routes: [{ name: "AccountHub" }],
     });
-    tabNavigation.navigate("QuickActionTab", {
+    rootNavigation.navigate("OrderCreate", {
       openCreateStamp: Date.now(),
       preselectCustomerId,
     });

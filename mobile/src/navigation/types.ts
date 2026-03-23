@@ -99,17 +99,17 @@ export type AccountStackParamList = {
   WhatsAppTools: undefined;
 };
 
+export type OrderCreateRouteParams = {
+  openCreateStamp?: number;
+  preselectCustomerId?: string;
+  editOrderId?: string;
+  editStartStep?: "customer" | "services" | "review";
+};
+
 export type AppTabParamList = {
   HomeTab: undefined;
   OrdersTab: NavigatorScreenParams<OrdersStackParamList> | undefined;
-  QuickActionTab:
-    | {
-        openCreateStamp?: number;
-        preselectCustomerId?: string;
-        editOrderId?: string;
-        editStartStep?: "customer" | "services" | "review";
-      }
-    | undefined;
+  QuickActionTab: undefined;
   ReportsTab: undefined;
   AccountTab: NavigatorScreenParams<AccountStackParamList> | undefined;
 };
@@ -117,6 +117,7 @@ export type AppTabParamList = {
 export type AppRootStackParamList = {
   OutletSelect: undefined;
   MainTabs: NavigatorScreenParams<AppTabParamList> | undefined;
+  OrderCreate: OrderCreateRouteParams | undefined;
   OrderPayment: {
     orderId: string;
     source: "create" | "detail";

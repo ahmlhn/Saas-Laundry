@@ -1,6 +1,11 @@
+import axios from "axios";
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { MOBILE_DEVICE_NAME } from "../config/env";
 import { fetchMeContext, loginWithCredential, loginWithGoogleIdToken, logoutCurrentSession, registerAccount } from "../features/auth/authApi";
+import { initializeLocalDatabase } from "../features/localdb/database";
+import { clearSessionSnapshot, readSessionSnapshot, writeSessionSnapshot } from "../features/session/sessionSnapshotStorage";
+import { getOrCreateDeviceId } from "../features/sync/deviceIdentity";
+import { ensureSyncStateInitialized } from "../features/sync/syncStateStorage";
 import { authenticateWithBiometric, getBiometricAvailability } from "../lib/biometricAuth";
 import { setAuthBearerToken } from "../lib/httpClient";
 import {
@@ -54,6 +59,23 @@ interface SessionContextValue {
 
 const SessionContext = createContext<SessionContextValue | undefined>(undefined);
 
+function isUnauthorizedError(error: unknown): boolean {
+  if (!axios.isAxiosError(error)) {
+    return false;
+  }
+
+  const status = error.response?.status;
+  return status === 401 || status === 403;
+}
+
+function isRecoverableSessionFetchError(error: unknown): boolean {
+  if (!axios.isAxiosError(error)) {
+    return error instanceof Error;
+  }
+
+  return !error.response || (typeof error.response?.status === "number" && error.response.status >= 500);
+}
+
 function reconcileSelectedOutlet(
   session: UserContext,
   options: {
@@ -93,6 +115,39 @@ async function persistSelectedOutlet(outlet: AllowedOutlet | null): Promise<void
   await setStoredSelectedOutletId(outlet.id);
 }
 
+function applySessionState(
+  nextSession: UserContext | null,
+  nextSelectedOutlet: AllowedOutlet | null,
+  setters: {
+    setSession: (session: UserContext | null) => void;
+    setSelectedOutlet: (outlet: AllowedOutlet | null) => void;
+    setHasStoredSession?: (value: boolean) => void;
+  }
+): void {
+  setters.setSession(nextSession);
+  setters.setSelectedOutlet(nextSelectedOutlet);
+  setters.setHasStoredSession?.(nextSession !== null);
+}
+
+async function clearPersistedSession(): Promise<void> {
+  await Promise.all([clearStoredAccessToken(), clearStoredSelectedOutletId(), clearSessionSnapshot()]);
+  setAuthBearerToken(null);
+}
+
+function restoreSnapshotSession(
+  snapshot: UserContext,
+  preferredOutletId: string | null | undefined,
+  previousOutlet: AllowedOutlet | null
+): { session: UserContext; selectedOutlet: AllowedOutlet | null } {
+  return {
+    session: snapshot,
+    selectedOutlet: reconcileSelectedOutlet(snapshot, {
+      preferredOutletId,
+      previousOutlet,
+    }),
+  };
+}
+
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [booting, setBooting] = useState(true);
   const [session, setSession] = useState<UserContext | null>(null);
@@ -109,11 +164,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   async function bootstrapSession(): Promise<void> {
     setBooting(true);
 
-    const [token, preferredOutletId, storedBiometricEnabled, biometricAvailability] = await Promise.all([
+    try {
+      await initializeLocalDatabase();
+      const deviceId = await getOrCreateDeviceId();
+      await ensureSyncStateInitialized(deviceId);
+    } catch (error) {
+      console.warn("[SessionContext] Failed to initialize local mobile foundation.", error);
+    }
+
+    const [token, preferredOutletId, storedBiometricEnabled, biometricAvailability, sessionSnapshot] = await Promise.all([
       getStoredAccessToken(),
       getStoredSelectedOutletId(),
       getStoredBiometricEnabled(),
       getBiometricAvailability(),
+      readSessionSnapshot(),
     ]);
 
     setBiometricAvailable(biometricAvailability.isSupported);
@@ -121,9 +185,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setBiometricEnabledState(storedBiometricEnabled && biometricAvailability.isSupported);
 
     if (!token) {
+      await clearSessionSnapshot();
       setAuthBearerToken(null);
-      setSession(null);
-      setSelectedOutlet(null);
+      applySessionState(null, null, { setSession, setSelectedOutlet, setHasStoredSession });
       setHasStoredSession(false);
       await clearStoredSelectedOutletId();
       setBooting(false);
@@ -134,8 +198,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     if (storedBiometricEnabled && biometricAvailability.isSupported) {
       setAuthBearerToken(null);
-      setSession(null);
-      setSelectedOutlet(null);
+      applySessionState(null, null, { setSession, setSelectedOutlet });
       setBooting(false);
       return;
     }
@@ -149,15 +212,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         previousOutlet: selectedOutlet,
       });
 
-      setSession(response.data);
-      setSelectedOutlet(nextSelectedOutlet);
-      await persistSelectedOutlet(nextSelectedOutlet);
-    } catch {
-      await Promise.all([clearStoredAccessToken(), clearStoredSelectedOutletId()]);
-      setAuthBearerToken(null);
-      setSession(null);
-      setSelectedOutlet(null);
-      setHasStoredSession(false);
+      applySessionState(response.data, nextSelectedOutlet, { setSession, setSelectedOutlet, setHasStoredSession });
+      await Promise.all([persistSelectedOutlet(nextSelectedOutlet), writeSessionSnapshot(response.data)]);
+    } catch (error) {
+      if (isUnauthorizedError(error)) {
+        await clearPersistedSession();
+        applySessionState(null, null, { setSession, setSelectedOutlet, setHasStoredSession });
+        setHasStoredSession(false);
+      } else if (sessionSnapshot && isRecoverableSessionFetchError(error)) {
+        const restored = restoreSnapshotSession(sessionSnapshot, preferredOutletId, selectedOutlet);
+        applySessionState(restored.session, restored.selectedOutlet, { setSession, setSelectedOutlet, setHasStoredSession });
+        await persistSelectedOutlet(restored.selectedOutlet);
+      } else {
+        setAuthBearerToken(token);
+        applySessionState(null, null, { setSession, setSelectedOutlet });
+        setHasStoredSession(true);
+      }
     } finally {
       setBooting(false);
     }
@@ -168,15 +238,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const [response, preferredOutletId] = await Promise.all([fetchMeContext(), getStoredSelectedOutletId()]);
-    const nextSelectedOutlet = reconcileSelectedOutlet(response.data, {
-      preferredOutletId,
-      previousOutlet: selectedOutlet,
-    });
+    try {
+      const [response, preferredOutletId] = await Promise.all([fetchMeContext(), getStoredSelectedOutletId()]);
+      const nextSelectedOutlet = reconcileSelectedOutlet(response.data, {
+        preferredOutletId,
+        previousOutlet: selectedOutlet,
+      });
 
-    setSession(response.data);
-    setSelectedOutlet(nextSelectedOutlet);
-    await persistSelectedOutlet(nextSelectedOutlet);
+      applySessionState(response.data, nextSelectedOutlet, { setSession, setSelectedOutlet, setHasStoredSession });
+      await Promise.all([persistSelectedOutlet(nextSelectedOutlet), writeSessionSnapshot(response.data)]);
+    } catch (error) {
+      if (!isUnauthorizedError(error)) {
+        return;
+      }
+
+      await clearPersistedSession();
+      applySessionState(null, null, { setSession, setSelectedOutlet, setHasStoredSession });
+      setHasStoredSession(false);
+    }
   }
 
   async function login(input: LoginInput): Promise<void> {
@@ -196,9 +275,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       previousOutlet: selectedOutlet,
     });
 
-    setSession(response.data);
-    setSelectedOutlet(nextSelectedOutlet);
-    await persistSelectedOutlet(nextSelectedOutlet);
+    applySessionState(response.data, nextSelectedOutlet, { setSession, setSelectedOutlet, setHasStoredSession });
+    await Promise.all([persistSelectedOutlet(nextSelectedOutlet), writeSessionSnapshot(response.data)]);
   }
 
   async function loginWithGoogle(input: GoogleLoginInput): Promise<void> {
@@ -217,9 +295,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       previousOutlet: selectedOutlet,
     });
 
-    setSession(response.data);
-    setSelectedOutlet(nextSelectedOutlet);
-    await persistSelectedOutlet(nextSelectedOutlet);
+    applySessionState(response.data, nextSelectedOutlet, { setSession, setSelectedOutlet, setHasStoredSession });
+    await Promise.all([persistSelectedOutlet(nextSelectedOutlet), writeSessionSnapshot(response.data)]);
   }
 
   async function register(input: RegisterInput): Promise<void> {
@@ -244,9 +321,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       previousOutlet: selectedOutlet,
     });
 
-    setSession(response.data);
-    setSelectedOutlet(nextSelectedOutlet);
-    await persistSelectedOutlet(nextSelectedOutlet);
+    applySessionState(response.data, nextSelectedOutlet, { setSession, setSelectedOutlet, setHasStoredSession });
+    await Promise.all([persistSelectedOutlet(nextSelectedOutlet), writeSessionSnapshot(response.data)]);
   }
 
   async function biometricLogin(): Promise<void> {
@@ -262,16 +338,33 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await authenticateWithBiometric(`Verifikasi ${biometricLabel} untuk masuk`);
     setAuthBearerToken(token);
 
-    const [response, preferredOutletId] = await Promise.all([fetchMeContext(), getStoredSelectedOutletId()]);
-    const nextSelectedOutlet = reconcileSelectedOutlet(response.data, {
-      preferredOutletId,
-      previousOutlet: selectedOutlet,
-    });
+    const [preferredOutletId, sessionSnapshot] = await Promise.all([getStoredSelectedOutletId(), readSessionSnapshot()]);
 
-    setSession(response.data);
-    setSelectedOutlet(nextSelectedOutlet);
-    setHasStoredSession(true);
-    await persistSelectedOutlet(nextSelectedOutlet);
+    try {
+      const response = await fetchMeContext();
+      const nextSelectedOutlet = reconcileSelectedOutlet(response.data, {
+        preferredOutletId,
+        previousOutlet: selectedOutlet,
+      });
+
+      applySessionState(response.data, nextSelectedOutlet, { setSession, setSelectedOutlet, setHasStoredSession });
+      await Promise.all([persistSelectedOutlet(nextSelectedOutlet), writeSessionSnapshot(response.data)]);
+    } catch (error) {
+      if (isUnauthorizedError(error)) {
+        await clearPersistedSession();
+        applySessionState(null, null, { setSession, setSelectedOutlet, setHasStoredSession });
+        setHasStoredSession(false);
+        throw new Error("Sesi login sudah tidak valid. Silakan login ulang.");
+      }
+
+      if (!sessionSnapshot || !isRecoverableSessionFetchError(error)) {
+        throw error;
+      }
+
+      const restored = restoreSnapshotSession(sessionSnapshot, preferredOutletId, selectedOutlet);
+      applySessionState(restored.session, restored.selectedOutlet, { setSession, setSelectedOutlet, setHasStoredSession });
+      await persistSelectedOutlet(restored.selectedOutlet);
+    }
   }
 
   async function setBiometricEnabled(enabled: boolean): Promise<void> {
@@ -299,10 +392,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     } catch {
       // best effort: sesi lokal tetap dibersihkan.
     } finally {
-      await Promise.all([clearStoredAccessToken(), clearStoredSelectedOutletId()]);
-      setAuthBearerToken(null);
-      setSession(null);
-      setSelectedOutlet(null);
+      await clearPersistedSession();
+      applySessionState(null, null, { setSession, setSelectedOutlet, setHasStoredSession });
       setHasStoredSession(false);
     }
   }

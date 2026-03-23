@@ -1,48 +1,126 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
-import { BrandMark } from "../../components/branding/BrandMark";
+import { ActivityIndicator, Animated, Easing, Pressable, RefreshControl, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppPanel } from "../../components/ui/AppPanel";
-import { StatusPill } from "../../components/ui/StatusPill";
 import { countOrdersByBucket, type OrderBucket } from "../../features/orders/orderBuckets";
 import { listOrders } from "../../features/orders/orderApi";
-import { formatDateLabel, formatTimeLabel, toDateToken } from "../../lib/dateTime";
+import { toDateToken } from "../../lib/dateTime";
 import { getApiErrorMessage } from "../../lib/httpClient";
-import type { AppTabParamList } from "../../navigation/types";
+import type { AppRootStackParamList, AppTabParamList } from "../../navigation/types";
 import { useSession } from "../../state/SessionContext";
 import type { AppTheme } from "../../theme/useAppTheme";
 import { useAppTheme } from "../../theme/useAppTheme";
 import type { OrderSummary } from "../../types/order";
 
 type Navigation = BottomTabNavigationProp<AppTabParamList, "HomeTab">;
+type LoadMode = "initial" | "refresh";
+type WorkspaceMode = "owner" | "cashier" | "worker" | "courier";
+type ToneKey = "warning" | "danger" | "info" | "success";
 
-interface ShortcutConfig {
-  key: OrderBucket | null;
+interface ToneStyle {
+  softBackground: string;
+  strongBackground: string;
+  foreground: string;
+  border: string;
+}
+
+interface WorkspaceModeMeta {
+  key: WorkspaceMode;
   label: string;
-  subtitle: string;
+  shortLabel: string;
+  hint: string;
   icon: keyof typeof Ionicons.glyphMap;
 }
 
-const SHORTCUTS: ShortcutConfig[] = [
-  { key: "antrian", label: "Antrian", subtitle: "Menunggu proses", icon: "time-outline" },
-  { key: "proses", label: "Proses", subtitle: "Sedang dikerjakan", icon: "color-wand-outline" },
-  { key: "siap_ambil", label: "Siap Ambil", subtitle: "Menunggu diambil", icon: "bag-check-outline" },
-  { key: "siap_antar", label: "Siap Antar", subtitle: "Menunggu / proses antar", icon: "bicycle-outline" },
-  { key: "selesai", label: "Selesai", subtitle: "Sudah diambil / diantar", icon: "checkmark-done-outline" },
-  { key: null, label: "Semua", subtitle: "Seluruh pesanan", icon: "layers-outline" },
-];
-
-const currencyFormatter = new Intl.NumberFormat("id-ID");
-const compactFormatter = new Intl.NumberFormat("id-ID", { notation: "compact", maximumFractionDigits: 1 });
-
-function formatMoney(value: number): string {
-  return `Rp ${currencyFormatter.format(value)}`;
+interface HeroState {
+  title: string;
+  subtitle: string;
+  eyebrow: string;
+  primaryValue: string;
+  primaryLabel: string;
+  secondaryValue: string;
+  secondaryLabel: string;
 }
 
-function formatCompact(value: number): string {
+interface ActionTarget {
+  type: "orders" | "quick-action";
+  bucket?: OrderBucket | null;
+}
+
+interface FocusItemState {
+  key: string;
+  title: string;
+  subtitle: string;
+  cta: string;
+  tone: ToneKey;
+  icon: keyof typeof Ionicons.glyphMap;
+  target: ActionTarget;
+}
+
+interface MetricCardState {
+  key: string;
+  label: string;
+  value: string;
+  badge: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  tone: ToneKey;
+  target: ActionTarget;
+}
+
+interface LaneCardState {
+  key: string;
+  label: string;
+  value: string;
+  tone: ToneKey;
+  target: ActionTarget;
+}
+
+const MODE_META: Record<WorkspaceMode, WorkspaceModeMeta> = {
+  owner: {
+    key: "owner",
+    label: "Owner / Admin",
+    shortLabel: "Owner",
+    hint: "Command center outlet dan keputusan operasional.",
+    icon: "grid-outline",
+  },
+  cashier: {
+    key: "cashier",
+    label: "Kasir",
+    shortLabel: "Kasir",
+    hint: "Transaksi baru, pembayaran, dan pickup pending.",
+    icon: "card-outline",
+  },
+  worker: {
+    key: "worker",
+    label: "Pekerja",
+    shortLabel: "Worker",
+    hint: "Antrian masuk, proses laundry, dan order siap serah.",
+    icon: "shirt-outline",
+  },
+  courier: {
+    key: "courier",
+    label: "Kurir",
+    shortLabel: "Kurir",
+    hint: "Pickup, delivery, dan verifikasi alamat prioritas.",
+    icon: "bicycle-outline",
+  },
+};
+
+const numberFormatter = new Intl.NumberFormat("id-ID");
+const compactFormatter = new Intl.NumberFormat("id-ID", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
+function formatCount(value: number): string {
+  return numberFormatter.format(Math.max(Math.round(value), 0));
+}
+
+function formatCompactCount(value: number): string {
   if (!Number.isFinite(value)) {
     return "0";
   }
@@ -50,31 +128,305 @@ function formatCompact(value: number): string {
   return compactFormatter.format(Math.max(value, 0));
 }
 
-function getGreetingLabel(): string {
-  const hour = new Date().getHours();
+function formatMoney(value: number): string {
+  return `Rp ${numberFormatter.format(Math.max(Math.round(value), 0))}`;
+}
+
+function formatCompactMoney(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "Rp 0";
+  }
+
+  return `Rp ${compactFormatter.format(value)}`;
+}
+
+function getShiftLabel(date = new Date()): string {
+  const hour = date.getHours();
+
   if (hour < 11) {
-    return "Selamat Pagi";
+    return "Shift Pagi";
   }
+
   if (hour < 15) {
-    return "Selamat Siang";
+    return "Shift Siang";
   }
+
   if (hour < 19) {
-    return "Selamat Sore";
+    return "Shift Sore";
   }
 
-  return "Selamat Malam";
+  return "Shift Malam";
 }
 
-function getTodayLabel(timezone?: string): string {
-  return formatDateLabel(new Date(), timezone);
+function formatLiveLabel(timezone?: string): string {
+  try {
+    const value = new Intl.DateTimeFormat("id-ID", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: timezone,
+    }).format(new Date());
+
+    return `${value} Live`;
+  } catch {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")} Live`;
+  }
 }
 
-function getUpdatedLabel(date: Date | null, timezone?: string): string {
-  if (!date) {
-    return "-";
+function isPickupOrder(order: OrderSummary): boolean {
+  if (typeof order.requires_pickup === "boolean") {
+    return order.requires_pickup;
   }
 
-  return formatTimeLabel(date, timezone);
+  return Boolean(order.is_pickup_delivery);
+}
+
+function isPickupPending(order: OrderSummary): boolean {
+  if (!isPickupOrder(order)) {
+    return false;
+  }
+
+  return !order.courier_status || order.courier_status === "pickup_pending";
+}
+
+function resolveAvailableModes(roles: string[]): WorkspaceMode[] {
+  const modes: WorkspaceMode[] = [];
+
+  if (roles.some((role) => ["owner", "admin", "tenant_manager"].includes(role))) {
+    modes.push("owner");
+  }
+  if (roles.includes("cashier")) {
+    modes.push("cashier");
+  }
+  if (roles.includes("worker")) {
+    modes.push("worker");
+  }
+  if (roles.includes("courier")) {
+    modes.push("courier");
+  }
+
+  return modes.length > 0 ? modes : ["owner"];
+}
+
+function resolveInitialMode(modes: WorkspaceMode[]): WorkspaceMode {
+  if (modes.includes("cashier")) {
+    return "cashier";
+  }
+  if (modes.includes("worker")) {
+    return "worker";
+  }
+  if (modes.includes("courier")) {
+    return "courier";
+  }
+
+  return modes[0] ?? "owner";
+}
+
+function resolveReadyBucket(siapAmbilCount: number, siapAntarCount: number): OrderBucket {
+  return siapAntarCount >= siapAmbilCount ? "siap_antar" : "siap_ambil";
+}
+
+function buildHeroState(args: {
+  mode: WorkspaceMode;
+  selectedOutletName: string;
+  shiftLabel: string;
+  pickupPendingCount: number;
+  dueCount: number;
+  dueAmountTotal: number;
+  activeOrderCount: number;
+  cashToday: number;
+  queueCount: number;
+  processCount: number;
+  readyCount: number;
+  pickupTodayCount: number;
+  deliveryReadyCount: number;
+}): HeroState {
+  if (args.mode === "cashier") {
+    return {
+      eyebrow: "MODE KASIR",
+      title: "Shift kasir siap dijalankan.",
+      subtitle: `${args.selectedOutletName} • ${args.shiftLabel.toLowerCase()} • fokus ke transaksi baru, pickup pending, dan pembayaran due.`,
+      primaryValue: formatCount(args.activeOrderCount),
+      primaryLabel: "order aktif",
+      secondaryValue: formatCompactMoney(args.cashToday),
+      secondaryLabel: "cash hari ini",
+    };
+  }
+
+  if (args.mode === "worker") {
+    return {
+      eyebrow: "MODE PRODUKSI",
+      title: "Antrian proses lebih mudah diawasi.",
+      subtitle: `${args.selectedOutletName} • ${args.shiftLabel.toLowerCase()} • ringkas semua order masuk, proses, dan siap serah.`,
+      primaryValue: formatCount(args.queueCount),
+      primaryLabel: "antrian masuk",
+      secondaryValue: formatCount(args.processCount),
+      secondaryLabel: "sedang proses",
+    };
+  }
+
+  if (args.mode === "courier") {
+    return {
+      eyebrow: "MODE KURIR",
+      title: "Pickup dan delivery lebih terarah.",
+      subtitle: `${args.selectedOutletName} • ${args.shiftLabel.toLowerCase()} • prioritaskan pickup pending dan order siap antar.`,
+      primaryValue: formatCount(args.pickupPendingCount),
+      primaryLabel: "pickup pending",
+      secondaryValue: formatCount(args.deliveryReadyCount),
+      secondaryLabel: "siap antar",
+    };
+  }
+
+  return {
+    eyebrow: "COMMAND CENTER",
+    title: "Semua aksi penting ada di sini.",
+    subtitle: `${args.selectedOutletName} • ${args.shiftLabel.toLowerCase()} • ${formatCount(Math.max(args.pickupPendingCount + args.dueCount, args.readyCount))} sinyal prioritas aktif.`,
+    primaryValue: formatCount(Math.max(args.pickupPendingCount + args.dueCount, 0)),
+    primaryLabel: "butuh tindakan",
+    secondaryValue: formatCompactMoney(args.dueAmountTotal),
+    secondaryLabel: "piutang aktif",
+  };
+}
+
+function buildFocusItems(args: {
+  mode: WorkspaceMode;
+  pickupPendingCount: number;
+  dueCount: number;
+  dueAmountTotal: number;
+  activeOrderCount: number;
+  pendingCount: number;
+  readyCount: number;
+  queueCount: number;
+  processCount: number;
+  pickupTodayCount: number;
+  deliveryReadyCount: number;
+  readyBucket: OrderBucket;
+}): FocusItemState[] {
+  if (args.mode === "cashier") {
+    return [
+      {
+        key: "new-order",
+        title: "Transaksi baru siap dibuat",
+        subtitle: `${formatCount(args.activeOrderCount)} order aktif sedang berjalan di outlet ini.`,
+        cta: "Buat",
+        tone: "info",
+        icon: "add-circle-outline",
+        target: { type: "quick-action" },
+      },
+      {
+        key: "due",
+        title: `${formatCount(args.dueCount)} tagihan belum lunas`,
+        subtitle: `Nilai berjalan ${formatMoney(args.dueAmountTotal)} perlu follow up kasir.`,
+        cta: "Tagih",
+        tone: "danger",
+        icon: "wallet-outline",
+        target: { type: "orders", bucket: null },
+      },
+      {
+        key: "pickup",
+        title: `${formatCount(args.pickupPendingCount)} pickup menunggu konfirmasi`,
+        subtitle: "Verifikasi alamat dan slot jemput sebelum pelanggan menunggu terlalu lama.",
+        cta: "Tindak",
+        tone: "warning",
+        icon: "navigate-circle-outline",
+        target: { type: "orders", bucket: "antrian" },
+      },
+    ];
+  }
+
+  if (args.mode === "worker") {
+    return [
+      {
+        key: "queue",
+        title: `${formatCount(args.queueCount)} order baru masuk antrian`,
+        subtitle: "Pastikan penerimaan dan pengelompokan layanan berjalan tanpa bottleneck.",
+        cta: "Mulai",
+        tone: "warning",
+        icon: "time-outline",
+        target: { type: "orders", bucket: "antrian" },
+      },
+      {
+        key: "process",
+        title: `${formatCount(args.processCount)} order sedang diproses`,
+        subtitle: "Pantau tahap cuci, kering, dan setrika yang masih berjalan.",
+        cta: "Cek",
+        tone: "info",
+        icon: "color-wand-outline",
+        target: { type: "orders", bucket: "proses" },
+      },
+      {
+        key: "ready",
+        title: `${formatCount(args.readyCount)} order siap diserahkan`,
+        subtitle: "Dorong order siap ambil atau siap antar keluar dari lane secepatnya.",
+        cta: "Serahkan",
+        tone: "success",
+        icon: "bag-check-outline",
+        target: { type: "orders", bucket: args.readyBucket },
+      },
+    ];
+  }
+
+  if (args.mode === "courier") {
+    return [
+      {
+        key: "pickup",
+        title: `${formatCount(args.pickupPendingCount)} pickup masih pending`,
+        subtitle: "Ada jadwal jemput yang butuh follow up sebelum kurir berangkat.",
+        cta: "Ambil",
+        tone: "warning",
+        icon: "bicycle-outline",
+        target: { type: "orders", bucket: "antrian" },
+      },
+      {
+        key: "delivery",
+        title: `${formatCount(args.deliveryReadyCount)} order siap antar`,
+        subtitle: "Periksa alamat dan mulai delivery untuk order yang sudah ready.",
+        cta: "Antar",
+        tone: "info",
+        icon: "car-outline",
+        target: { type: "orders", bucket: "siap_antar" },
+      },
+      {
+        key: "route",
+        title: `${formatCount(args.pickupTodayCount)} tugas pickup hari ini`,
+        subtitle: "Lihat seluruh tugas jemput dan antar aktif dalam satu board.",
+        cta: "Board",
+        tone: "success",
+        icon: "map-outline",
+        target: { type: "orders", bucket: null },
+      },
+    ];
+  }
+
+  return [
+    {
+      key: "pickup",
+      title: `${formatCount(args.pickupPendingCount)} order menunggu konfirmasi pickup`,
+      subtitle: "Kasir dan kurir perlu sinkron untuk alamat, slot jemput, dan penugasan.",
+      cta: "Tindak",
+      tone: "warning",
+      icon: "navigate-outline",
+      target: { type: "orders", bucket: "antrian" },
+    },
+    {
+      key: "due",
+      title: `${formatCount(args.dueCount)} tagihan belum lunas`,
+      subtitle: `Piutang aktif ${formatMoney(args.dueAmountTotal)} masih berjalan di outlet ini.`,
+      cta: "Tagih",
+      tone: "danger",
+      icon: "cash-outline",
+      target: { type: "orders", bucket: null },
+    },
+    {
+      key: "ready",
+      title: `${formatCount(args.readyCount)} order siap diserahkan`,
+      subtitle: `${formatCount(args.pendingCount)} order lain masih menunggu progres lane harian.`,
+      cta: "Buka",
+      tone: "info",
+      icon: "grid-outline",
+      target: { type: "orders", bucket: args.readyBucket },
+    },
+  ];
 }
 
 export function HomeDashboardScreen() {
@@ -83,16 +435,18 @@ export function HomeDashboardScreen() {
   const minEdge = Math.min(width, height);
   const isLandscape = width > height;
   const isTablet = minEdge >= 600;
-  const isCompactLandscape = isLandscape && !isTablet;
-  const styles = useMemo(() => createStyles(theme, isTablet, isLandscape, isCompactLandscape), [theme, isTablet, isLandscape, isCompactLandscape]);
+  const styles = useMemo(() => createStyles(theme, isTablet, isLandscape), [theme, isTablet, isLandscape]);
   const navigation = useNavigation<Navigation>();
   const { selectedOutlet, session } = useSession();
   const outletId = selectedOutlet?.id;
   const outletTimezone = selectedOutlet?.timezone;
+  const roles = session?.roles ?? [];
+  const availableModes = useMemo(() => resolveAvailableModes(roles), [roles]);
+  const [activeMode, setActiveMode] = useState<WorkspaceMode>(resolveInitialMode(availableModes));
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const firstFocusHandledRef = useRef(false);
   const entranceProgress = useRef(new Animated.Value(0)).current;
 
@@ -105,16 +459,27 @@ export function HomeDashboardScreen() {
     }).start();
   }, [entranceProgress]);
 
+  useEffect(() => {
+    if (!availableModes.includes(activeMode)) {
+      setActiveMode(resolveInitialMode(availableModes));
+    }
+  }, [activeMode, availableModes]);
+
   const loadDashboard = useCallback(
-    async (forceRefresh = false): Promise<void> => {
+    async (forceRefresh = false, mode: LoadMode = "initial"): Promise<void> => {
       if (!outletId) {
         setOrders([]);
         setLoading(false);
-        setLastUpdatedAt(null);
+        setRefreshing(false);
         return;
       }
 
-      setLoading(true);
+      if (mode === "refresh") {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+
       setErrorMessage(null);
 
       try {
@@ -126,11 +491,14 @@ export function HomeDashboardScreen() {
           forceRefresh,
         });
         setOrders(data);
-        setLastUpdatedAt(new Date());
       } catch (error) {
         setErrorMessage(getApiErrorMessage(error));
       } finally {
-        setLoading(false);
+        if (mode === "refresh") {
+          setRefreshing(false);
+        } else {
+          setLoading(false);
+        }
       }
     },
     [outletId, outletTimezone]
@@ -138,7 +506,7 @@ export function HomeDashboardScreen() {
 
   useEffect(() => {
     firstFocusHandledRef.current = false;
-    void loadDashboard(true);
+    void loadDashboard(true, "initial");
   }, [outletId, loadDashboard]);
 
   useFocusEffect(
@@ -152,8 +520,8 @@ export function HomeDashboardScreen() {
         return;
       }
 
-      void loadDashboard(true);
-    }, [outletId, loadDashboard])
+      void loadDashboard(true, orders.length > 0 ? "refresh" : "initial");
+    }, [loadDashboard, orders.length, outletId])
   );
 
   const heroAnimatedStyle = useMemo(
@@ -181,7 +549,7 @@ export function HomeDashboardScreen() {
         {
           translateY: entranceProgress.interpolate({
             inputRange: [0, 1],
-            outputRange: [20, 0],
+            outputRange: [22, 0],
           }),
         },
       ],
@@ -190,44 +558,165 @@ export function HomeDashboardScreen() {
   );
 
   const bucketCounts = useMemo(() => countOrdersByBucket(orders), [orders]);
-  const dueCount = useMemo(() => orders.filter((order) => order.due_amount > 0).length, [orders]);
   const pendingCount = useMemo(() => bucketCounts.antrian + bucketCounts.proses, [bucketCounts]);
+  const readyCount = useMemo(() => bucketCounts.siap_ambil + bucketCounts.siap_antar, [bucketCounts]);
+  const readyBucket = useMemo(() => resolveReadyBucket(bucketCounts.siap_ambil, bucketCounts.siap_antar), [bucketCounts.siap_ambil, bucketCounts.siap_antar]);
+  const dueCount = useMemo(() => orders.filter((order) => order.due_amount > 0).length, [orders]);
   const dueAmountTotal = useMemo(() => orders.reduce((total, order) => total + Math.max(order.due_amount, 0), 0), [orders]);
-  const totalSales = useMemo(() => orders.reduce((total, order) => total + Math.max(order.total_amount, 0), 0), [orders]);
+  const pickupTodayCount = useMemo(() => orders.filter((order) => isPickupOrder(order)).length, [orders]);
+  const pickupPendingCount = useMemo(() => orders.filter((order) => isPickupPending(order)).length, [orders]);
+  const activeOrderCount = useMemo(() => Math.max(orders.length - bucketCounts.selesai, 0), [bucketCounts.selesai, orders.length]);
+  const cashToday = useMemo(() => orders.reduce((total, order) => total + Math.max(order.paid_amount, 0), 0), [orders]);
   const quotaLimit = session?.quota.orders_limit ?? null;
   const quotaRemaining = session?.quota.orders_remaining ?? null;
-  const quotaSummary =
-    quotaRemaining === null
-      ? "Tanpa Batas"
-      : quotaLimit && quotaLimit > 0
-        ? `${quotaRemaining}/${quotaLimit}`
-        : `${quotaRemaining}`;
-  const selectedOutletLabel = selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "Outlet belum dipilih";
-  const outletMeta = selectedOutlet ? `Timezone ${selectedOutlet.timezone}` : "Pilih outlet untuk mulai operasional";
-  const planLabel = session?.plan.key ? session.plan.key.toUpperCase() : "FREE";
-  const greeting = getGreetingLabel();
-  const todayLabel = getTodayLabel(outletTimezone);
-  const updatedLabel = getUpdatedLabel(lastUpdatedAt, outletTimezone);
+  const quotaUsed = session?.quota.orders_used ?? 0;
+  const shiftLabel = getShiftLabel();
+  const liveLabel = formatLiveLabel(outletTimezone);
+  const currentModeMeta = MODE_META[activeMode];
+  const outletLabel = selectedOutlet ? `${selectedOutlet.code} - ${selectedOutlet.name}` : "Outlet belum dipilih";
 
-  const metricCards = [
-    { label: "Total Order", value: formatCompact(orders.length), icon: "receipt-outline" as const, tone: "info" as const },
-    { label: "Perlu Aksi", value: formatCompact(pendingCount), icon: "flash-outline" as const, tone: "warning" as const },
-    { label: "Belum Lunas", value: formatCompact(dueCount), icon: "wallet-outline" as const, tone: "danger" as const },
-    { label: "Sisa Kuota", value: quotaSummary, icon: "layers-outline" as const, tone: "success" as const },
-  ];
+  const heroState = useMemo(
+    () =>
+      buildHeroState({
+        mode: activeMode,
+        selectedOutletName: outletLabel,
+        shiftLabel,
+        pickupPendingCount,
+        dueCount,
+        dueAmountTotal,
+        activeOrderCount,
+        cashToday,
+        queueCount: bucketCounts.antrian,
+        processCount: bucketCounts.proses,
+        readyCount,
+        pickupTodayCount,
+        deliveryReadyCount: bucketCounts.siap_antar,
+      }),
+    [activeMode, activeOrderCount, bucketCounts.antrian, bucketCounts.proses, bucketCounts.siap_antar, cashToday, dueAmountTotal, dueCount, outletLabel, pickupPendingCount, pickupTodayCount, readyCount, shiftLabel]
+  );
 
-  function metricToneColor(tone: "info" | "warning" | "danger" | "success"): string {
+  const focusItems = useMemo(
+    () =>
+      buildFocusItems({
+        mode: activeMode,
+        pickupPendingCount,
+        dueCount,
+        dueAmountTotal,
+        activeOrderCount,
+        pendingCount,
+        readyCount,
+        queueCount: bucketCounts.antrian,
+        processCount: bucketCounts.proses,
+        pickupTodayCount,
+        deliveryReadyCount: bucketCounts.siap_antar,
+        readyBucket,
+      }),
+    [activeMode, activeOrderCount, bucketCounts.antrian, bucketCounts.proses, bucketCounts.siap_antar, dueAmountTotal, dueCount, pendingCount, pickupPendingCount, pickupTodayCount, readyBucket, readyCount]
+  );
+
+  const metricCards: MetricCardState[] = useMemo(
+    () => [
+      {
+        key: "active",
+        label: "Order aktif",
+        value: formatCount(activeOrderCount),
+        badge: formatCompactCount(activeOrderCount),
+        icon: "receipt-outline",
+        tone: "info",
+        target: { type: "orders", bucket: null },
+      },
+      {
+        key: "due",
+        label: "Belum lunas",
+        value: formatCount(dueCount),
+        badge: formatCompactCount(dueCount),
+        icon: "wallet-outline",
+        tone: "danger",
+        target: { type: "orders", bucket: null },
+      },
+      {
+        key: "pickup",
+        label: "Pickup pending",
+        value: formatCount(pickupPendingCount),
+        badge: formatCompactCount(pickupTodayCount),
+        icon: "navigate-outline",
+        tone: "warning",
+        target: { type: "orders", bucket: "antrian" },
+      },
+      {
+        key: "quota",
+        label: "Sisa kuota",
+        value: quotaRemaining === null ? "∞" : formatCount(quotaRemaining),
+        badge: quotaRemaining === null ? "∞" : formatCompactCount(quotaUsed),
+        icon: "layers-outline",
+        tone: "success",
+        target: { type: "orders", bucket: null },
+      },
+    ],
+    [activeOrderCount, dueCount, pickupPendingCount, pickupTodayCount, quotaRemaining, quotaUsed]
+  );
+
+  const laneCards: LaneCardState[] = useMemo(
+    () => [
+      {
+        key: "queue",
+        label: "Antrian",
+        value: formatCount(bucketCounts.antrian),
+        tone: "warning",
+        target: { type: "orders", bucket: "antrian" },
+      },
+      {
+        key: "process",
+        label: "Proses",
+        value: formatCount(bucketCounts.proses),
+        tone: "info",
+        target: { type: "orders", bucket: "proses" },
+      },
+      {
+        key: "ready",
+        label: "Siap",
+        value: formatCount(readyCount),
+        tone: "success",
+        target: { type: "orders", bucket: readyBucket },
+      },
+    ],
+    [bucketCounts.antrian, bucketCounts.proses, readyBucket, readyCount]
+  );
+
+  function toneStyles(tone: ToneKey): ToneStyle {
     if (tone === "warning") {
-      return theme.colors.warning;
-    }
-    if (tone === "danger") {
-      return theme.colors.danger;
-    }
-    if (tone === "success") {
-      return theme.colors.success;
+      return {
+        softBackground: theme.mode === "dark" ? "#4a3718" : "#fff4de",
+        strongBackground: theme.mode === "dark" ? "#6a4c1d" : "#f5bf55",
+        foreground: theme.colors.warning,
+        border: theme.mode === "dark" ? "#815f2c" : "#f1d6a5",
+      };
     }
 
-    return theme.colors.info;
+    if (tone === "danger") {
+      return {
+        softBackground: theme.mode === "dark" ? "#4a2432" : "#ffe8ed",
+        strongBackground: theme.mode === "dark" ? "#7a2e45" : "#e35c76",
+        foreground: theme.colors.danger,
+        border: theme.mode === "dark" ? "#8d445c" : "#f3c1cd",
+      };
+    }
+
+    if (tone === "success") {
+      return {
+        softBackground: theme.mode === "dark" ? "#1f4130" : "#edf9f1",
+        strongBackground: theme.mode === "dark" ? "#24523b" : "#4cc488",
+        foreground: theme.colors.success,
+        border: theme.mode === "dark" ? "#2f6a4a" : "#bfe7cf",
+      };
+    }
+
+    return {
+      softBackground: theme.mode === "dark" ? "#17374f" : "#eef8ff",
+      strongBackground: theme.mode === "dark" ? "#23597f" : "#2a7ce2",
+      foreground: theme.colors.info,
+      border: theme.mode === "dark" ? "#295a86" : "#bfd8ec",
+    };
   }
 
   function handleOpenOrders(bucket: OrderBucket | null): void {
@@ -244,113 +733,185 @@ export function HomeDashboardScreen() {
     );
   }
 
+  function handleActionTarget(target: ActionTarget): void {
+    if (target.type === "quick-action") {
+      navigation.getParent<NativeStackNavigationProp<AppRootStackParamList>>()?.navigate("OrderCreate", {
+        openCreateStamp: Date.now(),
+      });
+      return;
+    }
+
+    handleOpenOrders(target.bucket ?? null);
+  }
+
   return (
-    <AppScreen contentContainerStyle={styles.content} scroll>
+    <AppScreen
+      contentContainerStyle={styles.content}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => {
+            void loadDashboard(true, "refresh");
+          }}
+          colors={[theme.colors.info]}
+          progressBackgroundColor={theme.colors.surface}
+          tintColor={theme.colors.info}
+        />
+      }
+      scroll
+    >
       <Animated.View style={[styles.heroCard, heroAnimatedStyle]}>
-        <View style={styles.heroLayerPrimary} />
-        <View style={styles.heroLayerSecondary} />
-        <View style={styles.heroGlowLarge} />
-        <View style={styles.heroGlowSmall} />
+        <View style={styles.heroGradientBase} />
+        <View style={styles.heroGradientEdge} />
+        <View style={styles.heroRing} />
+        <View style={styles.heroWave} />
+        <View style={styles.heroWaveAccent} />
 
-        <View style={styles.heroContent}>
-          <View style={styles.heroTopRow}>
-            <View style={styles.brandWrap}>
-              <View style={styles.brandBadge}>
-                <BrandMark size={isCompactLandscape ? 34 : 38} />
-              </View>
-              <View style={styles.brandTextWrap}>
-                <Text style={styles.brandTitle}>Cuci</Text>
-                <Text style={styles.brandSubtitle}>OPERASIONAL HARI INI</Text>
-              </View>
-            </View>
-            <View style={styles.dateChip}>
-              <Ionicons color="#d5ecff" name="calendar-outline" size={12} />
-              <Text style={styles.dateChipText}>{todayLabel}</Text>
-            </View>
+        <View style={styles.heroTopRow}>
+          <Text style={styles.heroEyebrow}>{heroState.eyebrow}</Text>
+          <View style={styles.liveChip}>
+            <Text style={styles.liveChipText}>{liveLabel}</Text>
           </View>
+        </View>
 
-          <Text style={styles.greeting}>{greeting}, {session?.user.name ?? "-"}</Text>
-          <Text style={styles.outletLabel}>{selectedOutletLabel}</Text>
-          <View style={styles.heroMetaRow}>
-            <StatusPill label={`Plan ${planLabel}`} tone="info" />
-            <StatusPill label={outletMeta} tone="neutral" />
-            <StatusPill label={`Update ${updatedLabel}`} tone="neutral" />
+        <Text style={styles.heroTitle}>{heroState.title}</Text>
+        <Text style={styles.heroSubtitle}>{heroState.subtitle}</Text>
+
+        <View style={styles.heroModeRow}>
+          <View style={styles.heroModeChip}>
+            <Ionicons color="#ffffff" name={currentModeMeta.icon} size={14} />
+            <Text style={styles.heroModeChipText}>{currentModeMeta.shortLabel}</Text>
+          </View>
+          <Text style={styles.heroModeHint}>{currentModeMeta.hint}</Text>
+        </View>
+
+        <View style={styles.heroStatRow}>
+          <View style={styles.heroStatBlock}>
+            <Text style={styles.heroStatValue}>{heroState.primaryValue}</Text>
+            <Text style={styles.heroStatLabel}>{heroState.primaryLabel}</Text>
+          </View>
+          <View style={styles.heroDivider} />
+          <View style={styles.heroStatBlock}>
+            <Text style={styles.heroStatValue}>{heroState.secondaryValue}</Text>
+            <Text style={styles.heroStatLabel}>{heroState.secondaryLabel}</Text>
           </View>
         </View>
       </Animated.View>
 
       {errorMessage ? (
-        <Animated.View style={[styles.errorWrap, bodyAnimatedStyle]}>
-          <StatusPill label="Error API" tone="danger" />
+        <Animated.View style={[styles.errorBox, bodyAnimatedStyle]}>
+          <Text style={styles.errorTitle}>Sinkronisasi ringkasan bermasalah</Text>
           <Text style={styles.errorText}>{errorMessage}</Text>
         </Animated.View>
       ) : null}
 
       <Animated.View style={bodyAnimatedStyle}>
-        <AppPanel style={styles.sectionPanel}>
-          <View style={styles.sectionHead}>
-            <Text style={styles.sectionEyebrow}>Ringkasan</Text>
-            <Text style={styles.sectionTitle}>Kinerja Outlet</Text>
+        <AppPanel style={styles.modePanel}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Mode kerja</Text>
+            <Text style={styles.sectionHint}>Beranda berubah mengikuti fokus kerja aktif.</Text>
           </View>
+          <View style={styles.modeChipGrid}>
+            {availableModes.map((mode) => {
+              const meta = MODE_META[mode];
+              const active = activeMode === mode;
 
-          {loading ? (
-            <View style={styles.loadingWrap}>
-              <ActivityIndicator color={theme.colors.info} />
-              <Text style={styles.loadingText}>Memuat ringkasan outlet...</Text>
-            </View>
-          ) : (
-            <>
-              <View style={styles.metricGrid}>
-                {metricCards.map((item) => (
-                  <View key={item.label} style={styles.metricCard}>
-                    <View style={styles.metricTopRow}>
-                      <View style={[styles.metricIconWrap, { backgroundColor: `${metricToneColor(item.tone)}19` }]}>
-                        <Ionicons color={metricToneColor(item.tone)} name={item.icon} size={16} />
-                      </View>
-                      <Text style={[styles.metricValue, { color: metricToneColor(item.tone) }]}>{item.value}</Text>
-                    </View>
-                    <Text style={styles.metricLabel}>{item.label}</Text>
-                  </View>
-                ))}
-              </View>
-
-              <View style={styles.financeStrip}>
-                <View style={styles.financeBlock}>
-                  <Text style={styles.financeLabel}>Nilai Transaksi</Text>
-                  <Text style={styles.financeValue}>{formatMoney(totalSales)}</Text>
-                </View>
-                <View style={styles.financeDivider} />
-                <View style={styles.financeBlock}>
-                  <Text style={styles.financeLabel}>Piutang Berjalan</Text>
-                  <Text style={[styles.financeValue, dueAmountTotal > 0 ? styles.financeDanger : styles.financeSafe]}>{formatMoney(dueAmountTotal)}</Text>
-                </View>
-              </View>
-            </>
-          )}
+              return (
+                <Pressable key={mode} onPress={() => setActiveMode(mode)} style={({ pressed }) => [styles.modeChip, active ? styles.modeChipActive : null, pressed ? styles.modeChipPressed : null]}>
+                  <Ionicons color={active ? "#ffffff" : theme.colors.textSecondary} name={meta.icon} size={16} />
+                  <Text style={[styles.modeChipText, active ? styles.modeChipTextActive : null]}>{meta.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </AppPanel>
       </Animated.View>
 
+      {loading && orders.length === 0 ? (
+        <Animated.View style={bodyAnimatedStyle}>
+          <AppPanel style={styles.loadingPanel}>
+            <ActivityIndicator color={theme.colors.info} />
+            <Text style={styles.loadingText}>Memuat command center outlet...</Text>
+          </AppPanel>
+        </Animated.View>
+      ) : null}
+
       <Animated.View style={bodyAnimatedStyle}>
-        <AppPanel style={styles.sectionPanel}>
-          <View style={styles.sectionHead}>
-            <Text style={styles.sectionEyebrow}>Status</Text>
-            <Text style={styles.sectionTitle}>Akses Cepat</Text>
+        <AppPanel style={styles.commandPanel}>
+          <View style={styles.sectionHeaderRow}>
+            <View style={styles.sectionHeaderCompact}>
+              <Text style={styles.sectionTitle}>Butuh tindakan sekarang</Text>
+              <Text style={styles.sectionHint}>Tiga fokus teratas untuk mode kerja yang sedang aktif.</Text>
+            </View>
+            <Pressable onPress={() => handleOpenOrders(null)} style={({ pressed }) => [styles.sectionActionButton, pressed ? styles.sectionActionButtonPressed : null]}>
+              <Text style={styles.sectionActionText}>Buka board</Text>
+            </Pressable>
           </View>
-          <View style={styles.shortcutGrid}>
-            {SHORTCUTS.map((item) => {
-              const count = item.key ? bucketCounts[item.key] : orders.length;
+
+          <View style={styles.focusList}>
+            {focusItems.map((item) => {
+              const tone = toneStyles(item.tone);
+
               return (
-                <Pressable
-                  key={`${item.label}-${item.key ?? "all"}`}
-                  onPress={() => handleOpenOrders(item.key)}
-                  style={({ pressed }) => [styles.shortcutItem, pressed ? styles.shortcutPressed : null]}
-                >
-                  <View style={styles.shortcutHeader}>
-                    <Ionicons color={theme.colors.info} name={item.icon} size={18} />
-                    <Text style={styles.shortcutCount}>{count}</Text>
+                <Pressable key={item.key} onPress={() => handleActionTarget(item.target)} style={({ pressed }) => [styles.focusRow, { backgroundColor: tone.softBackground, borderColor: tone.border }, pressed ? styles.focusRowPressed : null]}>
+                  <View style={[styles.focusIconWrap, { backgroundColor: tone.strongBackground }]}>
+                    <Ionicons color="#ffffff" name={item.icon} size={18} />
                   </View>
-                  <Text style={styles.shortcutLabel}>{item.label}</Text>
-                  <Text style={styles.shortcutSubtitle}>{item.subtitle}</Text>
+                  <View style={styles.focusCopy}>
+                    <Text style={styles.focusTitle}>{item.title}</Text>
+                    <Text style={styles.focusSubtitle}>{item.subtitle}</Text>
+                  </View>
+                  <View style={[styles.focusCtaPill, { borderColor: tone.border }]}>
+                    <Text style={[styles.focusCtaText, { color: tone.foreground }]}>{item.cta}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        </AppPanel>
+      </Animated.View>
+
+      <Animated.View style={[styles.metricGrid, bodyAnimatedStyle]}>
+        {metricCards.map((item) => {
+          const tone = toneStyles(item.tone);
+
+          return (
+            <Pressable key={item.key} onPress={() => handleActionTarget(item.target)} style={({ pressed }) => [styles.metricCard, { borderColor: tone.border }, pressed ? styles.metricCardPressed : null]}>
+              <View style={styles.metricTopRow}>
+                <View style={[styles.metricIconWrap, { backgroundColor: tone.softBackground }]}>
+                  <Ionicons color={tone.foreground} name={item.icon} size={16} />
+                </View>
+                <Text style={[styles.metricBadgeText, { color: tone.foreground }]}>{item.badge}</Text>
+              </View>
+              <Text style={styles.metricValue}>{item.value}</Text>
+              <Text style={styles.metricLabel}>{item.label}</Text>
+            </Pressable>
+          );
+        })}
+      </Animated.View>
+
+      <Animated.View style={bodyAnimatedStyle}>
+        <AppPanel style={styles.lanePanel}>
+          <View style={styles.laneBackdropPrimary} />
+          <View style={styles.laneBackdropSecondary} />
+
+          <View style={styles.sectionHeaderRow}>
+            <View style={styles.sectionHeaderCompact}>
+              <Text style={styles.laneTitle}>Lane kerja hari ini</Text>
+              <Text style={styles.laneHint}>Antrian, proses, dan order siap yang sedang hidup sekarang.</Text>
+            </View>
+            <Text style={styles.laneLiveLabel}>Live</Text>
+          </View>
+
+          <View style={styles.laneGrid}>
+            {laneCards.map((lane) => {
+              const tone = toneStyles(lane.tone);
+
+              return (
+                <Pressable key={lane.key} onPress={() => handleActionTarget(lane.target)} style={({ pressed }) => [styles.laneCard, pressed ? styles.laneCardPressed : null]}>
+                  <Text style={styles.laneLabel}>{lane.label}</Text>
+                  <Text style={styles.laneValue}>{lane.value}</Text>
+                  <View style={[styles.laneDot, { backgroundColor: tone.strongBackground }]} />
                 </Pressable>
               );
             })}
@@ -359,107 +920,91 @@ export function HomeDashboardScreen() {
       </Animated.View>
 
       <Animated.View style={bodyAnimatedStyle}>
-        <AppPanel style={styles.sectionPanel}>
-          <View style={styles.sectionHead}>
-            <Text style={styles.sectionEyebrow}>Analitik</Text>
-            <Text style={styles.sectionTitle}>Insight Cepat</Text>
+        <Pressable onPress={() => handleOpenOrders(null)} style={({ pressed }) => [styles.receivableStrip, pressed ? styles.receivableStripPressed : null]}>
+          <View style={styles.receivableCopy}>
+            <Text style={styles.receivableTitle}>{dueAmountTotal > 0 ? `Piutang aktif ${formatMoney(dueAmountTotal)}` : "Tidak ada piutang aktif"}</Text>
+            <Text style={styles.receivableSubtitle}>
+              {quotaLimit && quotaRemaining !== null
+                ? `Kuota ${formatCount(quotaUsed)} / ${formatCount(quotaLimit)} order periode ini`
+                : "Pantau invoice dan progres pembayaran langsung dari board pesanan."}
+            </Text>
           </View>
-          <Pressable
-            onPress={() =>
-              navigation.navigate("AccountTab", {
-                screen: "Customers",
-              })
-            }
-            style={({ pressed }) => [styles.quickLinkItem, pressed ? styles.quickLinkPressed : null]}
-          >
-            <View style={styles.quickLinkIcon}>
-              <Ionicons color={theme.colors.info} name="people-outline" size={18} />
-            </View>
-            <View style={styles.quickLinkTextWrap}>
-              <Text style={styles.quickLinkTitle}>Pelanggan Aktif</Text>
-              <Text style={styles.quickLinkSubtitle}>Monitor profil pelanggan dan status terbaru.</Text>
-            </View>
-            <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={18} />
-          </Pressable>
-
-          <Pressable
-            onPress={() =>
-              navigation.navigate("AccountTab", {
-                screen: "Services",
-              })
-            }
-            style={({ pressed }) => [styles.quickLinkItem, pressed ? styles.quickLinkPressed : null]}
-          >
-            <View style={styles.quickLinkIcon}>
-              <Ionicons color={theme.colors.warning} name="pricetags-outline" size={18} />
-            </View>
-            <View style={styles.quickLinkTextWrap}>
-              <Text style={styles.quickLinkTitle}>Layanan Favorit</Text>
-              <Text style={styles.quickLinkSubtitle}>Cek layanan terlaris dan update harga lebih cepat.</Text>
-            </View>
-            <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={18} />
-          </Pressable>
-        </AppPanel>
+          <View style={styles.receivablePill}>
+            <Text style={styles.receivablePillText}>{`${formatCount(dueCount)} invoice`}</Text>
+          </View>
+        </Pressable>
       </Animated.View>
     </AppScreen>
   );
 }
 
-function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, isCompactLandscape: boolean) {
+function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean) {
+  const horizontalPadding = isTablet ? theme.spacing.xl : theme.spacing.lg;
+  const heroHeight = isTablet ? 258 : isLandscape ? 228 : 248;
+  const metricWidth = isTablet ? "24%" : "48.2%";
+  const laneCardWidth = isTablet || isLandscape ? "31.4%" : "31.2%";
+
   return StyleSheet.create({
     content: {
       flexGrow: 1,
-      paddingHorizontal: isCompactLandscape ? theme.spacing.md : theme.spacing.lg,
-      paddingTop: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
-      paddingBottom: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
-      gap: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
+      paddingHorizontal: horizontalPadding,
+      paddingTop: theme.spacing.md,
+      paddingBottom: theme.spacing.xl,
+      gap: theme.spacing.md,
     },
     heroCard: {
       position: "relative",
-      borderRadius: isTablet ? 30 : isCompactLandscape ? 22 : 26,
+      minHeight: heroHeight,
+      borderRadius: 30,
       overflow: "hidden",
-      minHeight: isTablet ? 228 : isCompactLandscape ? 172 : isLandscape ? 196 : 214,
+      paddingHorizontal: theme.spacing.lg,
+      paddingTop: theme.spacing.md,
+      paddingBottom: theme.spacing.lg,
       borderWidth: 1,
-      borderColor: "rgba(157,214,255,0.34)",
-      backgroundColor: "#0f5ea8",
+      borderColor: "rgba(255,255,255,0.12)",
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
     },
-    heroLayerPrimary: {
+    heroGradientBase: {
       ...StyleSheet.absoluteFillObject,
-      backgroundColor: "#0f5ea8",
+      backgroundColor: "#0d6fc7",
     },
-    heroLayerSecondary: {
+    heroGradientEdge: {
       position: "absolute",
       top: 0,
       right: 0,
       bottom: 0,
-      width: "68%",
-      backgroundColor: "#1f8fe8",
-      opacity: 0.68,
+      width: "72%",
+      backgroundColor: "#1cc8df",
+      opacity: 0.58,
     },
-    heroGlowLarge: {
+    heroRing: {
       position: "absolute",
-      top: -88,
+      top: -92,
       right: -72,
-      width: 230,
-      height: 230,
-      borderRadius: 140,
+      width: 224,
+      height: 224,
+      borderRadius: 112,
       borderWidth: 34,
       borderColor: "rgba(255,255,255,0.1)",
     },
-    heroGlowSmall: {
+    heroWave: {
       position: "absolute",
-      left: -64,
-      bottom: -110,
-      width: 188,
-      height: 188,
-      borderRadius: 120,
-      backgroundColor: "rgba(52, 214, 231, 0.28)",
+      left: -50,
+      right: 28,
+      bottom: -114,
+      height: 162,
+      borderRadius: 118,
+      backgroundColor: "rgba(255,255,255,0.12)",
     },
-    heroContent: {
-      paddingHorizontal: isCompactLandscape ? theme.spacing.md : theme.spacing.lg,
-      paddingTop: isCompactLandscape ? theme.spacing.md : theme.spacing.lg,
-      paddingBottom: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
-      gap: theme.spacing.xs,
+    heroWaveAccent: {
+      position: "absolute",
+      right: -36,
+      bottom: -72,
+      width: 164,
+      height: 96,
+      borderRadius: 60,
+      backgroundColor: "rgba(255,255,255,0.16)",
     },
     heroTopRow: {
       flexDirection: "row",
@@ -467,275 +1012,428 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
       justifyContent: "space-between",
       gap: theme.spacing.sm,
     },
-    brandWrap: {
-      flexDirection: "row",
+    heroEyebrow: {
+      color: "rgba(255,255,255,0.84)",
+      fontFamily: theme.fonts.heavy,
+      fontSize: 11,
+      letterSpacing: 1,
+    },
+    liveChip: {
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.18)",
+      backgroundColor: "rgba(255,255,255,0.14)",
+      borderRadius: theme.radii.pill,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      minWidth: 82,
       alignItems: "center",
-      gap: theme.spacing.xs,
-      flex: 1,
-      minWidth: 0,
     },
-    brandBadge: {
-      alignItems: "center",
-      justifyContent: "center",
+    liveChipText: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
     },
-    brandTextWrap: {
-      gap: 1,
-      minWidth: 0,
-    },
-    brandTitle: {
+    heroTitle: {
       color: "#ffffff",
       fontFamily: theme.fonts.heavy,
-      fontSize: isTablet ? 25 : isCompactLandscape ? 20 : 22,
-      lineHeight: isTablet ? 30 : isCompactLandscape ? 24 : 26,
+      fontSize: isTablet ? 29 : 24,
+      lineHeight: isTablet ? 34 : 29,
+      maxWidth: "84%",
     },
-    brandSubtitle: {
-      color: "rgba(230,242,255,0.86)",
-      fontFamily: theme.fonts.semibold,
-      fontSize: 10,
-      letterSpacing: 1,
-      textTransform: "uppercase",
+    heroSubtitle: {
+      color: "rgba(255,255,255,0.82)",
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 18,
+      maxWidth: "92%",
     },
-    dateChip: {
+    heroModeRow: {
+      gap: theme.spacing.xs,
+    },
+    heroModeChip: {
+      alignSelf: "flex-start",
       flexDirection: "row",
       alignItems: "center",
-      gap: 4,
+      gap: 6,
       borderWidth: 1,
-      borderColor: "rgba(255,255,255,0.3)",
+      borderColor: "rgba(255,255,255,0.18)",
       backgroundColor: "rgba(255,255,255,0.12)",
-      paddingHorizontal: isCompactLandscape ? 8 : 9,
-      paddingVertical: isCompactLandscape ? 4 : 5,
-      borderRadius: 999,
+      borderRadius: theme.radii.pill,
+      paddingHorizontal: 11,
+      paddingVertical: 7,
     },
-    dateChipText: {
-      color: "#e4f2ff",
-      fontFamily: theme.fonts.semibold,
-      fontSize: isCompactLandscape ? 9 : 10,
-    },
-    greeting: {
+    heroModeChipText: {
       color: "#ffffff",
       fontFamily: theme.fonts.bold,
-      fontSize: isTablet ? 26 : isCompactLandscape ? 20 : 22,
-      lineHeight: isTablet ? 31 : isCompactLandscape ? 24 : 27,
-      marginTop: 2,
+      fontSize: 11,
     },
-    outletLabel: {
-      color: "rgba(240,247,255,0.93)",
+    heroModeHint: {
+      color: "rgba(255,255,255,0.74)",
       fontFamily: theme.fonts.medium,
-      fontSize: isCompactLandscape ? 12 : 13,
-      lineHeight: isCompactLandscape ? 17 : 19,
+      fontSize: 11,
+      lineHeight: 16,
+      maxWidth: "88%",
     },
-    heroMetaRow: {
+    heroStatRow: {
       flexDirection: "row",
-      flexWrap: "wrap",
-      gap: isCompactLandscape ? 4 : theme.spacing.xs,
-      marginTop: 2,
+      alignItems: "center",
+      gap: theme.spacing.md,
     },
-    sectionPanel: {
-      gap: isCompactLandscape ? theme.spacing.xs : theme.spacing.sm,
-      borderRadius: theme.radii.xl,
-      borderColor: theme.colors.borderStrong,
-      backgroundColor: theme.colors.surface,
-    },
-    sectionHead: {
+    heroStatBlock: {
+      minWidth: 0,
       gap: 2,
     },
-    sectionEyebrow: {
-      color: theme.colors.textMuted,
-      fontFamily: theme.fonts.semibold,
-      fontSize: 10,
-      textTransform: "uppercase",
-      letterSpacing: 1,
+    heroDivider: {
+      width: 1,
+      height: 42,
+      backgroundColor: "rgba(255,255,255,0.22)",
     },
-    sectionTitle: {
+    heroStatValue: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.heavy,
+      fontSize: isTablet ? 36 : 32,
+      lineHeight: isTablet ? 40 : 36,
+    },
+    heroStatLabel: {
+      color: "rgba(255,255,255,0.8)",
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
+      lineHeight: 15,
+    },
+    errorBox: {
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? "#804056" : "#f0bec8",
+      backgroundColor: theme.mode === "dark" ? "#452434" : "#fff3f6",
+      borderRadius: theme.radii.lg,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      gap: 4,
+    },
+    errorTitle: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.bold,
-      fontSize: isCompactLandscape ? 16 : 18,
-      lineHeight: isCompactLandscape ? 21 : 23,
+      fontSize: 13,
+      lineHeight: 18,
     },
-    loadingWrap: {
+    errorText: {
+      color: theme.colors.danger,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    loadingPanel: {
       flexDirection: "row",
       alignItems: "center",
       gap: theme.spacing.sm,
-      paddingVertical: 4,
+      borderRadius: theme.radii.xl,
     },
     loadingText: {
       color: theme.colors.textSecondary,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
     },
+    modePanel: {
+      borderRadius: theme.radii.xl,
+      gap: theme.spacing.sm,
+    },
+    sectionHeader: {
+      gap: 2,
+    },
+    sectionHeaderRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
+    },
+    sectionHeaderCompact: {
+      flex: 1,
+      gap: 2,
+    },
+    sectionTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 14,
+      lineHeight: 19,
+    },
+    sectionHint: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 16,
+    },
+    sectionActionButton: {
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      backgroundColor: theme.mode === "dark" ? "#17374f" : "#eef8ff",
+      borderRadius: 14,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+    },
+    sectionActionButtonPressed: {
+      opacity: 0.82,
+    },
+    sectionActionText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.bold,
+      fontSize: 12,
+    },
+    modeChipGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: theme.spacing.sm,
+    },
+    modeChip: {
+      minWidth: isTablet ? "23%" : "48.2%",
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surfaceSoft,
+      borderRadius: 16,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+    },
+    modeChipActive: {
+      backgroundColor: theme.colors.primaryStrong,
+      borderColor: theme.colors.primaryStrong,
+    },
+    modeChipPressed: {
+      opacity: 0.84,
+    },
+    modeChipText: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 13,
+    },
+    modeChipTextActive: {
+      color: "#ffffff",
+    },
+    commandPanel: {
+      borderRadius: theme.radii.xl,
+      gap: theme.spacing.sm,
+    },
+    focusList: {
+      gap: theme.spacing.sm,
+    },
+    focusRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.spacing.sm,
+      borderWidth: 1,
+      borderRadius: 18,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+    },
+    focusRowPressed: {
+      opacity: 0.84,
+    },
+    focusIconWrap: {
+      width: 38,
+      height: 38,
+      borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    focusCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    focusTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    focusSubtitle: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+      lineHeight: 16,
+    },
+    focusCtaPill: {
+      borderWidth: 1,
+      borderRadius: theme.radii.pill,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    focusCtaText: {
+      fontFamily: theme.fonts.bold,
+      fontSize: 11,
+    },
     metricGrid: {
       flexDirection: "row",
       flexWrap: "wrap",
       justifyContent: "space-between",
-      gap: theme.spacing.xs,
+      gap: theme.spacing.sm,
     },
     metricCard: {
-      width: isTablet || isCompactLandscape ? "24%" : "48.3%",
+      width: metricWidth,
       borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: theme.radii.md,
-      backgroundColor: theme.colors.surfaceSoft,
-      paddingHorizontal: isCompactLandscape ? 8 : 10,
-      paddingVertical: isCompactLandscape ? 8 : 10,
-      gap: 4,
+      borderRadius: 22,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 14,
+      paddingTop: 14,
+      paddingBottom: 12,
+      gap: 8,
+      shadowColor: theme.shadows.color,
+      shadowOpacity: theme.mode === "dark" ? theme.shadows.cardOpacity : theme.shadows.cardOpacity - 0.02,
+      shadowOffset: { width: 0, height: 8 },
+      shadowRadius: theme.shadows.cardRadius,
+      elevation: theme.shadows.cardElevation,
+    },
+    metricCardPressed: {
+      opacity: 0.84,
     },
     metricTopRow: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
-      gap: 8,
+      gap: theme.spacing.sm,
     },
     metricIconWrap: {
-      width: isCompactLandscape ? 24 : 28,
-      height: isCompactLandscape ? 24 : 28,
-      borderRadius: isCompactLandscape ? 12 : 14,
+      width: 30,
+      height: 30,
+      borderRadius: 10,
       alignItems: "center",
       justifyContent: "center",
+    },
+    metricBadgeText: {
+      fontFamily: theme.fonts.bold,
+      fontSize: 11,
     },
     metricValue: {
       color: theme.colors.textPrimary,
       fontFamily: theme.fonts.heavy,
-      fontSize: isTablet ? 18 : isCompactLandscape ? 14 : 16,
-      lineHeight: isTablet ? 23 : isCompactLandscape ? 18 : 20,
+      fontSize: 24,
+      lineHeight: 28,
     },
     metricLabel: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.semibold,
-      fontSize: isCompactLandscape ? 10 : 11,
-      lineHeight: isCompactLandscape ? 14 : 15,
+      fontSize: 11,
+      lineHeight: 15,
     },
-    financeStrip: {
-      flexDirection: "row",
-      alignItems: "stretch",
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: theme.radii.md,
-      backgroundColor: theme.colors.surfaceSoft,
+    lanePanel: {
+      position: "relative",
       overflow: "hidden",
+      borderRadius: theme.radii.xl,
+      borderColor: "rgba(255,255,255,0.08)",
+      backgroundColor: "#0d365f",
+      gap: theme.spacing.sm,
     },
-    financeBlock: {
-      flex: 1,
-      paddingHorizontal: isCompactLandscape ? 9 : 11,
-      paddingVertical: isCompactLandscape ? 8 : 9,
-      gap: 1,
+    laneBackdropPrimary: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: "#0d365f",
     },
-    financeDivider: {
-      width: 1,
-      backgroundColor: theme.colors.border,
+    laneBackdropSecondary: {
+      position: "absolute",
+      top: -30,
+      right: -30,
+      width: 182,
+      height: 182,
+      borderRadius: 91,
+      backgroundColor: "rgba(255,255,255,0.08)",
     },
-    financeLabel: {
-      color: theme.colors.textMuted,
+    laneTitle: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.bold,
+      fontSize: 14,
+      lineHeight: 19,
+    },
+    laneHint: {
+      color: "rgba(255,255,255,0.72)",
       fontFamily: theme.fonts.medium,
       fontSize: 11,
+      lineHeight: 16,
     },
-    financeValue: {
-      color: theme.colors.textPrimary,
+    laneLiveLabel: {
+      color: "rgba(255,255,255,0.78)",
       fontFamily: theme.fonts.bold,
-      fontSize: isCompactLandscape ? 12 : 13,
-      lineHeight: isCompactLandscape ? 17 : 18,
+      fontSize: 11,
+      letterSpacing: 0.3,
     },
-    financeDanger: {
-      color: theme.colors.danger,
-    },
-    financeSafe: {
-      color: theme.colors.success,
-    },
-    shortcutGrid: {
+    laneGrid: {
       flexDirection: "row",
-      flexWrap: "wrap",
       justifyContent: "space-between",
       gap: theme.spacing.xs,
     },
-    shortcutItem: {
-      width: isTablet || isCompactLandscape ? "31.8%" : "48.3%",
+    laneCard: {
+      width: laneCardWidth,
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.12)",
+      backgroundColor: "rgba(255,255,255,0.1)",
+      borderRadius: 20,
+      paddingHorizontal: 14,
+      paddingTop: 12,
+      paddingBottom: 10,
+      gap: 6,
+    },
+    laneCardPressed: {
+      opacity: 0.82,
+    },
+    laneLabel: {
+      color: "rgba(255,255,255,0.72)",
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
+    },
+    laneValue: {
+      color: "#ffffff",
+      fontFamily: theme.fonts.heavy,
+      fontSize: 26,
+      lineHeight: 30,
+    },
+    laneDot: {
+      width: 16,
+      height: 16,
+      borderRadius: 8,
+    },
+    receivableStrip: {
       borderWidth: 1,
       borderColor: theme.colors.border,
-      borderRadius: theme.radii.md,
-      backgroundColor: theme.colors.surfaceSoft,
-      paddingHorizontal: isCompactLandscape ? 8 : 10,
-      paddingVertical: isCompactLandscape ? 8 : 10,
-      gap: 3,
-    },
-    shortcutPressed: {
-      opacity: 0.84,
-    },
-    shortcutHeader: {
+      backgroundColor: theme.colors.surface,
+      borderRadius: 20,
+      paddingHorizontal: 16,
+      paddingVertical: 13,
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
+      gap: theme.spacing.sm,
     },
-    shortcutCount: {
-      color: theme.colors.info,
-      fontFamily: theme.fonts.heavy,
-      fontSize: isCompactLandscape ? 13 : 14,
-    },
-    shortcutLabel: {
-      color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: isCompactLandscape ? 12 : 13,
-      lineHeight: isCompactLandscape ? 16 : 17,
-    },
-    shortcutSubtitle: {
-      color: theme.colors.textMuted,
-      fontFamily: theme.fonts.medium,
-      fontSize: isCompactLandscape ? 10 : 11,
-      lineHeight: isCompactLandscape ? 14 : 15,
-    },
-    quickLinkItem: {
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: theme.radii.md,
-      backgroundColor: theme.colors.surfaceSoft,
-      paddingHorizontal: isCompactLandscape ? 10 : 11,
-      paddingVertical: isCompactLandscape ? 8 : 10,
-      gap: 8,
-      flexDirection: "row",
-      alignItems: "center",
-    },
-    quickLinkPressed: {
+    receivableStripPressed: {
       opacity: 0.84,
     },
-    quickLinkIcon: {
-      width: isCompactLandscape ? 30 : 34,
-      height: isCompactLandscape ? 30 : 34,
-      borderRadius: isCompactLandscape ? 15 : 17,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: theme.colors.surface,
-      borderWidth: 1,
-      borderColor: theme.colors.borderStrong,
-    },
-    quickLinkTextWrap: {
+    receivableCopy: {
       flex: 1,
-      gap: 1,
-      minWidth: 0,
+      gap: 2,
     },
-    quickLinkTitle: {
+    receivableTitle: {
       color: theme.colors.textPrimary,
-      fontFamily: theme.fonts.semibold,
-      fontSize: isCompactLandscape ? 13 : 14,
-      lineHeight: isCompactLandscape ? 17 : 19,
+      fontFamily: theme.fonts.bold,
+      fontSize: 12,
+      lineHeight: 17,
     },
-    quickLinkSubtitle: {
+    receivableSubtitle: {
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
-      fontSize: isCompactLandscape ? 10 : 11,
-      lineHeight: isCompactLandscape ? 14 : 16,
+      fontSize: 11,
+      lineHeight: 16,
     },
-    errorWrap: {
+    receivablePill: {
       borderWidth: 1,
-      borderColor: theme.mode === "dark" ? "#693447" : "#f0bec8",
-      borderRadius: theme.radii.md,
-      backgroundColor: theme.mode === "dark" ? "#492736" : "#fff3f6",
+      borderColor: theme.mode === "dark" ? "#7a5928" : "#f1d6a5",
+      backgroundColor: theme.mode === "dark" ? "#412e14" : "#fff4de",
+      borderRadius: theme.radii.pill,
       paddingHorizontal: 12,
-      paddingVertical: 10,
-      gap: 6,
+      paddingVertical: 7,
     },
-    errorText: {
-      color: theme.colors.danger,
-      fontFamily: theme.fonts.medium,
-      fontSize: 12,
-      lineHeight: 18,
+    receivablePillText: {
+      color: theme.colors.warning,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 11,
     },
   });
 }

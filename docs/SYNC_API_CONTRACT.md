@@ -29,6 +29,7 @@ Clients:
 
 Entity IDs:
 - Semua entity internal: UUID.
+- Untuk mobile offline-first, client boleh mengirim UUID final sendiri untuk `order` dan `payment` agar entity_id tetap stabil saat offline lalu online lagi.
 - invoice_no: string cantik (prefix outlet + date + counter4).
 
 Timezone:
@@ -86,6 +87,8 @@ Purpose: client mengirim outbox mutations.
 Notes:
 
 seq meningkat per device (monotonic). Berguna untuk debugging ordering, tapi server tetap idempotent by mutation_id.
+
+Untuk `ORDER_CREATE` dan `ORDER_ADD_PAYMENT`, `entity.entity_id` boleh sama dengan UUID final yang dibentuk client. Server akan memakai UUID itu bila valid dan belum dipakai.
 
 Response
 {
@@ -329,30 +332,28 @@ Data berikut adalah bentuk yang direkomendasikan untuk changes[].data pada pull 
 Payload:
 
 {
-  "order": {
-    "id": "order-uuid",
-    "outlet_id": "outlet-uuid",
-    "customer_id": "cust-uuid",
-    "invoice_no": "BL-260215-0042-or-null",
-    "order_code": "ORD-8F3K2Q1A",
-    "created_at": "2026-02-15T10:02:00+07:00",
-    "is_pickup_delivery": true,
-    "notes": "..."
+  "id": "order-uuid",
+  "outlet_id": "outlet-uuid",
+  "invoice_no": "BL-260215-0042-or-null",
+  "order_code": "ORD-8F3K2Q1A",
+  "requires_pickup": true,
+  "requires_delivery": false,
+  "is_pickup_delivery": true,
+  "notes": "...",
+  "customer": {
+    "name": "Budi",
+    "phone": "0812....",
+    "notes": ""
   },
   "items": [
     {
-      "id": "item-uuid",
       "service_id": "svc-uuid",
-      "service_name_snapshot": "Kiloan Reguler",
-      "unit_type_snapshot": "kg",
       "weight_kg": 5.2,
-      "unit_price_amount": 8000,
-      "subtotal_amount": 41600
+      "qty": null
     }
   ],
   "pickup": {
-    "pickup_date": "2026-02-15",
-    "pickup_slot": "09.00–11.00",
+    "slot": "2026-02-15 09:00",
     "address_short": "Jl. Mawar No.10",
     "maps_link": "https://..."
   },
@@ -363,14 +364,7 @@ Payload:
     "maps_link": "https://..."
   },
   "shipping_fee_amount": 10000,
-  "discount_amount": 0,
-  "total_amount": 55000,
-  "initial_payment": {
-    "id": "pay-uuid",
-    "amount": 20000,
-    "method": "cash",
-    "paid_at": "2026-02-15T10:03:10+07:00"
-  }
+  "discount_amount": 0
 }
 
 
@@ -388,6 +382,8 @@ jika invoice_no null, server assign saat online jika memungkinkan.
 
 simpan snapshot items
 
+`items` boleh kosong hanya untuk flow pickup-first explicit (`requires_pickup=true`, `requires_delivery=false`) dengan slot pickup valid.
+
 trigger WA_PICKUP_CONFIRM jika is_pickup_delivery & plan Premium/Pro
 
 Effects:
@@ -396,15 +392,13 @@ invoice_no_assigned (jika server meng-assign)
 
 id_map jika ada merge customer
 
-8.2 ORDER_UPDATE_STATUS
+8.2 ORDER_UPDATE_LAUNDRY_STATUS
 
 Payload:
 
 {
   "order_id": "order-uuid",
-  "pipeline": "laundry",
-  "to_status": "drying",
-  "from_status": "washing"
+  "status": "drying"
 }
 
 
@@ -416,14 +410,13 @@ STATUS_NOT_FORWARD / INVALID_TRANSITION jika tidak sah
 
 trigger WA_LAUNDRY_READY saat to_status=ready (Premium/Pro)
 
-8.3 COURIER_UPDATE_STATUS
+8.3 ORDER_UPDATE_COURIER_STATUS
 
 Payload:
 
 {
   "order_id": "order-uuid",
-  "pipeline": "courier",
-  "to_status": "pickup_on_the_way"
+  "status": "pickup_on_the_way"
 }
 
 
@@ -439,19 +432,17 @@ WA_DELIVERY_OTW saat delivery_on_the_way
 
 WA_ORDER_DONE saat delivered (atau completed)
 
-8.4 PAYMENT_ADD (append-only)
+8.4 ORDER_ADD_PAYMENT (append-only)
 
 Payload:
 
 {
-  "payment": {
-    "id": "pay-uuid",
-    "order_id": "order-uuid",
-    "amount": 20000,
-    "method": "cash",
-    "paid_at": "2026-02-15T10:03:10+07:00",
-    "notes": ""
-  }
+  "id": "pay-uuid",
+  "order_id": "order-uuid",
+  "amount": 20000,
+  "method": "cash",
+  "paid_at": "2026-02-15T10:03:10+07:00",
+  "notes": ""
 }
 
 
@@ -488,7 +479,7 @@ jika merge:
 
 return effects.id_map: client_id -> server_id
 
-8.6 COURIER_ASSIGN (Admin/Owner)
+8.6 ORDER_ASSIGN_COURIER (Admin/Owner)
 
 Payload:
 

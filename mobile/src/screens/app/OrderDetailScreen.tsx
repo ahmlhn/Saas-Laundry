@@ -13,8 +13,9 @@ import { buildOrderReceiptText, type OrderReceiptKind } from "../../features/ord
 import { formatStatusLabel, getNextLaundryStatus, resolveCourierTone, resolveLaundryTone } from "../../features/orders/orderStatus";
 import { formatServiceDuration } from "../../features/services/defaultDuration";
 import { getStoredBluetoothThermalPrinter } from "../../features/settings/printerBluetoothStorage";
-import { DEFAULT_PRINTER_NOTE_SETTINGS, getPrinterNoteSettings } from "../../features/settings/printerNoteStorage";
-import { DEFAULT_PRINTER_LOCAL_SETTINGS, getPrinterLocalSettings } from "../../features/settings/printerLocalSettingsStorage";
+import { getPrinterDeviceSettingsFromServer, getPrinterNoteSettingsFromServer } from "../../features/settings/printerNoteApi";
+import { DEFAULT_PRINTER_NOTE_SETTINGS, getPrinterNoteSettings, setPrinterNoteSettings } from "../../features/settings/printerNoteStorage";
+import { DEFAULT_PRINTER_LOCAL_SETTINGS, getPrinterLocalSettings, setPrinterLocalSettings } from "../../features/settings/printerLocalSettingsStorage";
 import { printBluetoothThermalReceipt } from "../../features/settings/thermalBluetoothPrinter";
 import { getApiErrorMessage } from "../../lib/httpClient";
 import type { AppRootStackParamList, OrdersStackParamList } from "../../navigation/types";
@@ -36,6 +37,7 @@ const RECEIPT_PREVIEW_FONT_SIZE = 10.5;
 const RECEIPT_PREVIEW_LINE_HEIGHT = 16;
 const RECEIPT_PREVIEW_CHAR_WIDTH_FACTOR = 0.64;
 const RECEIPT_PREVIEW_SIDE_PADDING = 26;
+const RECEIPT_SETTINGS_SYNC_TIMEOUT_MS = 8000;
 
 const CANCEL_REASON_OPTIONS: Array<{ id: string; label: string }> = [
   { id: "customer_change_mind", label: "Pelanggan membatalkan pesanan" },
@@ -54,6 +56,24 @@ const currencyFormatter = new Intl.NumberFormat("id-ID");
 
 function formatMoney(value: number): string {
   return `Rp ${currencyFormatter.format(value)}`;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutHandle = setTimeout(() => {
+      reject(new Error("REQUEST_TIMEOUT"));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timeoutHandle);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutHandle);
+        reject(error);
+      });
+  });
 }
 
 function formatCompactNumber(value: number): string {
@@ -466,12 +486,9 @@ export function OrderDetailScreen() {
 
     setActionMessage(null);
     setErrorMessage(null);
-    rootNavigation.navigate("MainTabs", {
-      screen: "QuickActionTab",
-      params: {
-        editOrderId: detail.id,
-        editStartStep: startStep,
-      },
+    rootNavigation.navigate("OrderCreate", {
+      editOrderId: detail.id,
+      editStartStep: startStep,
     });
   }
 
@@ -800,6 +817,8 @@ export function OrderDetailScreen() {
     detail?.laundry_status,
   ]);
   const paymentStatusLabel = detail?.due_amount && detail.due_amount > 0 ? "Belum Lunas" : "Lunas";
+  const syncStatusLabel = detail?.local_sync_status === "failed" ? "Sync Gagal" : detail?.local_sync_status === "pending" ? "Belum Sinkron" : null;
+  const syncStatusTone: "danger" | "warning" = detail?.local_sync_status === "failed" ? "danger" : "warning";
 
   function handleOpenPaymentTools(): void {
     if (!detail) {
@@ -867,12 +886,9 @@ export function OrderDetailScreen() {
 
       if (nextCourierStatus === "picked_up") {
         if (canEditOrder && rootNavigation) {
-          rootNavigation.navigate("MainTabs", {
-            screen: "QuickActionTab",
-            params: {
-              editOrderId: latest.id,
-              editStartStep: "services",
-            },
+          rootNavigation.navigate("OrderCreate", {
+            editOrderId: latest.id,
+            editStartStep: "services",
           });
           return;
         }
@@ -1053,6 +1069,7 @@ export function OrderDetailScreen() {
     latestDetail: OrderDetail;
     printerSettings: Awaited<ReturnType<typeof getPrinterLocalSettings>>;
     noteSettings: Awaited<ReturnType<typeof getPrinterNoteSettings>>;
+    receiptOutletId: string | null;
     receiptText: string;
   }> {
     if (!detail) {
@@ -1064,23 +1081,56 @@ export function OrderDetailScreen() {
       setDetail(latestDetail);
     }
 
-    const printerSettings = await getPrinterLocalSettings(selectedOutlet?.id).catch(() => DEFAULT_PRINTER_LOCAL_SETTINGS);
-    const noteSettings = await getPrinterNoteSettings(selectedOutlet?.id).catch(() => ({
+    const receiptOutletId = latestDetail.outlet_id ?? selectedOutlet?.id ?? null;
+    const localPrinterSettings = await getPrinterLocalSettings(receiptOutletId).catch(() => DEFAULT_PRINTER_LOCAL_SETTINGS);
+    const localNoteSettings = await getPrinterNoteSettings(receiptOutletId).catch(() => ({
       ...DEFAULT_PRINTER_NOTE_SETTINGS,
-      profileName: selectedOutlet?.name || "",
+      profileName: selectedOutlet && selectedOutlet.id === receiptOutletId ? selectedOutlet.name || "" : "",
     }));
+    const syncedSettings = await (async () => {
+      if (!receiptOutletId) {
+        return {
+          printerSettings: localPrinterSettings,
+          noteSettings: localNoteSettings,
+        };
+      }
+
+      try {
+        const [serverNoteSettings, serverPrinterSettings] = await Promise.all([
+          withTimeout(getPrinterNoteSettingsFromServer(receiptOutletId), RECEIPT_SETTINGS_SYNC_TIMEOUT_MS),
+          withTimeout(getPrinterDeviceSettingsFromServer(receiptOutletId), RECEIPT_SETTINGS_SYNC_TIMEOUT_MS),
+        ]);
+
+        await Promise.all([
+          setPrinterNoteSettings(serverNoteSettings, receiptOutletId),
+          setPrinterLocalSettings(serverPrinterSettings, receiptOutletId),
+        ]);
+
+        return {
+          printerSettings: serverPrinterSettings,
+          noteSettings: serverNoteSettings,
+        };
+      } catch {
+        return {
+          printerSettings: localPrinterSettings,
+          noteSettings: localNoteSettings,
+        };
+      }
+    })();
+    const receiptOutletLabel = selectedOutlet && selectedOutlet.id === receiptOutletId ? outletLabel : undefined;
     const receiptText = buildOrderReceiptText({
       kind,
       order: latestDetail,
-      outletLabel,
-      paperWidth: printerSettings.paperWidth,
-      noteSettings,
+      outletLabel: receiptOutletLabel,
+      paperWidth: syncedSettings.printerSettings.paperWidth,
+      noteSettings: syncedSettings.noteSettings,
     });
 
     return {
       latestDetail,
-      printerSettings,
-      noteSettings,
+      printerSettings: syncedSettings.printerSettings,
+      noteSettings: syncedSettings.noteSettings,
+      receiptOutletId,
       receiptText,
     };
   }
@@ -1146,7 +1196,7 @@ export function OrderDetailScreen() {
 
     try {
       const payload = await resolveReceiptPayload(kind);
-      const pairedPrinter = await getStoredBluetoothThermalPrinter(selectedOutlet?.id);
+      const pairedPrinter = await getStoredBluetoothThermalPrinter(payload.receiptOutletId);
       if (!pairedPrinter?.address) {
         setErrorMessage("Belum ada printer thermal yang tersanding. Atur dulu di menu Printer & Nota.");
         return;
@@ -1251,6 +1301,7 @@ export function OrderDetailScreen() {
             </View>
 
             <View style={styles.statusRow}>
+              {syncStatusLabel ? <StatusPill label={syncStatusLabel} tone={syncStatusTone} /> : null}
               <StatusPill label={`Laundry: ${formatStatusLabel(detail.laundry_status)}`} tone={resolveLaundryTone(detail.laundry_status)} />
               <StatusPill
                 label={hasCourierFlow ? `Kurir ${courierModeLabel}: ${formatStatusLabel(currentCourierStatus)}` : "Kurir: Tidak"}

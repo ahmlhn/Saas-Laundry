@@ -13,8 +13,11 @@ import { Alert, Animated, Easing, Linking, Platform, StyleSheet, View } from "re
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { APP_VERSION } from "./src/config/appVersion";
 import { AppLaunchLoader } from "./src/components/system/AppLaunchLoader";
+import { SyncStatusHud } from "./src/components/system/SyncStatusHud";
 import { AppUpdateRequiredScreen } from "./src/components/system/AppUpdateRequiredScreen";
 import { checkAndroidAppUpdate, resolveAndroidUpdateUrl } from "./src/features/appUpdate/updateChecker";
+import { ConnectivityProvider } from "./src/features/connectivity/ConnectivityContext";
+import { SyncProvider } from "./src/features/sync/SyncContext";
 import { AppNavigator } from "./src/navigation/AppNavigator";
 import { AuthNavigator } from "./src/navigation/AuthNavigator";
 import { SessionProvider, useSession } from "./src/state/SessionContext";
@@ -163,6 +166,7 @@ function RootRouter({ fontsLoaded }: { fontsLoaded: boolean }) {
               ? <AppNavigator />
               : <AuthNavigator />
           : null}
+        {startupReady && session ? <SyncStatusHud /> : null}
       </Animated.View>
 
       {showLoader ? (
@@ -186,12 +190,16 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <SessionProvider>
-        <NavigationContainer>
-          <RootRouter fontsLoaded={fontsLoaded} />
-          <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
-        </NavigationContainer>
-      </SessionProvider>
+      <ConnectivityProvider>
+        <SessionProvider>
+          <SyncProvider>
+            <NavigationContainer>
+              <RootRouter fontsLoaded={fontsLoaded} />
+              <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
+            </NavigationContainer>
+          </SyncProvider>
+        </SessionProvider>
+      </ConnectivityProvider>
     </SafeAreaProvider>
   );
 }

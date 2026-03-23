@@ -522,6 +522,8 @@ export function OrdersTodayScreen() {
     const pickupLabel = item.is_pickup_delivery ? (isCompactLandscape ? "Antar" : "Antar Jemput") : (isCompactLandscape ? "Ambil" : "Ambil Sendiri");
     const paymentLabel = isDue ? (isCompactLandscape ? "Piutang" : "Belum Lunas") : "Lunas";
     const subtleIconColor = theme.mode === "dark" ? "#a8c6e1" : theme.colors.textMuted;
+    const syncTone: "danger" | "warning" = item.local_sync_status === "failed" ? "danger" : "warning";
+    const syncLabel = item.local_sync_status === "failed" ? "Sync Gagal" : "Belum Sinkron";
 
     return (
       <Pressable onPress={() => navigation.navigate("OrderDetail", { orderId: item.id })} style={({ pressed }) => [styles.orderCard, pressed ? styles.orderCardPressed : null]}>
@@ -542,7 +544,10 @@ export function OrdersTodayScreen() {
                 {identitySecondary}
               </Text>
             </View>
-            <StatusPill label={formatStatusLabel(item.laundry_status)} tone={laundryTone} />
+            <View style={styles.orderTopPills}>
+              {item.local_sync_status && item.local_sync_status !== "synced" ? <StatusPill label={syncLabel} tone={syncTone} /> : null}
+              <StatusPill label={formatStatusLabel(item.laundry_status)} tone={laundryTone} />
+            </View>
           </View>
 
           <View style={styles.metricsRow}>
@@ -1169,6 +1174,10 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
       justifyContent: "space-between",
       alignItems: "flex-start",
       gap: isCompactLandscape ? 8 : theme.spacing.sm,
+    },
+    orderTopPills: {
+      alignItems: "flex-end",
+      gap: 6,
     },
     orderTitleWrap: {
       flex: 1,

@@ -66,6 +66,11 @@ export interface OrderSummary {
   cancelled_reason?: string | null;
   created_at: string;
   updated_at: string;
+  local_sync_status?: "synced" | "pending" | "failed";
+  local_pending_mutation_count?: number;
+  local_rejected_mutation_count?: number;
+  local_sync_error_code?: string | null;
+  local_sync_error_message?: string | null;
   customer?: OrderCustomer;
   courier?: OrderCourier | null;
 }

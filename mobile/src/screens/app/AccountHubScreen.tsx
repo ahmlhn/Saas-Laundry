@@ -1,12 +1,16 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { StatusPill } from "../../components/ui/StatusPill";
+import { useConnectivity } from "../../features/connectivity/ConnectivityContext";
+import { listVisibleOutboxMutations, type OutboxMutationRecord } from "../../features/sync/outboxRepository";
+import { describeSyncReason, formatMutationTypeLabel, formatOutboxMutationEntityLabel } from "../../features/sync/syncConflictMapper";
+import { useSync } from "../../features/sync/SyncContext";
 import {
   canManageFinance,
   canManagePrinterNote,
@@ -47,6 +51,24 @@ function userInitials(name: string): string {
   return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
 }
 
+function formatSyncTime(value: string | null): string {
+  if (!value) {
+    return "Belum pernah";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export function AccountHubScreen() {
   const theme = useAppTheme();
   const { width, height } = useWindowDimensions();
@@ -57,9 +79,12 @@ export function AccountHubScreen() {
   const styles = useMemo(() => createStyles(theme, isTablet, isCompactLandscape), [theme, isTablet, isCompactLandscape]);
   const navigation = useNavigation<NativeStackNavigationProp<AccountStackParamList, "AccountHub">>();
   const { session, selectedOutlet, selectOutlet, logout, biometricAvailable, biometricEnabled, biometricLabel, setBiometricEnabled } = useSession();
+  const connectivity = useConnectivity();
+  const { isSyncing, pendingCount, rejectedCount, unsyncedCount, lastSyncAt, lastErrorMessage, syncNow, refreshSnapshot } = useSync();
   const [biometricSaving, setBiometricSaving] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [syncQueue, setSyncQueue] = useState<OutboxMutationRecord[]>([]);
 
   if (!session) {
     return null;
@@ -76,6 +101,30 @@ export function AccountHubScreen() {
     session.quota.orders_remaining === null
       ? "tanpa batas"
       : `${session.quota.orders_remaining} sisa dari ${session.quota.orders_limit ?? "-"}`;
+  const syncStatusTone: "danger" | "warning" | "info" | "success" =
+    rejectedCount > 0 ? "danger" : connectivity.isOffline ? "warning" : isSyncing ? "info" : unsyncedCount > 0 ? "warning" : "success";
+  const syncStatusLabel = rejectedCount > 0 ? `Gagal ${rejectedCount}` : connectivity.isOffline ? "Offline" : isSyncing ? "Syncing" : unsyncedCount > 0 ? `${unsyncedCount} pending` : "Online";
+
+  useEffect(() => {
+    let active = true;
+
+    void refreshSnapshot()
+      .then(() => listVisibleOutboxMutations(6))
+      .then((rows) => {
+        if (active) {
+          setSyncQueue(rows);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setSyncQueue([]);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [refreshSnapshot, rejectedCount, unsyncedCount]);
 
   const rawMenuItems: AccountMenuItem[] = [
     {
@@ -205,6 +254,34 @@ export function AccountHubScreen() {
     }
   }
 
+  async function handleSyncNow(): Promise<void> {
+    setActionMessage(null);
+    setErrorMessage(null);
+
+    try {
+      const result = await syncNow();
+      setSyncQueue(await listVisibleOutboxMutations(6));
+      if (!result) {
+        setActionMessage("Pilih outlet aktif dulu untuk mulai sinkronisasi.");
+        return;
+      }
+
+      if (result.rejected.length > 0) {
+        setErrorMessage(`Ada ${result.rejected.length} perubahan yang ditolak server. Cek antrean sinkron di bawah.`);
+        return;
+      }
+
+      if (result.pushedCount === 0 && result.pulledCount === 0) {
+        setActionMessage("Data lokal sudah sinkron.");
+        return;
+      }
+
+      setActionMessage(`Sinkronisasi selesai. Push ${result.pushedCount}, pull ${result.pulledCount}.`);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Sinkronisasi gagal dijalankan.");
+    }
+  }
+
   return (
     <AppScreen contentContainerStyle={styles.content} scroll>
       <AppPanel style={styles.profilePanel}>
@@ -261,6 +338,69 @@ export function AccountHubScreen() {
           </>
         ) : (
           <Text style={styles.settingsHint}>Perangkat ini belum mendukung login biometrik.</Text>
+        )}
+      </AppPanel>
+
+      <AppPanel style={styles.syncPanel}>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.settingsTitle}>Status Sinkron</Text>
+          <StatusPill label={syncStatusLabel} tone={syncStatusTone} />
+        </View>
+        <Text style={styles.settingsHint}>
+          {connectivity.isOffline
+            ? "Aplikasi tetap bisa dipakai. Perubahan baru akan ditahan di perangkat sampai koneksi kembali."
+            : "Perubahan transaksi inti akan dikirim ke server melalui antrean sinkronisasi."}
+        </Text>
+        <View style={styles.syncMetaWrap}>
+          <View style={styles.syncMetaItem}>
+            <Text style={styles.syncMetaLabel}>Belum sinkron</Text>
+            <Text style={styles.syncMetaValue}>{unsyncedCount}</Text>
+          </View>
+          <View style={styles.syncMetaItem}>
+            <Text style={styles.syncMetaLabel}>Pending</Text>
+            <Text style={styles.syncMetaValue}>{pendingCount}</Text>
+          </View>
+          <View style={styles.syncMetaItem}>
+            <Text style={styles.syncMetaLabel}>Ditolak</Text>
+            <Text style={styles.syncMetaValue}>{rejectedCount}</Text>
+          </View>
+        </View>
+        <Text style={styles.syncFootnote}>Sinkron terakhir: {formatSyncTime(lastSyncAt)}</Text>
+        {lastErrorMessage ? <Text style={styles.syncErrorInline}>{lastErrorMessage}</Text> : null}
+        <View style={styles.syncActionWrap}>
+          <AppButton
+            disabled={isSyncing}
+            leftElement={<Ionicons color={theme.colors.info} name="sync-outline" size={18} />}
+            loading={isSyncing}
+            onPress={() => void handleSyncNow()}
+            title={isSyncing ? "Menyinkronkan..." : "Sync Sekarang"}
+            variant="secondary"
+          />
+        </View>
+        {syncQueue.length > 0 ? (
+          <View style={styles.syncQueueWrap}>
+            {syncQueue.map((item) => {
+              const statusTone: "danger" | "warning" = item.status === "rejected" ? "danger" : "warning";
+              const statusLabel = item.status === "rejected" ? "Gagal" : "Pending";
+
+              return (
+                <View key={item.mutation_id} style={styles.syncQueueItem}>
+                  <View style={styles.syncQueueTopRow}>
+                    <Text style={styles.syncQueueTitle}>{formatMutationTypeLabel(item.type)}</Text>
+                    <StatusPill label={statusLabel} tone={statusTone} />
+                  </View>
+                  <Text style={styles.syncQueueMeta}>
+                    {formatOutboxMutationEntityLabel(item)} • {formatSyncTime(item.updated_at)}
+                  </Text>
+                  {item.status === "rejected" ? (
+                    <Text style={styles.syncQueueReason}>{describeSyncReason(item.reason_code, item.message)}</Text>
+                  ) : null}
+                </View>
+              );
+            })}
+          </View>
+        ) : (
+          <Text style={styles.syncFootnote}>Tidak ada antrean sync yang perlu perhatian.</Text>
         )}
       </AppPanel>
 
@@ -408,6 +548,11 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       backgroundColor: theme.colors.surfaceSoft,
       borderColor: theme.colors.borderStrong,
     },
+    syncPanel: {
+      gap: theme.spacing.xs,
+      backgroundColor: theme.colors.surfaceSoft,
+      borderColor: theme.colors.borderStrong,
+    },
     sectionHeaderRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -424,6 +569,80 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontFamily: theme.fonts.medium,
       fontSize: 12,
       lineHeight: 18,
+    },
+    syncMetaWrap: {
+      flexDirection: "row",
+      gap: theme.spacing.xs,
+    },
+    syncMetaItem: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+      gap: 2,
+    },
+    syncMetaLabel: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11,
+    },
+    syncMetaValue: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: 16,
+    },
+    syncFootnote: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+      lineHeight: 17,
+    },
+    syncErrorInline: {
+      color: theme.colors.danger,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+      lineHeight: 17,
+    },
+    syncActionWrap: {
+      alignSelf: "flex-start",
+    },
+    syncQueueWrap: {
+      gap: 8,
+    },
+    syncQueueItem: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 11,
+      paddingVertical: 10,
+      gap: 4,
+    },
+    syncQueueTopRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+    },
+    syncQueueTitle: {
+      flex: 1,
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 13,
+    },
+    syncQueueMeta: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+    },
+    syncQueueReason: {
+      color: theme.colors.danger,
+      fontFamily: theme.fonts.medium,
+      fontSize: 11.5,
+      lineHeight: 17,
     },
     menuPanel: {
       gap: 0,

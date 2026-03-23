@@ -1,6 +1,7 @@
 import { httpClient } from "../../lib/httpClient";
 import { toQueryBoolean } from "../../lib/httpQuery";
 import { getCachedValue, invalidateCache, setCachedValue } from "../../lib/queryCache";
+import { hasAnyLocalServices, readLocalServices, upsertLocalServices } from "../repositories/servicesRepository";
 import type { ServiceCatalogItem, ServiceCreatePayload, ServiceType, ServiceUpdatePayload } from "../../types/service";
 
 interface ServicesResponse {
@@ -59,16 +60,7 @@ function buildCacheKey(params: ListServicesParams): string {
   return `services:list:${outletId}:${includeDeleted}:${active}:${serviceTypes}:${parent}:${isGroup}:${withChildren}:${q}:${sort}:${limit}`;
 }
 
-export async function listServices(params: ListServicesParams = {}): Promise<ServiceCatalogItem[]> {
-  const cacheKey = buildCacheKey(params);
-
-  if (!params.forceRefresh) {
-    const cached = getCachedValue<ServiceCatalogItem[]>(cacheKey);
-    if (cached) {
-      return cached;
-    }
-  }
-
+async function fetchServicesFromServer(params: ListServicesParams = {}): Promise<ServiceCatalogItem[]> {
   const serviceTypes = normalizeServiceTypes(params.serviceType);
 
   const response = await httpClient.get<ServicesResponse>("/services", {
@@ -86,8 +78,44 @@ export async function listServices(params: ListServicesParams = {}): Promise<Ser
     },
   });
 
-  setCachedValue(cacheKey, response.data.data, 20_000);
+  await upsertLocalServices(response.data.data, {
+    outletId: params.outletId,
+  });
+
   return response.data.data;
+}
+
+export async function listServices(params: ListServicesParams = {}): Promise<ServiceCatalogItem[]> {
+  const cacheKey = buildCacheKey(params);
+
+  if (!params.forceRefresh) {
+    const cached = getCachedValue<ServiceCatalogItem[]>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+  }
+
+  const hasLocalSnapshot = await hasAnyLocalServices(params.outletId);
+  const localItems = await readLocalServices(params);
+
+  if (!params.forceRefresh && hasLocalSnapshot) {
+    setCachedValue(cacheKey, localItems, 20_000);
+    return localItems;
+  }
+
+  try {
+    await fetchServicesFromServer(params);
+    const refreshed = await readLocalServices(params);
+    setCachedValue(cacheKey, refreshed, 20_000);
+    return refreshed;
+  } catch (error) {
+    if (!hasLocalSnapshot) {
+      throw error;
+    }
+
+    setCachedValue(cacheKey, localItems, 20_000);
+    return localItems;
+  }
 }
 
 export async function archiveService(serviceId: string): Promise<string | null> {
@@ -99,6 +127,7 @@ export async function archiveService(serviceId: string): Promise<string | null> 
 export async function restoreService(serviceId: string): Promise<ServiceCatalogItem> {
   const response = await httpClient.post<ServiceResponse>(`/services/${serviceId}/restore`);
   invalidateCache("services:list:");
+  await upsertLocalServices([response.data.data]);
   return response.data.data;
 }
 
@@ -126,6 +155,7 @@ export async function createService(payload: ServiceCreatePayload): Promise<Serv
   });
 
   invalidateCache("services:list:");
+  await upsertLocalServices([response.data.data]);
   return response.data.data;
 }
 
@@ -210,5 +240,6 @@ export async function updateService(serviceId: string, payload: ServiceUpdatePay
 
   const response = await httpClient.patch<ServiceResponse>(`/services/${serviceId}`, body);
   invalidateCache("services:list:");
+  await upsertLocalServices([response.data.data]);
   return response.data.data;
 }

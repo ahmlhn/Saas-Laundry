@@ -84,6 +84,70 @@ function buildReceiptPreviewLine(label: string, value: string, labelWidth: numbe
   return `${normalizedLabel.padEnd(labelWidth, " ")} : ${value}`;
 }
 
+function centerPreviewLine(value: string, lineWidth: number): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (trimmed.length >= lineWidth) {
+    return trimmed;
+  }
+  const paddingStart = Math.max(Math.floor((lineWidth - trimmed.length) / 2), 0);
+  return `${" ".repeat(paddingStart)}${trimmed}`;
+}
+
+function wrapPreviewText(value: string, lineWidth: number): string[] {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return [];
+  }
+
+  const words = normalized.split(" ");
+  const wrapped: string[] = [];
+  let currentLine = "";
+
+  for (const word of words) {
+    if (word.length > lineWidth) {
+      if (currentLine) {
+        wrapped.push(currentLine);
+        currentLine = "";
+      }
+
+      let remainder = word;
+      while (remainder.length > lineWidth) {
+        wrapped.push(remainder.slice(0, lineWidth));
+        remainder = remainder.slice(lineWidth);
+      }
+
+      if (remainder) {
+        currentLine = remainder;
+      }
+      continue;
+    }
+
+    const nextLine = currentLine ? `${currentLine} ${word}` : word;
+    if (nextLine.length <= lineWidth) {
+      currentLine = nextLine;
+      continue;
+    }
+
+    if (currentLine) {
+      wrapped.push(currentLine);
+    }
+    currentLine = word;
+  }
+
+  if (currentLine) {
+    wrapped.push(currentLine);
+  }
+
+  return wrapped;
+}
+
+function buildCenteredPreviewLines(value: string, lineWidth: number): string[] {
+  return wrapPreviewText(value, lineWidth).map((line) => centerPreviewLine(line, lineWidth));
+}
+
 function buildPrinterNotePreviewText(params: {
   kind: "customer" | "production";
   profileName: string;
@@ -96,12 +160,13 @@ function buildPrinterNotePreviewText(params: {
 }): string {
   const { kind, profileName, description, phone, footer, paperWidth, noteNumber, showCustomerReceipt } = params;
   const { divider, labelWidth } = resolveReceiptPreviewLayout(paperWidth);
+  const lineWidth = divider.length;
   const lines: string[] = [];
 
   if (kind !== "production") {
-    lines.push(profileName);
-    lines.push(description);
-    lines.push(`Telp. ${phone}`);
+    lines.push(...buildCenteredPreviewLines(profileName, lineWidth));
+    lines.push(...buildCenteredPreviewLines(description, lineWidth));
+    lines.push(...buildCenteredPreviewLines(`Telp. ${phone}`, lineWidth));
     lines.push(divider);
     lines.push(buildReceiptPreviewLine("Nomor Nota", noteNumber, labelWidth));
     lines.push(buildReceiptPreviewLine("Pelanggan", "Nama Pelanggan", labelWidth));
