@@ -61,6 +61,40 @@ const renderTrendCharts = () => {
     });
 };
 
+const enhanceResponsiveTables = () => {
+    document.querySelectorAll('.table-wrap table').forEach((table) => {
+        const headers = [...table.querySelectorAll('thead th')].map((header) =>
+            header.textContent
+                ?.replace(/\s+/g, ' ')
+                .trim() ?? '',
+        );
+
+        table.querySelectorAll('tbody tr').forEach((row) => {
+            const cells = [...row.children].filter((cell) => ['TD', 'TH'].includes(cell.tagName));
+            const inlineRowHeader = cells.length === 2 && cells[0]?.tagName === 'TH'
+                ? cells[0].textContent?.replace(/\s+/g, ' ').trim() ?? ''
+                : '';
+
+            if (inlineRowHeader && cells[0]?.tagName === 'TH') {
+                cells[0].setAttribute('data-mobile-hidden', '1');
+            }
+
+            cells.forEach((cell, index) => {
+                if (cell.hasAttribute('data-cell-label')) {
+                    return;
+                }
+
+                const onlySpanningCell = cells.length === 1 && Number(cell.getAttribute('colspan') ?? '1') > 1;
+                const label = onlySpanningCell
+                    ? ''
+                    : headers[index] || (cell.tagName === 'TD' ? inlineRowHeader : '');
+
+                cell.setAttribute('data-cell-label', label);
+            });
+        });
+    });
+};
+
 window.Alpine = Alpine;
 
 Alpine.data('panelApp', () => ({
@@ -79,6 +113,7 @@ Alpine.data('panelApp', () => ({
         this.sidebarOpen = this.isDesktop;
 
         requestAnimationFrame(renderTrendCharts);
+        requestAnimationFrame(enhanceResponsiveTables);
 
         window.addEventListener('resize', () => {
             const desktopNow = window.innerWidth >= 1280;
@@ -91,6 +126,7 @@ Alpine.data('panelApp', () => ({
             }
 
             requestAnimationFrame(renderTrendCharts);
+            requestAnimationFrame(enhanceResponsiveTables);
         });
     },
 
@@ -486,4 +522,5 @@ Alpine.start();
 
 window.addEventListener('load', () => {
     requestAnimationFrame(renderTrendCharts);
+    requestAnimationFrame(enhanceResponsiveTables);
 });

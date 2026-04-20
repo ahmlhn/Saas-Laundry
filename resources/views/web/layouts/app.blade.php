@@ -161,6 +161,10 @@
                         <span class="panel-meta-pill">Tenant {{ $tenant->name }}</span>
                         <span class="panel-meta-pill">Paket {{ strtoupper((string) ($tenant->currentPlan?->key ?? 'plan')) }}</span>
                     </div>
+                    <div class="panel-mobile-meta">
+                        <span class="panel-meta-pill">Tenant {{ $tenant->name }}</span>
+                        <span class="panel-meta-pill">Paket {{ strtoupper((string) ($tenant->currentPlan?->key ?? 'plan')) }}</span>
+                    </div>
                     <button type="button" class="btn btn-ghost btn-icon" @click="toggleTheme()">
                         <span x-text="isDark ? 'Terang' : 'Gelap'"></span>
                     </button>

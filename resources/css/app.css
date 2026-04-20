@@ -446,12 +446,22 @@ html:not(.dark) .panel-plan {
     display: inline-flex;
     align-items: center;
     gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 
 .panel-header-meta {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    flex-wrap: wrap;
+}
+
+.panel-mobile-meta {
+    display: none;
+    width: 100%;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .panel-meta-pill {
@@ -697,6 +707,54 @@ html:not(.dark) .panel-plan {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
     gap: 14px;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 14px;
+}
+
+.stat-card {
+    position: relative;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--line);
+    background:
+        radial-gradient(circle at 100% 0%, rgba(37, 99, 235, 0.06), transparent 42%),
+        linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+    padding: 16px;
+    box-shadow: var(--shadow-sm);
+    display: grid;
+    gap: 6px;
+}
+
+.stat-label {
+    margin: 0;
+    color: var(--gray-500);
+    font-size: 0.74rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-family: var(--font-mono);
+}
+
+.stat-value {
+    margin: 0;
+    color: var(--gray-900);
+    font-size: 1.28rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+
+.dark .stat-card {
+    border-color: #223047;
+    background:
+        radial-gradient(circle at 100% 0%, rgba(37, 99, 235, 0.12), transparent 42%),
+        #111827;
+}
+
+.dark .stat-value {
+    color: #ffffff;
 }
 
 .page-shell > .metric-grid,
@@ -1780,6 +1838,10 @@ tbody tr:nth-child(even) {
     gap: 8px;
 }
 
+.table-wrap .filter-actions {
+    flex-wrap: wrap;
+}
+
 .table-wrap .filters-grid label {
     margin-bottom: 3px;
     font-size: 0.72rem;
@@ -1967,6 +2029,8 @@ textarea:focus-visible {
     text-decoration: none;
     cursor: pointer;
     transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background 120ms ease;
+    min-height: 42px;
+    text-align: center;
 }
 
 .btn:focus-visible {
@@ -2082,6 +2146,7 @@ textarea:focus-visible {
     display: inline-flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
 }
 
 .auth-root {
@@ -2575,6 +2640,7 @@ textarea:focus-visible {
 
     .panel-header-right {
         margin-left: auto;
+        justify-content: flex-start;
     }
 }
 
@@ -2633,6 +2699,10 @@ textarea:focus-visible {
     .panel-header-meta {
         display: none;
     }
+
+    .stats-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 @media (max-width: 720px) {
@@ -2651,7 +2721,12 @@ textarea:focus-visible {
         display: none;
     }
 
+    .panel-mobile-meta {
+        display: flex;
+    }
+
     .metric-grid,
+    .stats-grid,
     .order-detail-grid,
     .dashboard-grid-2,
     .filters-grid {
@@ -2679,6 +2754,16 @@ textarea:focus-visible {
     .form-slim {
         flex-direction: column;
         align-items: stretch;
+        width: 100%;
+    }
+
+    .filter-actions .btn,
+    .inline-filter .btn,
+    .form-slim .btn,
+    .panel-header-right .btn,
+    .panel-header-right form,
+    .panel-header-right form .btn {
+        width: 100%;
     }
 
     .order-builder-foot {
@@ -2713,6 +2798,129 @@ textarea:focus-visible {
 
     .bulk-shell-right select {
         min-width: 0;
+    }
+
+    .table-wrap {
+        overflow: visible;
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+    }
+
+    .table-wrap table,
+    .table-wrap thead,
+    .table-wrap tbody,
+    .table-wrap tr,
+    .table-wrap th,
+    .table-wrap td {
+        display: block;
+        width: 100%;
+        min-width: 0;
+    }
+
+    .table-wrap table {
+        border-collapse: separate;
+        border-spacing: 0;
+        background: transparent;
+    }
+
+    .table-wrap thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+    }
+
+    .table-wrap tbody {
+        display: grid;
+        gap: 12px;
+    }
+
+    .table-wrap tbody tr {
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+        padding: 12px;
+        box-shadow: var(--shadow-sm);
+    }
+
+    .dark .table-wrap tbody tr {
+        border-color: #223047;
+        background: #111827;
+    }
+
+    .table-wrap tbody tr:hover,
+    .table-wrap tbody tr:nth-child(even) {
+        background: inherit;
+    }
+
+    .table-wrap td {
+        border-bottom: 1px dashed var(--line);
+        padding: 10px 0;
+        display: grid;
+        grid-template-columns: minmax(96px, 42%) minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+    }
+
+    .dark .table-wrap td {
+        border-bottom-color: #223047;
+    }
+
+    .table-wrap td:last-child {
+        border-bottom: 0;
+        padding-bottom: 0;
+    }
+
+    .table-wrap td:first-child {
+        padding-top: 0;
+    }
+
+    .table-wrap td::before {
+        content: attr(data-cell-label);
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--gray-500);
+        line-height: 1.4;
+    }
+
+    .dark .table-wrap td::before {
+        color: #94a3b8;
+    }
+
+    .table-wrap td[data-cell-label=''] {
+        grid-template-columns: 1fr;
+    }
+
+    .table-wrap td[data-cell-label='']::before {
+        display: none;
+    }
+
+    .table-wrap th[data-mobile-hidden='1'] {
+        display: none;
+    }
+
+    .table-wrap td > * {
+        min-width: 0;
+    }
+
+    .table-wrap .table-actions,
+    .table-wrap .table-actions .btn,
+    .table-wrap .table-form-stack,
+    .table-wrap .table-form-stack .btn {
+        width: 100%;
+    }
+
+    .table-wrap .table-actions-menu {
+        left: 0;
+        right: 0;
     }
 
     .auth-root {

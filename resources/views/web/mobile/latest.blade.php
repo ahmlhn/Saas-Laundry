@@ -174,6 +174,18 @@
                 padding: 22px 18px;
                 border-radius: 20px;
             }
+
+            .meta-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .action-row {
+                flex-direction: column;
+            }
+
+            .btn {
+                width: 100%;
+            }
         }
     </style>
 </head>
