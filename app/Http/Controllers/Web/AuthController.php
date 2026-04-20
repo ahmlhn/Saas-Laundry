@@ -26,7 +26,7 @@ class AuthController extends Controller
         $user = $request->user();
 
         if ($user && $user->tenant_id && $user->hasAnyRole(['owner', 'admin'])) {
-            return redirect()->route('tenant.dashboard');
+            return redirect()->route('filament.tenant.pages.dashboard');
         }
 
         return view('web.auth.login');
@@ -99,7 +99,7 @@ class AuthController extends Controller
         );
 
         return redirect()
-            ->route('tenant.dashboard')
+            ->route('filament.tenant.pages.dashboard')
             ->with('status', 'Login success.');
     }
 

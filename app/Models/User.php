@@ -3,6 +3,8 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Filament\Models\Contracts\FilamentUser;
+use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -11,7 +13,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-class User extends Authenticatable
+class User extends Authenticatable implements FilamentUser
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasApiTokens, HasFactory, Notifiable, SoftDeletes;
@@ -102,5 +104,15 @@ class User extends Authenticatable
         }
 
         return $this->outlets->contains(fn (Outlet $outlet): bool => $outlet->id === $outletId);
+    }
+
+    public function canAccessPanel(Panel $panel): bool
+    {
+        return match ($panel->getId()) {
+            'tenant' => filled($this->tenant_id)
+                && $this->status === 'active'
+                && $this->hasAnyRole(['owner', 'admin']),
+            default => false,
+        };
     }
 }

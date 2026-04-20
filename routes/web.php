@@ -3,7 +3,6 @@
 use App\Http\Controllers\Web\AuthController as WebAuthController;
 use App\Http\Controllers\Web\BillingController;
 use App\Http\Controllers\Web\CustomerTrackingController;
-use App\Http\Controllers\Web\DashboardController;
 use App\Http\Controllers\Web\ManagementController;
 use App\Http\Controllers\Web\MobileReleaseController as WebMobileReleaseController;
 use App\Http\Controllers\Web\OrderBoardController;
@@ -18,7 +17,7 @@ Route::get('/', function () {
     $user = request()->user();
 
     if ($user && $user->tenant_id && $user->hasAnyRole(['owner', 'admin'])) {
-        return redirect()->route('tenant.dashboard');
+        return redirect()->route('filament.tenant.pages.dashboard');
     }
 
     return redirect()->route('login');
@@ -35,7 +34,7 @@ Route::middleware('guest')->group(function (): void {
 Route::middleware(['auth', 'tenant.path'])->group(function (): void {
     Route::post('/logout', [WebAuthController::class, 'destroy'])->name('tenant.logout');
 
-    Route::get('/dashboard', [DashboardController::class, 'index'])->name('tenant.dashboard');
+    Route::get('/dashboard', fn () => redirect()->route('filament.tenant.pages.dashboard'))->name('tenant.dashboard');
     Route::get('/billing', [BillingController::class, 'index'])->name('tenant.billing.index');
     Route::get('/billing/export', [BillingController::class, 'export'])->name('tenant.billing.export');
     Route::post('/billing/collections/{order}', [BillingController::class, 'updateCollection'])->name('tenant.billing.collection.update');
