@@ -9,7 +9,9 @@ import { useAppTheme } from "../../theme/useAppTheme";
 
 interface AppUpdateRequiredScreenProps {
   currentVersion: string;
+  currentBuild: number | null;
   latestVersion: string;
+  latestBuild: number;
   minimumSupportedVersion: string | null;
   releaseNote?: string | null;
   onOpenUpdate: () => void;
@@ -17,7 +19,9 @@ interface AppUpdateRequiredScreenProps {
 
 export function AppUpdateRequiredScreen({
   currentVersion,
+  currentBuild,
   latestVersion,
+  latestBuild,
   minimumSupportedVersion,
   releaseNote,
   onOpenUpdate,
@@ -28,6 +32,8 @@ export function AppUpdateRequiredScreen({
   const isLandscape = width > height;
   const isTablet = minEdge >= 600;
   const styles = useMemo(() => createStyles(theme, isTablet, isLandscape), [theme, isTablet, isLandscape]);
+  const currentLabel = currentBuild ? `v${currentVersion} (build ${currentBuild})` : `v${currentVersion}`;
+  const latestLabel = `v${latestVersion} (build ${latestBuild})`;
 
   return (
     <SafeAreaView edges={["top", "right", "bottom", "left"]} style={styles.safeArea}>
@@ -52,15 +58,15 @@ export function AppUpdateRequiredScreen({
           <View style={styles.metaGrid}>
             <View style={styles.metaCard}>
               <Text style={styles.metaLabel}>Versi Saat Ini</Text>
-              <Text style={styles.metaValue}>{currentVersion}</Text>
+              <Text style={styles.metaValue}>{currentLabel}</Text>
             </View>
             <View style={styles.metaCard}>
               <Text style={styles.metaLabel}>Versi Terbaru</Text>
-              <Text style={styles.metaValue}>{latestVersion}</Text>
+              <Text style={styles.metaValue}>{latestLabel}</Text>
             </View>
             <View style={styles.metaCard}>
               <Text style={styles.metaLabel}>Minimal Didukung</Text>
-              <Text style={styles.metaValue}>{minimumSupportedVersion ?? latestVersion}</Text>
+              <Text style={styles.metaValue}>{minimumSupportedVersion ? `v${minimumSupportedVersion}` : latestLabel}</Text>
             </View>
           </View>
 

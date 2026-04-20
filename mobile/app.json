@@ -3,7 +3,7 @@
     "name": "Cuci",
     "slug": "saas-laundry-mobile",
     "scheme": "saaslaundry",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -38,7 +38,8 @@
       ],
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize",
-      "package": "com.daratlaut.cuci"
+      "package": "com.daratlaut.cuci",
+      "versionCode": 8
     },
     "web": {
       "favicon": "./assets/favicon.png"

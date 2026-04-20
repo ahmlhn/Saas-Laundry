@@ -128,10 +128,12 @@ export function HelpInfoScreen() {
     try {
       const result = await checkAndroidAppUpdate();
       const latestVersion = result.latestVersion;
+      const latestLabel = `v${latestVersion} (build ${result.latestBuild})`;
       const updateRequired = result.status === "required";
 
       if (result.status === "current") {
-        setActionMessage(`Aplikasi sudah versi terbaru (${result.currentVersion}).`);
+        const currentLabel = result.currentBuild ? `v${result.currentVersion} (build ${result.currentBuild})` : `v${result.currentVersion}`;
+        setActionMessage(`Aplikasi sudah versi terbaru (${currentLabel}).`);
         return;
       }
 
@@ -145,8 +147,8 @@ export function HelpInfoScreen() {
 
       const dialogTitle = updateRequired ? "Update wajib tersedia" : "Update tersedia";
       const dialogMessage = updateRequired
-        ? `Versi ${latestVersion} tersedia. Minimal versi ${result.minimumSupportedVersion} diperlukan untuk lanjut memakai aplikasi.${releaseNote ? `\n\nCatatan: ${releaseNote}` : ""}`
-        : `Versi ${latestVersion} tersedia untuk diunduh.${releaseNote ? `\n\nCatatan: ${releaseNote}` : ""}`;
+        ? `Versi ${latestLabel} tersedia. Minimal versi ${result.minimumSupportedVersion} diperlukan untuk lanjut memakai aplikasi.${releaseNote ? `\n\nCatatan: ${releaseNote}` : ""}`
+        : `Versi ${latestLabel} tersedia untuk diunduh.${releaseNote ? `\n\nCatatan: ${releaseNote}` : ""}`;
 
       Alert.alert(dialogTitle, dialogMessage, [
         { text: "Nanti", style: "cancel" },
@@ -155,7 +157,7 @@ export function HelpInfoScreen() {
           onPress: () => {
             void openExternalUrl(primaryUrl, "Update aplikasi").then((opened) => {
               if (opened) {
-                setActionMessage(`Versi ${latestVersion} dibuka. Lanjutkan instalasi APK dari browser perangkat.`);
+                setActionMessage(`Versi ${latestLabel} dibuka. Lanjutkan instalasi APK dari browser perangkat.`);
               }
             });
           },

@@ -521,9 +521,11 @@ export function OrdersTodayScreen() {
     const identitySecondary = item.invoice_no ? item.order_code : "Tanpa invoice";
     const pickupLabel = item.is_pickup_delivery ? (isCompactLandscape ? "Antar" : "Antar Jemput") : (isCompactLandscape ? "Ambil" : "Ambil Sendiri");
     const paymentLabel = isDue ? (isCompactLandscape ? "Piutang" : "Belum Lunas") : "Lunas";
+    const courierLabel = item.is_pickup_delivery ? formatStatusLabel(item.courier_status) : "Tanpa kurir";
     const subtleIconColor = theme.mode === "dark" ? "#a8c6e1" : theme.colors.textMuted;
     const syncTone: "danger" | "warning" = item.local_sync_status === "failed" ? "danger" : "warning";
     const syncLabel = item.local_sync_status === "failed" ? "Sync Gagal" : "Belum Sinkron";
+    const syncColor = syncTone === "danger" ? theme.colors.danger : theme.colors.warning;
 
     return (
       <Pressable onPress={() => navigation.navigate("OrderDetail", { orderId: item.id })} style={({ pressed }) => [styles.orderCard, pressed ? styles.orderCardPressed : null]}>
@@ -540,58 +542,62 @@ export function OrdersTodayScreen() {
               <Text numberOfLines={1} style={styles.orderTitle}>
                 {item.invoice_no ?? item.order_code}
               </Text>
-              <Text numberOfLines={1} style={styles.orderCode}>
-                {identitySecondary}
-              </Text>
-            </View>
+                <Text numberOfLines={1} style={styles.orderCode}>
+                  {identitySecondary}
+                </Text>
+              </View>
             <View style={styles.orderTopPills}>
-              {item.local_sync_status && item.local_sync_status !== "synced" ? <StatusPill label={syncLabel} tone={syncTone} /> : null}
               <StatusPill label={formatStatusLabel(item.laundry_status)} tone={laundryTone} />
             </View>
           </View>
 
-          <View style={styles.metricsRow}>
-            <View style={styles.metricCard}>
-              <Text style={styles.metricLabel}>Kurir</Text>
-              <Text numberOfLines={1} style={styles.metricValue}>
-                {formatStatusLabel(item.courier_status)}
-              </Text>
-            </View>
-            <View style={styles.metricCard}>
-              <Text style={styles.metricLabel}>Total</Text>
-              <Text numberOfLines={1} style={styles.metricValue}>
+          <View style={styles.summaryStrip}>
+            <View style={styles.summaryColumn}>
+              <Text style={styles.summaryLabel}>Total</Text>
+              <Text numberOfLines={1} style={styles.summaryValue}>
                 {formatMoney(item.total_amount)}
               </Text>
             </View>
-            <View style={styles.metricCard}>
-              <Text style={styles.metricLabel}>Sisa</Text>
-              <Text numberOfLines={1} style={[styles.metricValue, isDue ? styles.metricDue : styles.metricPaid]}>
+            <View style={styles.summaryDivider} />
+            <View style={[styles.summaryColumn, styles.summaryColumnTrailing]}>
+              <Text style={styles.summaryLabel}>Sisa</Text>
+              <Text numberOfLines={1} style={[styles.summaryValue, isDue ? styles.summaryValueDue : styles.summaryValuePaid]}>
                 {formatMoney(item.due_amount)}
+              </Text>
+              <Text style={[styles.summaryCaption, isDue ? styles.summaryCaptionDue : styles.summaryCaptionPaid]}>{paymentLabel}</Text>
+            </View>
+          </View>
+
+          <View style={styles.orderMetaRow}>
+            <View style={styles.metaItem}>
+              <Ionicons color={item.is_pickup_delivery ? theme.colors.info : subtleIconColor} name={item.is_pickup_delivery ? "bicycle-outline" : "walk-outline"} size={12} />
+              <Text numberOfLines={1} style={[styles.metaItemText, item.is_pickup_delivery ? styles.metaItemTextInfo : styles.metaItemTextNeutral]}>
+                {pickupLabel}
+              </Text>
+            </View>
+            <View style={styles.metaItem}>
+              <Ionicons color={subtleIconColor} name="navigate-outline" size={12} />
+              <Text numberOfLines={1} style={[styles.metaItemText, styles.metaItemTextNeutral]}>
+                {courierLabel}
               </Text>
             </View>
           </View>
 
-          <View style={styles.orderBottom}>
-            <View style={styles.badgeRow}>
-              <View style={[styles.tag, isCompactLandscape ? styles.tagCompact : null, item.is_pickup_delivery ? styles.tagInfo : styles.tagNeutral]}>
-                <Ionicons color={item.is_pickup_delivery ? theme.colors.info : subtleIconColor} name={item.is_pickup_delivery ? "bicycle-outline" : "walk-outline"} size={12} />
-                <Text numberOfLines={1} style={[styles.tagText, item.is_pickup_delivery ? styles.tagTextInfo : styles.tagTextNeutral]}>
-                  {pickupLabel}
-                </Text>
-              </View>
-              <View style={[styles.tag, isCompactLandscape ? styles.tagCompact : null, isDue ? styles.tagWarning : styles.tagSuccess]}>
-                <Ionicons color={isDue ? theme.colors.warning : theme.colors.success} name={isDue ? "alert-circle-outline" : "checkmark-circle-outline"} size={12} />
-                <Text numberOfLines={1} style={[styles.tagText, isDue ? styles.tagTextWarning : styles.tagTextSuccess]}>
-                  {paymentLabel}
-                </Text>
-              </View>
+          <View style={styles.orderFooter}>
+            <View style={styles.timeRow}>
+              <Ionicons color={subtleIconColor} name="time-outline" size={12} />
+              <Text style={styles.orderTime}>{formatOrderTime(item.created_at)}</Text>
             </View>
-            <View style={styles.timePill}>
+            <View style={styles.orderFooterRight}>
+              {item.local_sync_status && item.local_sync_status !== "synced" ? (
+                <View style={[styles.syncInlineBadge, syncTone === "danger" ? styles.syncInlineBadgeDanger : styles.syncInlineBadgeWarning]}>
+                  <View style={[styles.syncInlineDot, { backgroundColor: syncColor }]} />
+                  <Text style={[styles.syncInlineText, syncTone === "danger" ? styles.syncInlineTextDanger : styles.syncInlineTextWarning]}>{syncLabel}</Text>
+                </View>
+              ) : null}
               <View style={styles.timeRow}>
-                <Ionicons color={subtleIconColor} name="time-outline" size={12} />
-                <Text style={styles.orderTime}>{formatOrderTime(item.created_at)}</Text>
+                <Ionicons color={theme.colors.textMuted} name="chevron-forward" size={14} />
               </View>
-              <Ionicons color={subtleIconColor} name="chevron-forward" size={14} />
             </View>
           </View>
         </View>
@@ -1145,29 +1151,29 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
     orderCard: {
       flexDirection: "row",
       borderWidth: 1,
-      borderColor: theme.colors.border,
+      borderColor: theme.colors.borderStrong,
       borderRadius: isCompactLandscape ? theme.radii.md : theme.radii.lg,
       backgroundColor: theme.colors.surface,
       overflow: "hidden",
-      minHeight: isCompactLandscape ? 136 : 150,
+      minHeight: isCompactLandscape ? 116 : 128,
       shadowColor: theme.shadows.color,
-      shadowOpacity: theme.mode === "dark" ? 0.2 : 0.08,
-      shadowRadius: isCompactLandscape ? 6 : 8,
-      shadowOffset: { width: 0, height: isCompactLandscape ? 2 : 3 },
-      elevation: isCompactLandscape ? 1 : 2,
+      shadowOpacity: theme.mode === "dark" ? 0.16 : 0.06,
+      shadowRadius: isCompactLandscape ? 5 : 7,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 1,
     },
     orderCardPressed: {
-      opacity: 0.94,
-      transform: [{ scale: 0.995 }],
+      opacity: 0.97,
+      transform: [{ scale: 0.998 }],
     },
     orderAccent: {
-      width: 4,
+      width: 5,
     },
     orderContent: {
       flex: 1,
-      paddingHorizontal: isCompactLandscape ? 10 : theme.spacing.md,
-      paddingVertical: isCompactLandscape ? 8 : theme.spacing.sm,
-      gap: isCompactLandscape ? 8 : theme.spacing.sm,
+      paddingHorizontal: isCompactLandscape ? 11 : theme.spacing.md,
+      paddingVertical: isCompactLandscape ? 9 : 11,
+      gap: isCompactLandscape ? 7 : 8,
     },
     orderTop: {
       flexDirection: "row",
@@ -1177,7 +1183,7 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
     },
     orderTopPills: {
       alignItems: "flex-end",
-      gap: 6,
+      gap: 4,
     },
     orderTitleWrap: {
       flex: 1,
@@ -1207,6 +1213,123 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
       fontFamily: theme.fonts.bold,
       fontSize: isTablet ? 16 : isCompactLandscape ? 13 : 14,
       lineHeight: isTablet ? 22 : isCompactLandscape ? 18 : 19,
+    },
+    summaryStrip: {
+      flexDirection: "row",
+      alignItems: "stretch",
+      gap: isCompactLandscape ? 10 : 12,
+    },
+    summaryColumn: {
+      flex: 1,
+      gap: 1,
+    },
+    summaryColumnTrailing: {
+      alignItems: "flex-end",
+    },
+    summaryDivider: {
+      width: 1,
+      backgroundColor: theme.mode === "dark" ? "rgba(169,198,223,0.12)" : "rgba(111,139,164,0.18)",
+    },
+    summaryLabel: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.semibold,
+      fontSize: isCompactLandscape ? 10 : 10.5,
+      textTransform: "uppercase",
+      letterSpacing: 0.35,
+    },
+    summaryValue: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: isCompactLandscape ? 12.5 : 14,
+      lineHeight: isCompactLandscape ? 17 : 19,
+    },
+    summaryValueDue: {
+      color: theme.mode === "dark" ? "#ffc86a" : theme.colors.warning,
+    },
+    summaryValuePaid: {
+      color: theme.mode === "dark" ? "#61df9f" : theme.colors.success,
+    },
+    summaryCaption: {
+      fontFamily: theme.fonts.semibold,
+      fontSize: isCompactLandscape ? 9.5 : 10,
+      lineHeight: isCompactLandscape ? 13 : 14,
+    },
+    summaryCaptionDue: {
+      color: theme.mode === "dark" ? "#ffd892" : "#b56d00",
+    },
+    summaryCaptionPaid: {
+      color: theme.mode === "dark" ? "#8de1b4" : "#24794d",
+    },
+    orderMetaRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      alignItems: "center",
+      gap: isCompactLandscape ? 10 : 12,
+    },
+    metaItem: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      minWidth: 0,
+      maxWidth: isCompactLandscape ? "100%" : "48%",
+    },
+    metaItemText: {
+      flexShrink: 1,
+      fontFamily: theme.fonts.medium,
+      fontSize: isCompactLandscape ? 10.5 : 11,
+      lineHeight: isCompactLandscape ? 14 : 15,
+    },
+    metaItemTextNeutral: {
+      color: theme.mode === "dark" ? "#afcbe3" : theme.colors.textSecondary,
+    },
+    metaItemTextInfo: {
+      color: theme.colors.info,
+    },
+    orderFooter: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.spacing.sm,
+      paddingTop: isCompactLandscape ? 6 : 7,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
+    },
+    orderFooterRight: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+      gap: 8,
+      minWidth: 0,
+    },
+    syncInlineBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      borderRadius: theme.radii.pill,
+      paddingHorizontal: isCompactLandscape ? 7 : 8,
+      paddingVertical: isCompactLandscape ? 3 : 4,
+    },
+    syncInlineBadgeWarning: {
+      backgroundColor: theme.mode === "dark" ? "rgba(241,173,58,0.16)" : "rgba(221,140,16,0.1)",
+    },
+    syncInlineBadgeDanger: {
+      backgroundColor: theme.mode === "dark" ? "rgba(255,110,133,0.16)" : "rgba(206,61,82,0.1)",
+    },
+    syncInlineDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 999,
+    },
+    syncInlineText: {
+      fontFamily: theme.fonts.semibold,
+      fontSize: isCompactLandscape ? 10.5 : 11,
+      lineHeight: isCompactLandscape ? 14 : 15,
+    },
+    syncInlineTextWarning: {
+      color: theme.colors.warning,
+    },
+    syncInlineTextDanger: {
+      color: theme.colors.danger,
     },
     metricsRow: {
       flexDirection: "row",
@@ -1321,7 +1444,6 @@ function createStyles(theme: AppTheme, isTablet: boolean, isLandscape: boolean, 
       fontFamily: theme.fonts.medium,
       fontSize: isCompactLandscape ? 10.5 : 11,
       lineHeight: isCompactLandscape ? 14 : 15,
-      textAlign: "right",
     },
     emptyPanel: {
       marginTop: theme.spacing.md,

@@ -3,13 +3,15 @@ import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/nativ
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, BackHandler, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Alert, BackHandler, Linking, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { captureRef } from "react-native-view-shot";
 import { AppScreen } from "../../components/layout/AppScreen";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppPanel } from "../../components/ui/AppPanel";
 import { StatusPill } from "../../components/ui/StatusPill";
 import { cancelOrder, deleteOrder, getOrderDetail, updateCourierStatus, updateLaundryStatus } from "../../features/orders/orderApi";
-import { buildOrderReceiptText, type OrderReceiptKind } from "../../features/orders/orderReceipt";
+import { buildOrderReceiptText, buildOrderWhatsAppMessage, type OrderReceiptKind } from "../../features/orders/orderReceipt";
+import { shareReceiptImageToCustomerOnWhatsApp } from "../../features/orders/whatsAppReceiptShare";
 import { formatStatusLabel, getNextLaundryStatus, resolveCourierTone, resolveLaundryTone } from "../../features/orders/orderStatus";
 import { formatServiceDuration } from "../../features/services/defaultDuration";
 import { getStoredBluetoothThermalPrinter } from "../../features/settings/printerBluetoothStorage";
@@ -105,6 +107,59 @@ function formatItemMetric(weightKg: string | number | null, qty: string | number
     return `${weightKg ?? 0} kg`;
   }
   return `${qty ?? 0} pcs`;
+}
+
+function formatTimeOnly(value: string | null | undefined): string {
+  if (!value) {
+    return "-";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function normalizeWhatsAppPhone(value: string | null | undefined): string {
+  const digits = (value ?? "").replace(/[^\d]/g, "");
+  if (!digits) {
+    return "";
+  }
+
+  if (digits.startsWith("0")) {
+    return `62${digits.slice(1)}`;
+  }
+
+  return digits;
+}
+
+async function openCustomerWhatsAppChat(phoneDigits: string, message: string): Promise<boolean> {
+  const encodedMessage = encodeURIComponent(message);
+  const candidates = [
+    `whatsapp://send?phone=${phoneDigits}&text=${encodedMessage}`,
+    `https://wa.me/${phoneDigits}?text=${encodedMessage}`,
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      const supported = await Linking.canOpenURL(candidate);
+      if (!supported) {
+        continue;
+      }
+
+      await Linking.openURL(candidate);
+      return true;
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  return false;
 }
 
 function parseLooseNumber(value: string | number | null | undefined): number {
@@ -245,6 +300,35 @@ function getCourierActionLabel(nextStatus: string): string {
   )[nextStatus as "pickup_on_the_way" | "picked_up" | "delivery_pending" | "delivery_on_the_way" | "delivered"] ?? `Kurir: ${formatStatusLabel(nextStatus)}`;
 }
 
+function resolveHeroStatusMeta(params: {
+  isCancelled: boolean;
+  laundryStatus: string | null | undefined;
+  courierStatus: string | null | undefined;
+  hasCourierFlow: boolean;
+}): { label: string; tone: "info" | "success" | "warning" | "danger" } {
+  if (params.isCancelled) {
+    return { label: "Dibatalkan", tone: "danger" };
+  }
+
+  if (params.hasCourierFlow && params.courierStatus === "delivery_on_the_way") {
+    return { label: "Dalam pengantaran", tone: "info" };
+  }
+
+  if (params.hasCourierFlow && params.courierStatus === "delivered") {
+    return { label: "Terkirim", tone: "success" };
+  }
+
+  if (params.laundryStatus === "completed" || params.laundryStatus === "ready") {
+    return { label: "Siap", tone: "success" };
+  }
+
+  if (params.laundryStatus === "washing" || params.laundryStatus === "drying" || params.laundryStatus === "ironing") {
+    return { label: "Proses", tone: "warning" };
+  }
+
+  return { label: "Masuk", tone: "info" };
+}
+
 interface HistoryEntry {
   id: string;
   title: string;
@@ -341,8 +425,9 @@ export function OrderDetailScreen() {
   const minEdge = Math.min(width, height);
   const isLandscape = width > height;
   const isTablet = minEdge >= 600;
+  const isSmallMobile = !isTablet && minEdge <= 390;
   const isCompactLandscape = isLandscape && !isTablet;
-  const styles = useMemo(() => createStyles(theme, isTablet, isCompactLandscape), [theme, isTablet, isCompactLandscape]);
+  const styles = useMemo(() => createStyles(theme, isTablet, isCompactLandscape, isSmallMobile), [theme, isCompactLandscape, isSmallMobile, isTablet]);
   const navigation = useNavigation<Navigation>();
   const route = useRoute<DetailRoute>();
   const { session, selectedOutlet } = useSession();
@@ -369,8 +454,13 @@ export function OrderDetailScreen() {
   const [showPaymentSummary, setShowPaymentSummary] = useState(false);
   const [showDeliveryInfo, setShowDeliveryInfo] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showStatusActionModal, setShowStatusActionModal] = useState(false);
+  const [sharingWhatsApp, setSharingWhatsApp] = useState(false);
+  const [receiptCaptureText, setReceiptCaptureText] = useState("");
+  const [receiptCapturePaperWidth, setReceiptCapturePaperWidth] = useState(DEFAULT_PRINTER_LOCAL_SETTINGS.paperWidth);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const contentScrollRef = useRef<ScrollView | null>(null);
+  const receiptCaptureRef = useRef<View | null>(null);
   const pendingHistoryFocusRef = useRef(false);
 
   const roles = session?.roles ?? [];
@@ -422,10 +512,13 @@ export function OrderDetailScreen() {
     setShowPaymentSummary(false);
     setShowDeliveryInfo(false);
     setShowHistory(false);
+    setShowStatusActionModal(false);
     setShowReceiptPreviewModal(false);
     setReceiptPreviewKind("customer");
     setReceiptPreviewText("");
     setReceiptPreviewPaperWidth(DEFAULT_PRINTER_LOCAL_SETTINGS.paperWidth);
+    setReceiptCaptureText("");
+    setReceiptCapturePaperWidth(DEFAULT_PRINTER_LOCAL_SETTINGS.paperWidth);
     setSelectedCancelReasonId(null);
     setCancelReasonOtherDraft("");
     setShowCancelReasonModal(false);
@@ -580,16 +673,12 @@ export function OrderDetailScreen() {
   const canAdvanceLaundryStatus = canUpdateLaundry && !isOrderCancelled && Boolean(nextLaundryStatus) && hasOrderItems;
   const canShowStatusActions =
     canAdvanceLaundryStatus || (canUpdateCourier && !isOrderCancelled && hasCourierFlow && Boolean(nextCourierStatus));
+  const canOpenStatusSheet = canShowStatusActions || showInputServiceButton || (canEditOrder && !isOrderCancelled);
   const hasFloatingNotice = Boolean(actionMessage || errorMessage);
-  const stickyActionCount = (canAdvanceLaundryStatus ? 1 : 0) + (canUpdateCourier && !isOrderCancelled && hasCourierFlow && nextCourierStatus ? 1 : 0);
-  const stickyDockOffset = canShowStatusActions || hasFloatingNotice ? Math.max((isCompactLandscape ? theme.spacing.xs : theme.spacing.sm) - 4, 0) : 0;
-  const stickyActionsHeight = canShowStatusActions ? (stickyActionCount > 1 ? 122 : 58) : 0;
+  const stickyDockOffset = hasFloatingNotice ? Math.max((isCompactLandscape ? theme.spacing.xs : theme.spacing.sm) - 4, 0) : 0;
   const stickyNoticeHeight = hasFloatingNotice ? 88 : 0;
-  const stickyNoticeOffset = canShowStatusActions ? stickyDockOffset + stickyActionsHeight + 10 : stickyDockOffset;
-  const contentBottomPadding =
-    canShowStatusActions || hasFloatingNotice
-      ? stickyDockOffset + stickyActionsHeight + stickyNoticeHeight + (canShowStatusActions && hasFloatingNotice ? 10 : 0)
-      : theme.spacing.xxl;
+  const stickyNoticeOffset = stickyDockOffset;
+  const contentBottomPadding = hasFloatingNotice ? stickyDockOffset + stickyNoticeHeight + 10 : theme.spacing.xxl;
   const orderReference = detail?.invoice_no ?? detail?.order_code ?? "-";
   const itemCount = detail?.items?.length ?? 0;
   const totalQty = useMemo(() => (detail?.items ?? []).reduce((sum, item) => sum + parseLooseNumber(item.qty), 0), [detail?.items]);
@@ -618,6 +707,8 @@ export function OrderDetailScreen() {
   }, [pickupAddress, pickupSchedule, requiresPickup]);
   const deliveryAddress = useMemo(() => readRecordText(detail?.delivery ?? null, ["address_short", "address"]), [detail?.delivery]);
   const deliverySchedule = useMemo(() => readRecordText(detail?.delivery ?? null, ["slot", "schedule_slot", "date"]), [detail?.delivery]);
+  const customerPhoneDigits = useMemo(() => normalizeWhatsAppPhone(detail?.customer?.phone_normalized), [detail?.customer?.phone_normalized]);
+  const contactAddress = useMemo(() => deliveryAddress ?? pickupAddress ?? "-", [deliveryAddress, pickupAddress]);
   const sortedPayments = useMemo(
     () =>
       [...(detail?.payments ?? [])].sort((left, right) => {
@@ -819,6 +910,93 @@ export function OrderDetailScreen() {
   const paymentStatusLabel = detail?.due_amount && detail.due_amount > 0 ? "Belum Lunas" : "Lunas";
   const syncStatusLabel = detail?.local_sync_status === "failed" ? "Sync Gagal" : detail?.local_sync_status === "pending" ? "Belum Sinkron" : null;
   const syncStatusTone: "danger" | "warning" = detail?.local_sync_status === "failed" ? "danger" : "warning";
+  const heroStatusMeta = useMemo(
+    () =>
+      resolveHeroStatusMeta({
+        isCancelled: isOrderCancelled,
+        laundryStatus: detail?.laundry_status,
+        courierStatus: currentCourierStatus,
+        hasCourierFlow,
+      }),
+    [currentCourierStatus, detail?.laundry_status, hasCourierFlow, isOrderCancelled]
+  );
+  const heroStatusPalette = useMemo(() => {
+    if (heroStatusMeta.tone === "success") {
+      return {
+        backgroundColor: theme.mode === "dark" ? "rgba(33, 128, 85, 0.18)" : "#fff7e8",
+        borderColor: theme.mode === "dark" ? "rgba(255, 190, 92, 0.35)" : "#f1d4a0",
+        textColor: theme.mode === "dark" ? "#ffd27f" : "#d98a00",
+      };
+    }
+
+    if (heroStatusMeta.tone === "warning") {
+      return {
+        backgroundColor: theme.mode === "dark" ? "rgba(245, 151, 26, 0.14)" : "#fff6e7",
+        borderColor: theme.mode === "dark" ? "rgba(245, 151, 26, 0.34)" : "#f1d7a8",
+        textColor: theme.colors.warning,
+      };
+    }
+
+    if (heroStatusMeta.tone === "danger") {
+      return {
+        backgroundColor: theme.mode === "dark" ? "rgba(229, 72, 77, 0.16)" : "#fff0f2",
+        borderColor: theme.mode === "dark" ? "rgba(229, 72, 77, 0.34)" : "#f3c1cd",
+        textColor: theme.colors.danger,
+      };
+    }
+
+    return {
+      backgroundColor: theme.mode === "dark" ? "rgba(87, 168, 250, 0.18)" : "#f7efe0",
+      borderColor: theme.mode === "dark" ? "rgba(87, 168, 250, 0.34)" : "#f1cf93",
+      textColor: theme.mode === "dark" ? "#ffcf70" : "#d98a00",
+    };
+  }, [heroStatusMeta.tone, theme]);
+  const heroMetaText = useMemo(() => {
+    if (!detail) {
+      return "-";
+    }
+
+    const parts: string[] = [];
+    if (requiresPickup && pickupSchedule) {
+      parts.push(`Jemput ${pickupSchedule}`);
+    } else if (requiresDelivery && deliverySchedule) {
+      parts.push(`Antar ${deliverySchedule}`);
+    } else if (estimatedCompletionInfo.label !== "Belum diatur") {
+      parts.push(`Estimasi ${estimatedCompletionInfo.label}`);
+    }
+
+    parts.push(`dibuat ${formatTimeOnly(detail.created_at)}`);
+    return parts.join(" • ");
+  }, [deliverySchedule, detail, estimatedCompletionInfo.label, pickupSchedule, requiresDelivery, requiresPickup]);
+  const paymentHighlightText = useMemo(() => {
+    if (!detail) {
+      return "-";
+    }
+
+    if (detail.due_amount > 0) {
+      return detail.paid_amount > 0 ? `Belum lunas • DP ${formatMoney(detail.paid_amount)}` : "Belum lunas • Belum ada pembayaran";
+    }
+
+    return `Lunas • Dibayar ${formatMoney(detail.paid_amount)}`;
+  }, [detail]);
+  const receiptShareWidth = receiptCapturePaperWidth === "80mm" ? 420 : 310;
+
+  function handleOpenStatusActionModal(): void {
+    if (!canOpenStatusSheet) {
+      setActionMessage("Belum ada aksi status yang bisa dijalankan untuk pesanan ini.");
+      return;
+    }
+
+    setShowStatusActionModal(true);
+  }
+
+  function handleCloseStatusActionModal(): void {
+    if (updatingLaundry || updatingCourier) {
+      return;
+    }
+
+    setShowStatusActionModal(false);
+  }
 
   function handleOpenPaymentTools(): void {
     if (!detail) {
@@ -829,6 +1007,89 @@ export function OrderDetailScreen() {
       orderId: detail.id,
       source: "detail",
     });
+  }
+
+  async function handleOpenWhatsApp(): Promise<void> {
+    if (!detail) {
+      return;
+    }
+
+    if (!customerPhoneDigits) {
+      setActionMessage(null);
+      setErrorMessage("Nomor WhatsApp pelanggan belum valid.");
+      return;
+    }
+
+    setSharingWhatsApp(true);
+    setErrorMessage(null);
+    setActionMessage(null);
+
+    try {
+      const payload = await resolveReceiptPayload("customer");
+      const latestCustomerPhoneDigits = normalizeWhatsAppPhone(payload.latestDetail.customer?.phone_normalized);
+      if (!latestCustomerPhoneDigits) {
+        setErrorMessage("Nomor WhatsApp pelanggan belum valid.");
+        return;
+      }
+
+      setReceiptCapturePaperWidth(payload.printerSettings.paperWidth);
+      setReceiptCaptureText(payload.receiptText.trimEnd());
+
+      await new Promise<void>((resolve) => {
+        setTimeout(() => resolve(), 120);
+      });
+
+      if (!receiptCaptureRef.current) {
+        setErrorMessage("Gambar nota belum siap. Coba beberapa detik lagi.");
+        return;
+      }
+
+      const imageUri = await captureRef(receiptCaptureRef.current, {
+        format: "png",
+        quality: 1,
+        result: "tmpfile",
+      });
+
+      const waMessage = buildOrderWhatsAppMessage(payload.latestDetail, outletLabel);
+
+      try {
+        await shareReceiptImageToCustomerOnWhatsApp({
+          phoneDigits: latestCustomerPhoneDigits,
+          imageUri,
+          message: waMessage,
+        });
+        setActionMessage("WhatsApp dibuka ke nomor pelanggan dengan nota terlampir.");
+      } catch (directShareError) {
+        const openedDirectChat = await openCustomerWhatsAppChat(latestCustomerPhoneDigits, waMessage);
+        if (openedDirectChat) {
+          setActionMessage("Chat WhatsApp pelanggan dibuka langsung. Jika gambar belum terlampir, kirim lewat menu bagikan.");
+          return;
+        }
+
+        await Share.share(
+          {
+            title: "Nota Konsumen Laundry",
+            message: waMessage,
+            url: imageUri,
+          },
+          {
+            dialogTitle: "Kirim Nota ke WhatsApp",
+            subject: "Nota Konsumen Laundry",
+          },
+        );
+
+        const fallbackMessage =
+          directShareError instanceof Error && directShareError.message.trim()
+            ? directShareError.message.trim()
+            : "WhatsApp langsung tidak tersedia di build ini.";
+        setActionMessage(`${fallbackMessage} Nota sudah disiapkan untuk dibagikan.`);
+      }
+    } catch (error) {
+      const message = error instanceof Error && error.message.trim() ? error.message.trim() : "Gagal menyiapkan nota WhatsApp.";
+      setErrorMessage(message);
+    } finally {
+      setSharingWhatsApp(false);
+    }
   }
 
   async function handleNextLaundry(): Promise<void> {
@@ -1250,6 +1511,16 @@ export function OrderDetailScreen() {
         </View>
       ) : detail ? (
         <View style={styles.screenShell}>
+          <View pointerEvents="none" style={styles.hiddenReceiptCaptureWrap}>
+            <View
+              collapsable={false}
+              ref={receiptCaptureRef}
+              style={[styles.hiddenReceiptCaptureCard, { width: receiptShareWidth }]}
+            >
+              <Text style={styles.hiddenReceiptCaptureText}>{receiptCaptureText || receiptPreviewText}</Text>
+            </View>
+          </View>
+
           <ScrollView
             contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]}
             keyboardDismissMode="on-drag"
@@ -1258,81 +1529,177 @@ export function OrderDetailScreen() {
             showsVerticalScrollIndicator={false}
             style={styles.flex}
           >
-            <View style={styles.stack}>
-          <AppPanel style={[styles.heroPanel, estimatedCompletionInfo.isLate ? styles.heroPanelLate : null]}>
-            <View style={styles.heroTopRow}>
-              <Pressable onPress={handleBackPress} style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}>
-                <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={18} />
-              </Pressable>
-              <Text style={[styles.screenTitle, estimatedCompletionInfo.isLate ? styles.heroTitleLate : null]}>Antrean</Text>
-              <View style={styles.heroActionRow}>
-                {canCancelOrder ? (
-                  <Pressable
-                    disabled={cancellingOrder || deletingOrder || isOrderCancelled}
-                    onPress={handleOpenCancelReasonModal}
-                    style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}
-                  >
-                    <Ionicons color={theme.colors.warning} name="close-circle-outline" size={18} />
+            <View style={styles.detailPage}>
+              <View style={styles.stack}>
+              <View style={[styles.heroPanel, estimatedCompletionInfo.isLate ? styles.heroPanelLate : null]}>
+                <View style={styles.heroOrbA} />
+                <View style={styles.heroOrbB} />
+                <View style={styles.heroToolbar}>
+                  <Pressable onPress={handleBackPress} style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}>
+                    <Ionicons color={theme.colors.textSecondary} name="arrow-back" size={18} />
                   </Pressable>
-                ) : null}
-                {canDeleteOrder ? (
-                  <Pressable
-                    disabled={cancellingOrder || deletingOrder || !isOrderCancelled}
-                    onPress={handleConfirmDeleteOrder}
-                    style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}
+                  <View style={styles.heroActionRow}>
+                    {canCancelOrder ? (
+                      <Pressable
+                        disabled={cancellingOrder || deletingOrder || isOrderCancelled}
+                        onPress={handleOpenCancelReasonModal}
+                        style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}
+                      >
+                        <Ionicons color={theme.colors.warning} name="close-circle-outline" size={18} />
+                      </Pressable>
+                    ) : null}
+                    {canDeleteOrder ? (
+                      <Pressable
+                        disabled={cancellingOrder || deletingOrder || !isOrderCancelled}
+                        onPress={handleConfirmDeleteOrder}
+                        style={({ pressed }) => [styles.heroIconButton, pressed ? styles.heroIconButtonPressed : null]}
+                      >
+                        <Ionicons color={theme.colors.danger} name="trash-outline" size={18} />
+                      </Pressable>
+                    ) : null}
+                  </View>
+                </View>
+
+                <View style={styles.heroIdentityRow}>
+                  <Text style={styles.heroEyebrow}>{orderReference}</Text>
+                  <View
+                    style={[
+                      styles.heroStatusChip,
+                      {
+                        backgroundColor: heroStatusPalette.backgroundColor,
+                        borderColor: heroStatusPalette.borderColor,
+                      },
+                    ]}
                   >
-                    <Ionicons color={theme.colors.danger} name="trash-outline" size={18} />
-                  </Pressable>
-                ) : null}
-              </View>
-            </View>
+                    <Text style={[styles.heroStatusChipText, { color: heroStatusPalette.textColor }]}>{heroStatusMeta.label}</Text>
+                  </View>
+                </View>
 
-            <View style={styles.orderHeaderRow}>
-              <Text style={[styles.invoiceTitle, estimatedCompletionInfo.isLate ? styles.heroTitleLate : null]}>{orderReference}</Text>
-              <Text style={[styles.orderDateText, estimatedCompletionInfo.isLate ? styles.heroMetaLate : null]}>{formatDateTime(detail.created_at)}</Text>
-            </View>
+                <Text style={[styles.heroHeading, estimatedCompletionInfo.isLate ? styles.heroTitleLate : null]}>Detail pesanan</Text>
+                <Text style={[styles.heroSummaryText, estimatedCompletionInfo.isLate ? styles.heroMetaLate : null]}>{heroMetaText}</Text>
 
-            <View style={styles.customerCard}>
-              <Ionicons color={theme.colors.info} name="person-circle" size={54} />
-              <View style={styles.customerCardCopy}>
-                <Text style={styles.customerName}>{detail.customer?.name ?? "-"}</Text>
-                <Text style={styles.customerPhone}>{detail.customer?.phone_normalized ?? "-"}</Text>
-              </View>
-            </View>
-
-            <View style={styles.statusRow}>
-              {syncStatusLabel ? <StatusPill label={syncStatusLabel} tone={syncStatusTone} /> : null}
-              <StatusPill label={`Laundry: ${formatStatusLabel(detail.laundry_status)}`} tone={resolveLaundryTone(detail.laundry_status)} />
-              <StatusPill
-                label={hasCourierFlow ? `Kurir ${courierModeLabel}: ${formatStatusLabel(currentCourierStatus)}` : "Kurir: Tidak"}
-                tone={hasCourierFlow ? resolveCourierTone(currentCourierStatus) : "neutral"}
-              />
-            </View>
-          </AppPanel>
-
-          {hasCourierFlow ? (
-            <AppPanel style={styles.summaryPanel}>
-              <Pressable onPress={() => setShowDeliveryInfo((current) => !current)} style={({ pressed }) => [styles.sectionHeaderRow, styles.sectionHeaderButton, pressed ? styles.heroIconButtonPressed : null]}>
-                <Text style={styles.sectionTitle}>Informasi Logistik ({courierModeLabel})</Text>
-                <Ionicons color={theme.colors.textSecondary} name={showDeliveryInfo ? "chevron-up" : "chevron-down"} size={18} />
-              </Pressable>
-              {showDeliveryInfo ? (
-                <>
-                  {requiresPickup ? <Text style={styles.noteHint}>Jemput: {pickupAddress ?? "-"}{pickupSchedule ? ` • ${pickupSchedule}` : ""}</Text> : null}
-                  {requiresDelivery ? (
-                    <Text style={styles.noteHint}>
-                      Antar: {deliveryAddress ?? "-"}
-                      {deliverySchedule
-                        ? ` • ${deliverySchedule}`
-                        : requiresPickup
-                          ? " • Otomatis setelah input timbang"
-                          : ""}
-                    </Text>
+                <View style={styles.statusRow}>
+                  {syncStatusLabel ? <StatusPill label={syncStatusLabel} tone={syncStatusTone} /> : null}
+                  <StatusPill label={`Laundry: ${formatStatusLabel(detail.laundry_status)}`} tone={resolveLaundryTone(detail.laundry_status)} />
+                  {hasCourierFlow ? (
+                    <StatusPill
+                      label={`Kurir ${courierModeLabel}: ${formatStatusLabel(currentCourierStatus)}`}
+                      tone={resolveCourierTone(currentCourierStatus)}
+                    />
                   ) : null}
-                </>
+                </View>
+              </View>
+
+              <View style={styles.moneyGrid}>
+                <AppPanel style={styles.moneyCard}>
+                  <Text style={styles.moneyLabel}>Total tagihan</Text>
+                  <Text style={styles.moneyValue}>{formatMoney(detail.total_amount)}</Text>
+                </AppPanel>
+                <AppPanel style={styles.moneyCard}>
+                  <Text style={styles.moneyLabel}>Sisa bayar</Text>
+                  <Text style={[styles.moneyValue, detail.due_amount > 0 ? styles.moneyValueDue : styles.moneyValuePaid]}>
+                    {formatMoney(Math.max(detail.due_amount, 0))}
+                  </Text>
+                  <Text style={[styles.moneyCaption, detail.due_amount > 0 ? styles.moneyCaptionDue : styles.moneyCaptionPaid]}>
+                    {paymentStatusLabel}
+                  </Text>
+                </AppPanel>
+              </View>
+
+              <Pressable
+                onPress={() => setShowPaymentSummary((current) => !current)}
+                style={({ pressed }) => [styles.inlineMetaButton, pressed ? styles.heroIconButtonPressed : null]}
+              >
+                <Text style={styles.inlineMetaButtonText}>
+                  {showPaymentSummary ? "Sembunyikan rincian pembayaran" : "Lihat rincian pembayaran"}
+                </Text>
+                <Ionicons color={theme.colors.info} name={showPaymentSummary ? "chevron-up" : "chevron-down"} size={16} />
+              </Pressable>
+
+              {showPaymentSummary ? (
+                <View style={styles.summaryPanel}>
+                  <View style={styles.paymentSummaryCard}>
+                    <View style={styles.paymentSummaryRow}>
+                      <Text style={styles.paymentStatLabel}>Total</Text>
+                      <Text style={styles.paymentStatValue}>{formatMoney(detail.total_amount)}</Text>
+                    </View>
+                    <View style={styles.paymentSummaryRow}>
+                      <Text style={styles.paymentStatLabel}>Dibayar</Text>
+                      <Text style={styles.paymentStatValue}>{formatMoney(detail.paid_amount)}</Text>
+                    </View>
+                    <View style={styles.paymentSummaryRow}>
+                      <Text style={styles.paymentStatLabel}>Sisa Tagihan</Text>
+                      <Text style={[styles.paymentStatValue, detail.due_amount > 0 ? styles.dueValue : styles.successValue]}>{formatMoney(detail.due_amount)}</Text>
+                    </View>
+                    <View style={styles.paymentSummaryRow}>
+                      <Text style={styles.paymentStatLabel}>Estimasi selesai</Text>
+                      <Text style={[styles.paymentStatValue, estimatedCompletionInfo.isLate ? styles.dueValue : null]}>{estimatedCompletionInfo.label}</Text>
+                    </View>
+                  </View>
+                </View>
               ) : null}
-            </AppPanel>
-          ) : null}
+
+              <View style={styles.contactPanel}>
+                <View style={styles.sectionHeaderRow}>
+                  <Text style={styles.sectionTitle}>Pelanggan & pengantaran</Text>
+                  {canEditOrder && !isOrderCancelled ? (
+                    <Pressable hitSlop={6} onPress={handleEditOrder} style={({ pressed }) => [styles.sectionLinkButton, pressed ? styles.heroIconButtonPressed : null]}>
+                      <Text style={styles.sectionLink}>Edit</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+
+                <Text style={styles.contactName}>{detail.customer?.name ?? "-"}</Text>
+                <Text style={styles.contactMeta}>
+                  {detail.customer?.phone_normalized ?? "-"}
+                  {contactAddress !== "-" ? ` • ${contactAddress}` : ""}
+                </Text>
+
+                <View style={styles.contactBadgeRow}>
+                  {customerPhoneDigits ? <StatusPill label="WA siap" tone="success" /> : null}
+                  {hasCourierFlow ? <StatusPill label={`${courierModeLabel} aktif`} tone="info" /> : null}
+                  {detail.courier?.name ? <StatusPill label={`Kurir ${detail.courier.name}`} tone="info" /> : null}
+                </View>
+
+                {(requiresPickup || requiresDelivery || estimatedCompletionInfo.label !== "Belum diatur") ? (
+                  <Pressable
+                    onPress={() => setShowDeliveryInfo((current) => !current)}
+                    style={({ pressed }) => [styles.inlineMetaButton, styles.inlineMetaButtonCompact, pressed ? styles.heroIconButtonPressed : null]}
+                  >
+                    <Text style={styles.inlineMetaButtonText}>{showDeliveryInfo ? "Sembunyikan detail logistik" : "Lihat detail logistik"}</Text>
+                    <Ionicons color={theme.colors.info} name={showDeliveryInfo ? "chevron-up" : "chevron-down"} size={16} />
+                  </Pressable>
+                ) : null}
+
+                {showDeliveryInfo ? (
+                  <View style={styles.logisticsStack}>
+                    {requiresPickup ? (
+                      <View style={styles.logisticsRow}>
+                        <Text style={styles.logisticsLabel}>Jemput</Text>
+                        <Text style={styles.logisticsValue}>
+                          {pickupAddress ?? "-"}
+                          {pickupSchedule ? ` • ${pickupSchedule}` : ""}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {requiresDelivery ? (
+                      <View style={styles.logisticsRow}>
+                        <Text style={styles.logisticsLabel}>Antar</Text>
+                        <Text style={styles.logisticsValue}>
+                          {deliveryAddress ?? "-"}
+                          {deliverySchedule ? ` • ${deliverySchedule}` : requiresPickup ? " • Otomatis setelah input timbang" : ""}
+                        </Text>
+                      </View>
+                    ) : null}
+                    <View style={styles.logisticsRow}>
+                      <Text style={styles.logisticsLabel}>Estimasi</Text>
+                      <Text style={[styles.logisticsValue, estimatedCompletionInfo.isLate ? styles.dueValue : null]}>
+                        {estimatedCompletionInfo.label} • {estimatedCompletionInfo.hint}
+                      </Text>
+                    </View>
+                  </View>
+                ) : null}
+              </View>
 
           {isOrderCancelled ? (
             <AppPanel style={[styles.summaryPanel, styles.cancelledInfoPanel]}>
@@ -1402,105 +1769,56 @@ export function OrderDetailScreen() {
               ) : null}
             </AppPanel>
           ) : (
-            <>
-              <View>
-                <AppPanel style={styles.summaryPanel}>
-                  <View style={styles.billCard}>
-                    <View style={styles.billCardMain}>
-                      <Text style={styles.billLabel}>Tagihan</Text>
-                      <Text style={styles.billAmount}>{formatMoney(Math.max(detail.due_amount, 0))}</Text>
-                      <Text style={styles.billSubtext}>{paymentStatusLabel}</Text>
-                    </View>
-                    <View style={styles.billActionRow}>
-                      <Pressable onPress={() => setShowPaymentSummary((current) => !current)} style={({ pressed }) => [styles.billActionButton, pressed ? styles.heroIconButtonPressed : null]}>
-                        <Text style={styles.billActionText}>{showPaymentSummary ? "TUTUP" : "DETAIL"}</Text>
-                      </Pressable>
-                      {canManagePayment && detail.due_amount > 0 ? (
-                        <Pressable
-                          onPress={handleOpenPaymentTools}
-                          style={({ pressed }) => [styles.billActionButton, styles.billActionButtonPrimary, pressed ? styles.heroIconButtonPressed : null]}
-                        >
-                          <Text style={[styles.billActionText, styles.billActionTextPrimary]}>BAYAR</Text>
-                        </Pressable>
-                      ) : null}
-                    </View>
-                  </View>
-
-                  <View style={styles.centerInfoBlock}>
-                    <Text style={styles.centerInfoLabel}>Estimasi Selesai</Text>
-                    <Text style={styles.centerInfoValue}>{estimatedCompletionInfo.label}</Text>
-                    <Text style={[styles.centerInfoHint, estimatedCompletionInfo.isLate ? styles.centerInfoHintLate : null]}>{estimatedCompletionInfo.hint}</Text>
-                  </View>
-
-                  {showPaymentSummary ? (
-                    <View style={styles.paymentSummaryCard}>
-                      <View style={styles.paymentSummaryRow}>
-                        <Text style={styles.paymentStatLabel}>Total</Text>
-                        <Text style={styles.paymentStatValue}>{formatMoney(detail.total_amount)}</Text>
-                      </View>
-                      <View style={styles.paymentSummaryRow}>
-                        <Text style={styles.paymentStatLabel}>Dibayar</Text>
-                        <Text style={styles.paymentStatValue}>{formatMoney(detail.paid_amount)}</Text>
-                      </View>
-                      <View style={styles.paymentSummaryRow}>
-                        <Text style={styles.paymentStatLabel}>Sisa Tagihan</Text>
-                        <Text style={[styles.paymentStatValue, detail.due_amount > 0 ? styles.dueValue : styles.successValue]}>{formatMoney(detail.due_amount)}</Text>
-                      </View>
-                    </View>
-                  ) : null}
-                </AppPanel>
+            <View style={styles.servicePanel}>
+              <View style={styles.sectionHeaderRow}>
+                <View style={styles.sectionHeaderCopy}>
+                  <Text style={styles.sectionTitle}>Item layanan</Text>
+                  <Text style={styles.sectionHeaderMeta}>
+                    {itemCount} item • Qty {formatCompactNumber(totalQty)} • {formatCompactNumber(totalWeight)} kg
+                  </Text>
+                </View>
+                <Pressable hitSlop={6} onPress={handleToggleHistory} style={({ pressed }) => [styles.sectionLinkButton, pressed ? styles.heroIconButtonPressed : null]}>
+                  <Text style={styles.sectionLink}>{showHistory ? "Tutup riwayat" : "Riwayat"}</Text>
+                </Pressable>
               </View>
 
-              <AppPanel>
-                <View style={styles.sectionHeaderRow}>
-                  <Text style={styles.sectionTitle}>Detail Pesanan</Text>
-                  {canEditOrder && !isOrderCancelled ? (
-                    <Pressable hitSlop={6} onPress={handleEditOrder} style={({ pressed }) => [styles.sectionLinkButton, pressed ? styles.heroIconButtonPressed : null]}>
-                      <Text style={styles.sectionLink}>Edit</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-                <Text style={styles.sectionCaption}>
-                  {itemCount} item · Qty {formatCompactNumber(totalQty)} · {formatCompactNumber(totalWeight)} kg
-                </Text>
-                {detail.items && detail.items.length > 0 ? (
-                  <View style={styles.itemList}>
-                    {detail.items.map((item) => (
-                      <View key={item.id} style={styles.itemRow}>
-                        <View style={styles.itemThumb}>
-                          <Ionicons color={theme.colors.info} name="shirt-outline" size={22} />
-                        </View>
-                        <View style={styles.itemMain}>
-                          <Text style={styles.itemName}>{item.service_name_snapshot}</Text>
-                          <Text style={styles.itemMeta}>{formatItemMetric(item.weight_kg, item.qty, item.unit_type_snapshot)}</Text>
-                          <Text style={styles.itemMeta}>Harga unit {formatMoney(item.unit_price_amount)}</Text>
-                        </View>
-                        <Text style={styles.itemPrice}>{formatMoney(item.subtotal_amount)}</Text>
-                      </View>
-                    ))}
-                  </View>
-                ) : (
-                  <>
-                    <Text style={styles.emptyText}>Belum ada item order.</Text>
-                    {requiresPickup ? <Text style={styles.noteHint}>Mode jemput: input item setelah barang dijemput/sampai outlet.</Text> : null}
-                  </>
-                )}
+              {detail.items && detail.items.length > 0 ? (
+                <View style={styles.itemList}>
+                  {detail.items.map((item) => {
+                    const durationLabel = item.service
+                      ? formatServiceDuration(item.service.duration_days, item.service.duration_hours, "")
+                      : "";
+                    const itemMeta = [formatItemMetric(item.weight_kg, item.qty, item.unit_type_snapshot), durationLabel].filter(Boolean).join(" • ");
 
-                <View style={styles.quickIconRow}>
-                  <Pressable
-                    disabled={isReceiptActionBusy}
-                    onPress={() => void handleOpenReceiptPreview("customer")}
-                    style={({ pressed }) => [styles.iconActionButton, styles.iconActionButtonWide, pressed ? styles.heroIconButtonPressed : null]}
-                  >
-                    <Ionicons color={theme.colors.info} name="receipt-outline" size={18} />
-                    <Text style={styles.iconActionButtonText}>Resi</Text>
-                  </Pressable>
-                  <Pressable onPress={handleToggleHistory} style={({ pressed }) => [styles.ghostPill, showHistory ? styles.ghostPillActive : null, pressed ? styles.heroIconButtonPressed : null]}>
-                    <Text style={[styles.ghostPillText, showHistory ? styles.ghostPillTextActive : null]}>{showHistory ? "Tutup Riwayat" : "Riwayat"}</Text>
-                  </Pressable>
+                    return (
+                      <View key={item.id} style={styles.serviceItemCard}>
+                        <View style={styles.serviceItemTopRow}>
+                          <View style={styles.serviceItemMain}>
+                            <Text style={styles.serviceItemTitle}>{item.service_name_snapshot}</Text>
+                            <Text style={styles.serviceItemMeta}>{itemMeta}</Text>
+                          </View>
+                          <Text style={styles.serviceItemPrice}>{formatMoney(item.subtotal_amount)}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
                 </View>
-              </AppPanel>
-            </>
+              ) : (
+                <>
+                  <Text style={styles.emptyText}>Belum ada item order.</Text>
+                  {requiresPickup ? <Text style={styles.noteHint}>Mode jemput: input item setelah barang dijemput atau sampai outlet.</Text> : null}
+                </>
+              )}
+
+              <View style={[styles.paymentBanner, detail.due_amount > 0 ? styles.paymentBannerWarning : styles.paymentBannerSuccess]}>
+                <Text style={[styles.paymentBannerLabel, detail.due_amount > 0 ? styles.paymentBannerLabelWarning : styles.paymentBannerLabelSuccess]}>
+                  Status pembayaran
+                </Text>
+                <Text style={[styles.paymentBannerText, detail.due_amount > 0 ? styles.paymentBannerTextWarning : styles.paymentBannerTextSuccess]}>
+                  {paymentHighlightText}
+                </Text>
+              </View>
+            </View>
           )}
 
           {showHistory ? (
@@ -1517,7 +1835,7 @@ export function OrderDetailScreen() {
                 });
               }}
             >
-              <AppPanel style={styles.summaryPanel}>
+              <View style={styles.summaryPanel}>
                 <Pressable
                   onPress={() => {
                     pendingHistoryFocusRef.current = false;
@@ -1565,19 +1883,167 @@ export function OrderDetailScreen() {
                 ) : (
                   <Text style={styles.emptyText}>Belum ada histori untuk ditampilkan.</Text>
                 )}
-              </AppPanel>
+              </View>
             </View>
           ) : null}
 
-          <AppPanel style={styles.summaryPanel}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Informasi Tambahan</Text>
-            </View>
-            <Text style={styles.emptyText}>{detail.notes?.trim() ? detail.notes : "Tidak Ada"}</Text>
-          </AppPanel>
+                <View style={styles.summaryPanel}>
+                  <View style={styles.sectionHeaderRow}>
+                    <Text style={styles.sectionTitle}>Informasi Tambahan</Text>
+                  </View>
+                  <Text style={styles.emptyText}>{detail.notes?.trim() ? detail.notes : "Tidak Ada"}</Text>
+                </View>
 
+                <View style={styles.pageActionSection}>
+                  <View style={styles.sectionHeaderRow}>
+                    <Text style={styles.sectionTitle}>Aksi utama</Text>
+                  </View>
+                  <View style={styles.actionDockGrid}>
+                    <Pressable
+                      disabled={!canOpenStatusSheet || updatingLaundry || updatingCourier}
+                      onPress={handleOpenStatusActionModal}
+                      style={({ pressed }) => [
+                        styles.actionDockButton,
+                        styles.actionDockButtonSoft,
+                        pressed ? styles.heroIconButtonPressed : null,
+                        !canOpenStatusSheet ? styles.actionDockButtonDisabled : null,
+                      ]}
+                    >
+                      <Ionicons color={theme.colors.info} name="swap-horizontal-outline" size={20} />
+                      <Text style={styles.actionDockButtonText}>Update status</Text>
+                    </Pressable>
+
+                    <Pressable
+                      disabled={isReceiptActionBusy}
+                      onPress={() => void handleOpenReceiptPreview("customer")}
+                      style={({ pressed }) => [
+                        styles.actionDockButton,
+                        styles.actionDockButtonSoft,
+                        pressed ? styles.heroIconButtonPressed : null,
+                        isReceiptActionBusy ? styles.actionDockButtonDisabled : null,
+                      ]}
+                    >
+                      <Ionicons color={theme.colors.info} name="print-outline" size={20} />
+                      <Text style={styles.actionDockButtonText}>Cetak nota</Text>
+                    </Pressable>
+
+                    <Pressable
+                      disabled={!customerPhoneDigits || sharingWhatsApp}
+                      onPress={() => void handleOpenWhatsApp()}
+                      style={({ pressed }) => [
+                        styles.actionDockButton,
+                        styles.actionDockButtonGhost,
+                        pressed ? styles.heroIconButtonPressed : null,
+                        !customerPhoneDigits || sharingWhatsApp ? styles.actionDockButtonDisabled : null,
+                      ]}
+                    >
+                      {sharingWhatsApp ? (
+                        <ActivityIndicator color={theme.colors.success} size="small" />
+                      ) : (
+                        <Ionicons color={theme.colors.success} name="logo-whatsapp" size={20} />
+                      )}
+                      <Text style={styles.actionDockButtonTextDark}>Kirim WA</Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={canManagePayment && detail.due_amount > 0 ? handleOpenPaymentTools : handleToggleHistory}
+                      style={({ pressed }) => [
+                        styles.actionDockButton,
+                        canManagePayment && detail.due_amount > 0 ? styles.actionDockButtonPrimary : styles.actionDockButtonSoft,
+                        pressed ? styles.heroIconButtonPressed : null,
+                      ]}
+                    >
+                      <Ionicons
+                        color={canManagePayment && detail.due_amount > 0 ? theme.colors.primaryContrast : theme.colors.info}
+                        name={canManagePayment && detail.due_amount > 0 ? "wallet-outline" : "time-outline"}
+                        size={20}
+                      />
+                      <Text style={canManagePayment && detail.due_amount > 0 ? styles.actionDockButtonTextPrimary : styles.actionDockButtonText}>
+                        {canManagePayment && detail.due_amount > 0 ? "Tambah pembayaran" : showHistory ? "Tutup riwayat" : "Lihat riwayat"}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
             </View>
           </ScrollView>
+
+          <Modal
+            animationType="fade"
+            onRequestClose={handleCloseStatusActionModal}
+            statusBarTranslucent
+            transparent
+            visible={showStatusActionModal}
+          >
+            <View style={styles.actionSheetBackdrop}>
+              <Pressable onPress={handleCloseStatusActionModal} style={styles.actionSheetBackdropPressable} />
+              <View style={styles.actionSheetWrap}>
+                <View style={styles.actionSheetCard}>
+                  <View style={styles.actionSheetHeader}>
+                    <View style={styles.actionSheetHeaderCopy}>
+                      <Text style={styles.actionSheetTitle}>Update status</Text>
+                      <Text style={styles.actionSheetHint}>Pilih aksi berikutnya sesuai progres pesanan.</Text>
+                    </View>
+                    <Pressable onPress={handleCloseStatusActionModal} style={({ pressed }) => [styles.receiptModalCloseButton, pressed ? styles.heroIconButtonPressed : null]}>
+                      <Ionicons color={theme.colors.textSecondary} name="close-outline" size={18} />
+                    </Pressable>
+                  </View>
+
+                  <View style={styles.actionSheetBody}>
+                    {canAdvanceLaundryStatus && nextLaundryStatus ? (
+                      <AppButton
+                        disabled={updatingLaundry || updatingCourier}
+                        leftElement={<Ionicons color={theme.colors.primaryContrast} name="checkmark-done-outline" size={17} />}
+                        loading={updatingLaundry}
+                        onPress={() => {
+                          setShowStatusActionModal(false);
+                          void handleNextLaundry();
+                        }}
+                        title={isLaundryCompletionBlocked ? "Lunasi Tagihan Dulu" : nextLaundryActionLabel ?? "Perbarui Status Laundry"}
+                      />
+                    ) : null}
+
+                    {canUpdateCourier && hasCourierFlow && nextCourierStatus ? (
+                      <AppButton
+                        disabled={updatingLaundry || updatingCourier}
+                        leftElement={<Ionicons color={theme.colors.primaryContrast} name="bicycle-outline" size={17} />}
+                        loading={updatingCourier}
+                        onPress={() => {
+                          setShowStatusActionModal(false);
+                          void handleNextCourier();
+                        }}
+                        title={isCourierCompletionBlocked ? "Lunasi Tagihan Dulu" : nextCourierActionLabel ?? "Perbarui Status Kurir"}
+                      />
+                    ) : null}
+
+                    {showInputServiceButton ? (
+                      <AppButton
+                        leftElement={<Ionicons color={theme.colors.info} name="create-outline" size={16} />}
+                        onPress={() => {
+                          setShowStatusActionModal(false);
+                          handleInputServiceItems();
+                        }}
+                        title="Buka Input Layanan"
+                        variant="secondary"
+                      />
+                    ) : null}
+
+                    {canEditOrder && !isOrderCancelled ? (
+                      <AppButton
+                        leftElement={<Ionicons color={theme.colors.textPrimary} name="create-outline" size={16} />}
+                        onPress={() => {
+                          setShowStatusActionModal(false);
+                          handleEditOrder();
+                        }}
+                        title="Edit Pesanan"
+                        variant="ghost"
+                      />
+                    ) : null}
+                  </View>
+                </View>
+              </View>
+            </View>
+          </Modal>
 
           <Modal
             animationType="fade"
@@ -1855,39 +2321,6 @@ export function OrderDetailScreen() {
             </View>
           ) : null}
 
-          {canShowStatusActions ? (
-            <View style={[styles.stickyActionsDock, { bottom: stickyDockOffset }]}>
-              <View style={styles.stickyActionsPanel}>
-                {canAdvanceLaundryStatus && nextLaundryStatus ? (
-                  <AppButton
-                    disabled={updatingLaundry || updatingCourier}
-                    leftElement={<Ionicons color={theme.colors.primaryContrast} name="checkmark-done-outline" size={17} />}
-                    loading={updatingLaundry}
-                    onPress={() => void handleNextLaundry()}
-                    title={
-                      isLaundryCompletionBlocked
-                        ? "Lunasi Tagihan Dulu"
-                        : nextLaundryActionLabel ?? "Perbarui Status Laundry"
-                    }
-                  />
-                ) : null}
-
-                {canUpdateCourier && hasCourierFlow && nextCourierStatus ? (
-                  <AppButton
-                    disabled={updatingLaundry || updatingCourier}
-                    leftElement={<Ionicons color={theme.colors.primaryContrast} name="bicycle-outline" size={17} />}
-                    loading={updatingCourier}
-                    onPress={() => void handleNextCourier()}
-                    title={
-                      isCourierCompletionBlocked
-                        ? "Lunasi Tagihan Dulu"
-                        : nextCourierActionLabel ?? "Perbarui Status Kurir"
-                    }
-                  />
-                ) : null}
-              </View>
-            </View>
-          ) : null}
         </View>
       ) : (
         <AppPanel style={styles.centeredState}>
@@ -1905,7 +2338,7 @@ export function OrderDetailScreen() {
   );
 }
 
-function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: boolean) {
+function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: boolean, isSmallMobile: boolean) {
   return StyleSheet.create({
     flex: {
       flex: 1,
@@ -1916,10 +2349,10 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
     content: {
       flexGrow: 1,
-      paddingHorizontal: isTablet ? theme.spacing.xl : theme.spacing.lg,
-      paddingTop: isCompactLandscape ? theme.spacing.sm : theme.spacing.md,
+      paddingHorizontal: isTablet ? theme.spacing.xl : isSmallMobile ? theme.spacing.md : theme.spacing.lg,
+      paddingTop: isCompactLandscape ? theme.spacing.sm : isSmallMobile ? theme.spacing.sm : theme.spacing.md,
       paddingBottom: theme.spacing.xxl,
-      gap: isCompactLandscape ? theme.spacing.xs : theme.spacing.sm,
+      gap: isCompactLandscape ? theme.spacing.xs : isSmallMobile ? theme.spacing.xs : theme.spacing.sm,
     },
     centeredState: {
       minHeight: 220,
@@ -1933,17 +2366,59 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       fontFamily: theme.fonts.medium,
       fontSize: 13,
     },
+    detailPage: {
+      padding: 0,
+      overflow: "hidden",
+      backgroundColor: theme.colors.surface,
+      borderColor: theme.mode === "dark" ? theme.colors.borderStrong : "#d8e4ec",
+    },
     stack: {
-      gap: theme.spacing.sm,
+      gap: 0,
     },
     heroPanel: {
-      gap: theme.spacing.xs,
-      backgroundColor: theme.colors.surface,
-      borderColor: theme.colors.borderStrong,
+      position: "relative",
+      overflow: "hidden",
+      gap: theme.spacing.sm,
+      paddingHorizontal: isTablet ? 20 : isSmallMobile ? 14 : 16,
+      paddingTop: isTablet ? 20 : isSmallMobile ? 14 : 16,
+      paddingBottom: isTablet ? 18 : isSmallMobile ? 14 : 16,
+      borderWidth: 0,
+      borderBottomWidth: 1,
+      borderRadius: 0,
+      shadowOpacity: 0,
+      shadowRadius: 0,
+      shadowOffset: { width: 0, height: 0 },
+      elevation: 0,
+      backgroundColor: theme.mode === "dark" ? "#0b2840" : "#daf2ff",
+      borderColor: theme.mode === "dark" ? "#1d4b68" : "#b8dcf6",
     },
     heroPanelLate: {
       backgroundColor: theme.mode === "dark" ? "rgba(255,110,133,0.12)" : "rgba(255,244,244,0.98)",
       borderColor: theme.colors.danger,
+    },
+    heroOrbA: {
+      position: "absolute",
+      top: -78,
+      right: -54,
+      width: 184,
+      height: 184,
+      borderRadius: 92,
+      backgroundColor: theme.mode === "dark" ? "rgba(28,211,226,0.18)" : "rgba(14,164,206,0.16)",
+    },
+    heroOrbB: {
+      position: "absolute",
+      bottom: -64,
+      left: -22,
+      width: 148,
+      height: 148,
+      borderRadius: 74,
+      backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.42)",
+    },
+    heroToolbar: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: theme.spacing.sm,
     },
     heroTopRow: {
       flexDirection: "row",
@@ -2024,6 +2499,44 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     heroMetaLate: {
       color: theme.colors.danger,
     },
+    heroIdentityRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10,
+    },
+    heroEyebrow: {
+      flex: 1,
+      color: theme.mode === "dark" ? "#9eb8d0" : "#6d88a5",
+      fontFamily: theme.fonts.bold,
+      fontSize: isTablet ? 20 : isSmallMobile ? 14 : 15,
+      lineHeight: isTablet ? 26 : isSmallMobile ? 18 : 20,
+    },
+    heroStatusChip: {
+      minHeight: 40,
+      paddingHorizontal: 16,
+      borderWidth: 1,
+      borderRadius: theme.radii.pill,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    heroStatusChipText: {
+      fontFamily: theme.fonts.bold,
+      fontSize: 12.5,
+      lineHeight: 16,
+    },
+    heroHeading: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.heavy,
+      fontSize: isTablet ? 40 : isSmallMobile ? 23 : 26,
+      lineHeight: isTablet ? 46 : isSmallMobile ? 28 : 31,
+    },
+    heroSummaryText: {
+      color: theme.mode === "dark" ? "#b0c4d7" : "#6f89a5",
+      fontFamily: theme.fonts.semibold,
+      fontSize: isTablet ? 16 : isSmallMobile ? 11.5 : 12.5,
+      lineHeight: isTablet ? 22 : isSmallMobile ? 17 : 18,
+    },
     customerCard: {
       flexDirection: "row",
       alignItems: "center",
@@ -2099,10 +2612,146 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     },
     summaryPanel: {
       gap: theme.spacing.sm,
-      backgroundColor: theme.colors.surfaceSoft,
-      borderColor: theme.colors.borderStrong,
+      paddingHorizontal: isTablet ? 20 : isSmallMobile ? 14 : 16,
+      paddingVertical: isTablet ? 18 : isSmallMobile ? 14 : 16,
+      borderWidth: 0,
+      borderBottomWidth: 1,
+      borderRadius: 0,
+      shadowOpacity: 0,
+      shadowRadius: 0,
+      shadowOffset: { width: 0, height: 0 },
+      elevation: 0,
+      backgroundColor: theme.colors.surface,
+      borderColor: theme.mode === "dark" ? theme.colors.borderStrong : "#e1ebf2",
+    },
+    moneyGrid: {
+      flexDirection: "row",
+      alignItems: "stretch",
+      gap: isSmallMobile ? theme.spacing.xs : theme.spacing.sm,
+      paddingHorizontal: isTablet ? 20 : isSmallMobile ? 14 : 16,
+      paddingVertical: isTablet ? 18 : isSmallMobile ? 14 : 16,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.mode === "dark" ? theme.colors.borderStrong : "#e1ebf2",
+    },
+    moneyCard: {
+      flex: 1,
+      gap: isSmallMobile ? 6 : 8,
+      padding: isSmallMobile ? 14 : undefined,
+      backgroundColor: theme.mode === "dark" ? "rgba(7,22,38,0.34)" : "rgba(255,255,255,0.78)",
+      borderColor: theme.mode === "dark" ? "#2d506d" : "#bfe1f4",
+      minHeight: isTablet ? 154 : isSmallMobile ? 118 : 132,
+      justifyContent: "center",
+    },
+    moneyLabel: {
+      color: theme.mode === "dark" ? "#9eb8d0" : "#6d88a5",
+      fontFamily: theme.fonts.bold,
+      fontSize: isTablet ? 16 : isSmallMobile ? 12.5 : 14,
+      lineHeight: isTablet ? 21 : isSmallMobile ? 17 : 19,
+    },
+    moneyValue: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.heavy,
+      fontSize: isTablet ? 34 : isSmallMobile ? 24 : 28,
+      lineHeight: isTablet ? 40 : isSmallMobile ? 29 : 33,
+    },
+    moneyValueDue: {
+      color: theme.colors.danger,
+    },
+    moneyValuePaid: {
+      color: theme.colors.textPrimary,
+    },
+    moneyCaption: {
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    moneyCaptionDue: {
+      color: theme.colors.danger,
+    },
+    moneyCaptionPaid: {
+      color: theme.colors.success,
+    },
+    inlineMetaButton: {
+      minHeight: 36,
+      alignSelf: "flex-start",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      paddingHorizontal: isTablet ? 20 : isSmallMobile ? 14 : 16,
+      paddingBottom: isTablet ? 18 : isSmallMobile ? 14 : 16,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.mode === "dark" ? theme.colors.borderStrong : "#e1ebf2",
+    },
+    inlineMetaButtonCompact: {
+      marginTop: 2,
+    },
+    inlineMetaButtonText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12.5,
+      lineHeight: 17,
+    },
+    contactPanel: {
+      gap: 10,
+      paddingHorizontal: isTablet ? 20 : isSmallMobile ? 14 : 16,
+      paddingVertical: isTablet ? 18 : isSmallMobile ? 14 : 16,
+      borderWidth: 0,
+      borderBottomWidth: 1,
+      borderRadius: 0,
+      shadowOpacity: 0,
+      shadowRadius: 0,
+      shadowOffset: { width: 0, height: 0 },
+      elevation: 0,
+      backgroundColor: theme.colors.surface,
+      borderColor: theme.mode === "dark" ? theme.colors.borderStrong : "#e1ebf2",
+    },
+    contactName: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.heavy,
+      fontSize: isTablet ? 24 : isSmallMobile ? 16 : 18,
+      lineHeight: isTablet ? 30 : isSmallMobile ? 21 : 23,
+    },
+    contactMeta: {
+      color: theme.mode === "dark" ? "#b0c4d7" : "#6f89a5",
+      fontFamily: theme.fonts.semibold,
+      fontSize: isTablet ? 15 : isSmallMobile ? 11.5 : 12.5,
+      lineHeight: isTablet ? 21 : isSmallMobile ? 17 : 18,
+    },
+    contactBadgeRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    logisticsStack: {
+      gap: 8,
+      paddingTop: 2,
+    },
+    logisticsRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 10,
+    },
+    logisticsLabel: {
+      width: 54,
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.semibold,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    logisticsValue: {
+      flex: 1,
+      color: theme.colors.textSecondary,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 17,
     },
     pickupInstructionPanel: {
+      borderWidth: 1,
+      borderRadius: theme.radii.lg,
+      shadowOpacity: 0,
+      shadowRadius: 0,
+      shadowOffset: { width: 0, height: 0 },
+      elevation: 0,
       backgroundColor: theme.mode === "dark" ? "rgba(20, 35, 52, 0.56)" : "rgba(246, 251, 255, 0.98)",
       borderColor: theme.mode === "dark" ? "rgba(115, 173, 236, 0.35)" : "rgba(19, 104, 188, 0.2)",
       gap: 10,
@@ -2232,6 +2881,67 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       minHeight: 42,
       paddingHorizontal: 11,
       paddingVertical: 8,
+    },
+    hiddenReceiptCaptureWrap: {
+      position: "absolute",
+      left: -10_000,
+      top: -10_000,
+    },
+    hiddenReceiptCaptureCard: {
+      backgroundColor: "#ffffff",
+      paddingHorizontal: 18,
+      paddingVertical: 18,
+    },
+    hiddenReceiptCaptureText: {
+      color: "#111111",
+      fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: theme.fonts.medium }),
+      fontSize: 13,
+      lineHeight: 19,
+    },
+    actionSheetBackdrop: {
+      flex: 1,
+      backgroundColor: "rgba(10, 16, 28, 0.48)",
+      justifyContent: "flex-end",
+    },
+    actionSheetBackdropPressable: {
+      flex: 1,
+    },
+    actionSheetWrap: {
+      paddingHorizontal: isTablet ? 34 : 16,
+      paddingBottom: isTablet ? 20 : 14,
+    },
+    actionSheetCard: {
+      borderWidth: 1,
+      borderColor: theme.colors.borderStrong,
+      borderRadius: theme.radii.xl,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 14,
+      paddingVertical: 14,
+      gap: 12,
+    },
+    actionSheetHeader: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: 10,
+    },
+    actionSheetHeaderCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    actionSheetTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: isTablet ? 17 : 15,
+    },
+    actionSheetHint: {
+      color: theme.colors.textMuted,
+      fontFamily: theme.fonts.medium,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    actionSheetBody: {
+      gap: 8,
     },
     receiptModalBackdrop: {
       flex: 1,
@@ -2741,6 +3451,12 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       lineHeight: 17,
     },
     cancelledInfoPanel: {
+      borderWidth: 1,
+      borderRadius: theme.radii.lg,
+      shadowOpacity: 0,
+      shadowRadius: 0,
+      shadowOffset: { width: 0, height: 0 },
+      elevation: 0,
       borderColor: theme.mode === "dark" ? "rgba(255,111,129,0.42)" : "rgba(229,72,77,0.22)",
       backgroundColor: theme.mode === "dark" ? "rgba(255,111,129,0.08)" : "rgba(255,244,244,0.95)",
     },
@@ -2889,6 +3605,20 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     actionButtonWrap: {
       flex: 1,
     },
+    servicePanel: {
+      gap: theme.spacing.sm,
+      paddingHorizontal: isTablet ? 20 : isSmallMobile ? 14 : 16,
+      paddingVertical: isTablet ? 18 : isSmallMobile ? 14 : 16,
+      borderWidth: 0,
+      borderBottomWidth: 1,
+      borderRadius: 0,
+      shadowOpacity: 0,
+      shadowRadius: 0,
+      shadowOffset: { width: 0, height: 0 },
+      elevation: 0,
+      backgroundColor: theme.colors.surface,
+      borderColor: theme.mode === "dark" ? theme.colors.borderStrong : "#e1ebf2",
+    },
     itemList: {
       gap: theme.spacing.xs,
     },
@@ -2903,6 +3633,43 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       color: theme.colors.info,
       fontFamily: theme.fonts.semibold,
       fontSize: 13,
+    },
+    serviceItemCard: {
+      borderWidth: 1,
+      borderColor: theme.mode === "dark" ? theme.colors.borderStrong : "#cfe0eb",
+      borderRadius: theme.radii.lg,
+      backgroundColor: theme.mode === "dark" ? theme.colors.surfaceSoft : "#f6fbff",
+      paddingHorizontal: isSmallMobile ? 12 : 14,
+      paddingVertical: isSmallMobile ? 12 : 14,
+    },
+    serviceItemTopRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12,
+    },
+    serviceItemMain: {
+      flex: 1,
+      gap: 3,
+    },
+    serviceItemTitle: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: isTablet ? 16 : isSmallMobile ? 13 : 14,
+      lineHeight: isTablet ? 21 : isSmallMobile ? 18 : 19,
+    },
+    serviceItemMeta: {
+      color: theme.mode === "dark" ? "#b0c4d7" : "#6f89a5",
+      fontFamily: theme.fonts.semibold,
+      fontSize: isTablet ? 14 : isSmallMobile ? 11.5 : 12,
+      lineHeight: isTablet ? 19 : isSmallMobile ? 16 : 17,
+    },
+    serviceItemPrice: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.heavy,
+      fontSize: isTablet ? 16 : isSmallMobile ? 13 : 14,
+      lineHeight: isTablet ? 22 : isSmallMobile ? 18 : 19,
+      textAlign: "right",
     },
     itemRow: {
       flexDirection: "row",
@@ -2949,6 +3716,46 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
       color: theme.colors.textMuted,
       fontFamily: theme.fonts.medium,
       fontSize: 12,
+    },
+    paymentBanner: {
+      borderWidth: 1,
+      borderRadius: theme.radii.pill,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 4,
+    },
+    paymentBannerWarning: {
+      borderColor: theme.mode === "dark" ? "#7a5928" : "#f1d6a5",
+      backgroundColor: theme.mode === "dark" ? "#412e14" : "#fff6e7",
+    },
+    paymentBannerSuccess: {
+      borderColor: theme.mode === "dark" ? "#286246" : "#bfe7cf",
+      backgroundColor: theme.mode === "dark" ? "#153b2a" : "#edf9f1",
+    },
+    paymentBannerLabel: {
+      fontFamily: theme.fonts.bold,
+      fontSize: isTablet ? 16 : 13,
+      lineHeight: isTablet ? 21 : 18,
+    },
+    paymentBannerLabelWarning: {
+      color: theme.mode === "dark" ? "#ffdf9d" : "#46678c",
+    },
+    paymentBannerLabelSuccess: {
+      color: theme.mode === "dark" ? "#d2efd8" : "#46678c",
+    },
+    paymentBannerText: {
+      fontFamily: theme.fonts.bold,
+      fontSize: isTablet ? 16 : 13,
+      lineHeight: isTablet ? 21 : 18,
+    },
+    paymentBannerTextWarning: {
+      color: theme.colors.warning,
+    },
+    paymentBannerTextSuccess: {
+      color: theme.colors.success,
     },
     quickIconRow: {
       flexDirection: "row",
@@ -3059,8 +3866,74 @@ function createStyles(theme: AppTheme, isTablet: boolean, isCompactLandscape: bo
     stickyNoticeStack: {
       gap: 8,
     },
+    pageActionSection: {
+      gap: theme.spacing.sm,
+      paddingHorizontal: isTablet ? 20 : isSmallMobile ? 14 : 16,
+      paddingTop: isTablet ? 18 : isSmallMobile ? 14 : 16,
+      paddingBottom: isTablet ? 20 : isSmallMobile ? 16 : 18,
+    },
     stickyActionsPanel: {
-      gap: 10,
+      padding: isTablet ? 16 : isSmallMobile ? 12 : 14,
+      backgroundColor: theme.colors.surface,
+      borderColor: theme.mode === "dark" ? theme.colors.borderStrong : "#d8e4ec",
+    },
+    actionDockGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: isSmallMobile ? 10 : 12,
+    },
+    actionDockButton: {
+      minHeight: isSmallMobile ? 66 : 72,
+      flexBasis: "48%",
+      flexGrow: 1,
+      borderWidth: 1,
+      borderRadius: 22,
+      paddingHorizontal: isSmallMobile ? 10 : 12,
+      paddingVertical: isSmallMobile ? 10 : 12,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: isSmallMobile ? 6 : 8,
+      shadowColor: theme.shadows.color,
+      shadowOpacity: theme.mode === "dark" ? 0.12 : 0.05,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 2,
+    },
+    actionDockButtonSoft: {
+      borderColor: theme.mode === "dark" ? "rgba(87,168,250,0.28)" : "#c7ddf0",
+      backgroundColor: theme.mode === "dark" ? theme.colors.surfaceSoft : "#eef7ff",
+    },
+    actionDockButtonGhost: {
+      borderColor: theme.mode === "dark" ? theme.colors.borderStrong : "#d7e5f0",
+      backgroundColor: theme.colors.surface,
+    },
+    actionDockButtonPrimary: {
+      borderColor: theme.colors.primaryStrong,
+      backgroundColor: theme.colors.primaryStrong,
+    },
+    actionDockButtonDisabled: {
+      opacity: 0.52,
+    },
+    actionDockButtonText: {
+      color: theme.colors.info,
+      fontFamily: theme.fonts.bold,
+      fontSize: isSmallMobile ? 12 : 13,
+      lineHeight: isSmallMobile ? 16 : 17,
+      textAlign: "center",
+    },
+    actionDockButtonTextDark: {
+      color: theme.colors.textPrimary,
+      fontFamily: theme.fonts.bold,
+      fontSize: isSmallMobile ? 12 : 13,
+      lineHeight: isSmallMobile ? 16 : 17,
+      textAlign: "center",
+    },
+    actionDockButtonTextPrimary: {
+      color: theme.colors.primaryContrast,
+      fontFamily: theme.fonts.bold,
+      fontSize: isSmallMobile ? 12 : 13,
+      lineHeight: isSmallMobile ? 16 : 17,
+      textAlign: "center",
     },
     successWrap: {
       borderWidth: 1,

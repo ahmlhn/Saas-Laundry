@@ -1,5 +1,6 @@
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator, type NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { getFocusedRouteNameFromRoute } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -111,6 +112,20 @@ function MainTabsNavigator() {
   const tabBarHeight = baseTabBarHeight + bottomInset;
   const labelSize = isTablet ? 12 : 10;
   const iconSize = isTablet ? 22 : 20;
+  const activeTabColor = theme.mode === "dark" ? theme.colors.primary : theme.colors.primaryStrong;
+  const baseTabBarStyle = {
+    backgroundColor: theme.mode === "dark" ? theme.colors.surface : theme.colors.surface,
+    borderTopColor: theme.mode === "dark" ? theme.colors.borderStrong : theme.colors.border,
+    borderTopWidth: 1,
+    height: tabBarHeight,
+    paddingTop: baseTabBarPaddingTop,
+    paddingBottom: baseTabBarPaddingBottom + bottomInset,
+    shadowColor: "#000000",
+    shadowOpacity: theme.mode === "dark" ? 0.18 : 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: -3 },
+    elevation: 10,
+  } as const;
   const { session } = useSession();
   const roles = session?.roles ?? [];
   const showQuickAction = canSeeQuickActionTab(roles);
@@ -121,21 +136,9 @@ function MainTabsNavigator() {
       initialRouteName="HomeTab"
       screenOptions={{
         headerShown: false,
-        tabBarStyle: {
-          backgroundColor: theme.mode === "dark" ? theme.colors.surface : "#ffffff",
-          borderTopColor: theme.mode === "dark" ? theme.colors.borderStrong : "#e7ebee",
-          borderTopWidth: 1,
-          height: tabBarHeight,
-          paddingTop: baseTabBarPaddingTop,
-          paddingBottom: baseTabBarPaddingBottom + bottomInset,
-          shadowColor: "#000000",
-          shadowOpacity: theme.mode === "dark" ? 0.18 : 0.05,
-          shadowRadius: 10,
-          shadowOffset: { width: 0, height: -3 },
-          elevation: 10,
-        },
-        tabBarActiveTintColor: theme.colors.success,
-        tabBarInactiveTintColor: theme.mode === "dark" ? theme.colors.textMuted : "#98a1ad",
+        tabBarStyle: baseTabBarStyle,
+        tabBarActiveTintColor: activeTabColor,
+        tabBarInactiveTintColor: theme.colors.textMuted,
         tabBarLabelStyle: {
           fontFamily: theme.fonts.medium,
           fontSize: labelSize,
@@ -158,9 +161,15 @@ function MainTabsNavigator() {
       <Tab.Screen
         name="OrdersTab"
         component={OrdersTabNavigator}
-        options={{
-          tabBarLabel: "Pesanan",
-          tabBarIcon: ({ color, focused }) => <Ionicons color={color} name={focused ? "receipt" : "receipt-outline"} size={iconSize} />,
+        options={({ route }) => {
+          const focusedRouteName = getFocusedRouteNameFromRoute(route) ?? "OrdersToday";
+          const shouldHideTabBar = focusedRouteName === "OrderDetail";
+
+          return {
+            tabBarLabel: "Pesanan",
+            tabBarIcon: ({ color, focused }) => <Ionicons color={color} name={focused ? "receipt" : "receipt-outline"} size={iconSize} />,
+            tabBarStyle: shouldHideTabBar ? { display: "none" } : baseTabBarStyle,
+          };
         }}
       />
       {showQuickAction ? (

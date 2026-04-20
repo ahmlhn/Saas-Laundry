@@ -27,7 +27,9 @@ import { useAppTheme } from "./src/theme/useAppTheme";
 
 interface ForcedUpdateState {
   currentVersion: string;
+  currentBuild: number | null;
   latestVersion: string;
+  latestBuild: number;
   minimumSupportedVersion: string | null;
   releaseNote: string | null;
   updateUrl: string;
@@ -107,7 +109,9 @@ function RootRouter({ fontsLoaded }: { fontsLoaded: boolean }) {
           if (result.status === "required") {
             setForcedUpdate({
               currentVersion: result.currentVersion,
+              currentBuild: result.currentBuild,
               latestVersion: result.latestVersion,
+              latestBuild: result.latestBuild,
               minimumSupportedVersion: result.minimumSupportedVersion,
               releaseNote: result.release.notes[0] ?? null,
               updateUrl: primaryUrl,
@@ -117,7 +121,8 @@ function RootRouter({ fontsLoaded }: { fontsLoaded: boolean }) {
 
           const releaseNote = result.release.notes[0] ?? null;
           const title = "Update tersedia";
-          const message = `Versi ${result.latestVersion} tersedia untuk diunduh.${releaseNote ? `\n\nCatatan: ${releaseNote}` : ""}`;
+          const latestLabel = `v${result.latestVersion} (build ${result.latestBuild})`;
+          const message = `Versi ${latestLabel} tersedia untuk diunduh.${releaseNote ? `\n\nCatatan: ${releaseNote}` : ""}`;
 
           Alert.alert(title, message, [
             { text: "Nanti", style: "cancel" },
@@ -156,7 +161,9 @@ function RootRouter({ fontsLoaded }: { fontsLoaded: boolean }) {
             ? (
                 <AppUpdateRequiredScreen
                   currentVersion={forcedUpdate.currentVersion}
+                  currentBuild={forcedUpdate.currentBuild}
                   latestVersion={forcedUpdate.latestVersion}
+                  latestBuild={forcedUpdate.latestBuild}
                   minimumSupportedVersion={forcedUpdate.minimumSupportedVersion}
                   onOpenUpdate={() => {
                     void Linking.openURL(forcedUpdate.updateUrl).catch(() => undefined);

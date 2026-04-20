@@ -1,3 +1,4 @@
+import { isRunningInExpoGo as isRunningInExpoGoRuntime } from "expo";
 import Constants from "expo-constants";
 import { Platform } from "react-native";
 import { EXPO_PROJECT_ID } from "../../config/env";
@@ -14,10 +15,16 @@ let deviceModuleCache: DeviceModule | null | undefined;
 let notificationHandlerConfigured = false;
 let notificationModuleWarningShown = false;
 let deviceModuleWarningShown = false;
+let expoGoWarningShown = false;
 
 function getNotificationsModule(): NotificationsModule | null {
   if (notificationsModuleCache !== undefined) {
     return notificationsModuleCache;
+  }
+
+  if (isExpoGoRuntime()) {
+    notificationsModuleCache = null;
+    return null;
   }
 
   try {
@@ -78,7 +85,27 @@ function ensureNotificationHandlerConfigured(): NotificationsModule | null {
 }
 
 export function getAvailableNotificationsModule(): NotificationsModule | null {
+  if (isExpoGoRuntime()) {
+    return null;
+  }
+
   return ensureNotificationHandlerConfigured();
+}
+
+function isExpoGoRuntime(): boolean {
+  try {
+    if (isRunningInExpoGoRuntime()) {
+      return true;
+    }
+  } catch {
+    // Fall back to manifest-based detection when the helper is unavailable.
+  }
+
+  if (Constants.appOwnership === "expo") {
+    return true;
+  }
+
+  return Constants.expoGoConfig != null;
 }
 
 function resolveProjectId(): string {
@@ -110,6 +137,25 @@ async function ensureAndroidChannelAsync(): Promise<void> {
 
 export async function registerDeviceForPushNotificationsAsync(): Promise<string | null> {
   const deviceId = await getOrCreateDeviceId();
+
+  // SDK 53+ removes Android remote push support from Expo Go.
+  if (isExpoGoRuntime()) {
+    if (!expoGoWarningShown) {
+      expoGoWarningShown = true;
+      console.warn("[PushNotifications] Remote push dinonaktifkan saat berjalan di Expo Go. Gunakan development build atau APK build sendiri.");
+    }
+
+    await upsertDevicePushToken({
+      deviceId,
+      pushToken: null,
+      platform: Platform.OS,
+      permissionStatus: "expo_go_unsupported",
+      enabled: false,
+    });
+
+    return null;
+  }
+
   const Notifications = ensureNotificationHandlerConfigured();
   const Device = getDeviceModule();
 
