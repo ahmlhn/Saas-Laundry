@@ -4,7 +4,12 @@ namespace App\Http\Controllers\Web;
 
 use App\Domain\Audit\AuditEventKeys;
 use App\Domain\Audit\AuditTrailService;
+use App\Filament\Resources\Customers\CustomerResource;
+use App\Filament\Resources\Outlets\OutletResource;
 use App\Filament\Resources\OutletServices\OutletServiceResource;
+use App\Filament\Resources\Services\ServiceResource;
+use App\Filament\Resources\ShippingZones\ShippingZoneResource;
+use App\Filament\Resources\Users\UserResource;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Web\Concerns\EnsuresWebPanelAccess;
 use App\Models\Customer;
@@ -20,7 +25,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
-use Illuminate\View\View;
 
 class ManagementController extends Controller
 {
@@ -29,58 +33,6 @@ class ManagementController extends Controller
     public function __construct(
         private readonly AuditTrailService $auditTrail,
     ) {
-    }
-
-    public function users(Tenant $tenant): View
-    {
-        /** @var User $user */
-        $user = auth()->user();
-        $this->ensurePanelAccess($user, $tenant);
-
-        $ownerMode = $this->isOwner($user);
-        $allowedOutletIds = $this->allowedOutletIds($user, $tenant->id);
-        $assignableOutlets = $this->assignableOutlets($user, $tenant);
-        $roleOptions = $this->availableRoleOptions($user);
-
-        $rowsQuery = User::query()
-            ->where('tenant_id', $tenant->id)
-            ->with(['roles:id,key,name', 'outlets:id,name,code'])
-            ->orderBy('name');
-
-        if (! $ownerMode) {
-            $rowsQuery->whereHas('outlets', fn ($q) => $q->whereIn('outlets.id', $allowedOutletIds));
-        }
-
-        $rows = $rowsQuery->get();
-
-        $manageableUserIds = $rows
-            ->filter(fn (User $managed): bool => $this->canManageUserAssignment($user, $managed))
-            ->pluck('id')
-            ->map(fn ($id): string => (string) $id)
-            ->values()
-            ->all();
-
-        $archivedRows = collect();
-
-        if ($ownerMode) {
-            $archivedRows = User::withTrashed()
-                ->onlyTrashed()
-                ->where('tenant_id', $tenant->id)
-                ->with(['roles:id,key,name', 'outlets:id,name,code'])
-                ->orderByDesc('deleted_at')
-                ->get();
-        }
-
-        return view('web.management.users', [
-            'tenant' => $tenant,
-            'user' => $user,
-            'rows' => $rows,
-            'archivedRows' => $archivedRows,
-            'ownerMode' => $ownerMode,
-            'assignableOutlets' => $assignableOutlets,
-            'roleOptions' => $roleOptions,
-            'manageableUserIds' => $manageableUserIds,
-        ]);
     }
 
     public function storeUser(Request $request, Tenant $tenant): RedirectResponse
@@ -148,9 +100,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.users.index')
-            ->with('status', 'User baru berhasil dibuat.');
+        return $this->redirectToUsersIndex('User baru berhasil dibuat.');
     }
 
     public function updateUserAssignment(Request $request, Tenant $tenant, string $managedUser): RedirectResponse
@@ -227,76 +177,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.users.index')
-            ->with('status', 'Assignment user berhasil diperbarui.');
-    }
-
-    public function customers(Request $request, Tenant $tenant): View
-    {
-        /** @var User $user */
-        $user = auth()->user();
-        $this->ensurePanelAccess($user, $tenant);
-
-        $validated = $request->validate([
-            'search' => ['nullable', 'string', 'max:100'],
-            'limit' => ['nullable', 'integer', 'min:10', 'max:100'],
-        ]);
-
-        $search = trim((string) ($validated['search'] ?? ''));
-        $limit = (int) ($validated['limit'] ?? 20);
-
-        $rows = Customer::query()
-            ->where('tenant_id', $tenant->id)
-            ->withCount('orders')
-            ->withMax('orders', 'created_at')
-            ->orderByDesc('updated_at')
-            ->orderBy('name');
-
-        $archivedRows = Customer::withTrashed()
-            ->onlyTrashed()
-            ->where('tenant_id', $tenant->id)
-            ->withCount('orders')
-            ->withMax('orders', 'created_at')
-            ->orderByDesc('deleted_at')
-            ->orderBy('name');
-
-        if ($search !== '') {
-            $this->applyCustomerSearch($rows, $search);
-            $this->applyCustomerSearch($archivedRows, $search);
-        }
-
-        $summary = [
-            'active_total' => Customer::query()
-                ->where('tenant_id', $tenant->id)
-                ->count(),
-            'archived_total' => Customer::withTrashed()
-                ->onlyTrashed()
-                ->where('tenant_id', $tenant->id)
-                ->count(),
-            'with_notes_total' => Customer::query()
-                ->where('tenant_id', $tenant->id)
-                ->whereNotNull('notes')
-                ->where('notes', '!=', '')
-                ->count(),
-            'unique_phone_total' => Customer::query()
-                ->where('tenant_id', $tenant->id)
-                ->whereNotNull('phone_normalized')
-                ->distinct()
-                ->count('phone_normalized'),
-        ];
-
-        return view('web.management.customers', [
-            'tenant' => $tenant,
-            'user' => $user,
-            'rows' => $rows->paginate($limit, ['*'], 'active_page')->withQueryString(),
-            'archivedRows' => $archivedRows->paginate($limit, ['*'], 'archived_page')->withQueryString(),
-            'filters' => [
-                'search' => $search,
-                'limit' => $limit,
-            ],
-            'summary' => $summary,
-        ]);
+        return $this->redirectToUsersIndex('Assignment user berhasil diperbarui.');
     }
 
     public function storeCustomer(Request $request, Tenant $tenant): RedirectResponse
@@ -366,9 +247,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.customers.index', $this->customerFilterParams($request))
-            ->with('status', $statusMessage);
+        return $this->redirectToCustomersIndex($statusMessage);
     }
 
     public function updateCustomer(Request $request, Tenant $tenant, string $customer): RedirectResponse
@@ -432,87 +311,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.customers.index', $this->customerFilterParams($request))
-            ->with('status', 'Customer berhasil diperbarui.');
-    }
-
-    public function services(Tenant $tenant): View
-    {
-        /** @var User $user */
-        $user = auth()->user();
-        $this->ensurePanelAccess($user, $tenant);
-
-        $rows = Service::query()
-            ->where('tenant_id', $tenant->id)
-            ->orderBy('name')
-            ->get();
-
-        $archivedRows = Service::withTrashed()
-            ->onlyTrashed()
-            ->where('tenant_id', $tenant->id)
-            ->orderByDesc('deleted_at')
-            ->get();
-
-        return view('web.management.services', [
-            'tenant' => $tenant,
-            'user' => $user,
-            'rows' => $rows,
-            'archivedRows' => $archivedRows,
-        ]);
-    }
-
-    public function outlets(Tenant $tenant): View
-    {
-        /** @var User $user */
-        $user = auth()->user();
-        $this->ensurePanelAccess($user, $tenant);
-
-        $ownerMode = $this->isOwner($user);
-        $allowedOutletIds = $this->allowedOutletIds($user, $tenant->id);
-
-        $query = Outlet::query()
-            ->where('tenant_id', $tenant->id)
-            ->withCount([
-                'orders',
-                'orders as orders_this_month_count' => function ($q): void {
-                    $q->whereBetween('created_at', [now()->startOfMonth(), now()->endOfMonth()]);
-                },
-            ])
-            ->orderBy('name');
-
-        if (! $ownerMode) {
-            $query->whereIn('id', $allowedOutletIds);
-        }
-
-        $rows = $query->get();
-
-        $archivedRows = collect();
-
-        if ($ownerMode) {
-            $archivedRows = Outlet::withTrashed()
-                ->onlyTrashed()
-                ->where('tenant_id', $tenant->id)
-                ->orderByDesc('deleted_at')
-                ->get();
-        }
-
-        return view('web.management.outlets', [
-            'tenant' => $tenant,
-            'user' => $user,
-            'rows' => $rows,
-            'archivedRows' => $archivedRows,
-            'ownerMode' => $ownerMode,
-        ]);
-    }
-
-    public function outletServices(Request $request, Tenant $tenant): RedirectResponse
-    {
-        /** @var User $user */
-        $user = $request->user();
-        $this->ensurePanelAccess($user, $tenant);
-
-        return redirect(OutletServiceResource::getUrl(name: 'index', panel: 'tenant'));
+        return $this->redirectToCustomersIndex('Customer berhasil diperbarui.');
     }
 
     public function upsertOutletService(Request $request, Tenant $tenant): RedirectResponse
@@ -586,9 +385,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.outlet-services.index')
-            ->with('status', 'Outlet service override berhasil disimpan.');
+        return $this->redirectToOutletServicesIndex('Outlet service override berhasil disimpan.');
     }
 
     public function updateOutletService(Request $request, Tenant $tenant, string $outletService): RedirectResponse
@@ -657,71 +454,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.outlet-services.index')
-            ->with('status', 'Outlet service override berhasil diperbarui.');
-    }
-
-    public function shippingZones(Request $request, Tenant $tenant): View
-    {
-        /** @var User $user */
-        $user = $request->user();
-        $this->ensurePanelAccess($user, $tenant);
-
-        $filters = $request->validate([
-            'outlet_id' => ['nullable', 'uuid'],
-            'active' => ['nullable', 'boolean'],
-            'search' => ['nullable', 'string', 'max:120'],
-        ]);
-
-        $ownerMode = $this->isOwner($user);
-        $allowedOutletIds = $this->allowedOutletIds($user, $tenant->id);
-
-        $outletsQuery = Outlet::query()
-            ->where('tenant_id', $tenant->id)
-            ->orderBy('name');
-
-        if (! $ownerMode) {
-            $outletsQuery->whereIn('id', $allowedOutletIds);
-        }
-
-        $outlets = $outletsQuery->get(['id', 'name', 'code']);
-
-        $zonesQuery = ShippingZone::query()
-            ->where('tenant_id', $tenant->id)
-            ->with('outlet:id,name,code')
-            ->latest('created_at');
-
-        if (! $ownerMode) {
-            $zonesQuery->whereIn('outlet_id', $allowedOutletIds);
-        }
-
-        if (! empty($filters['outlet_id'])) {
-            $zonesQuery->where('outlet_id', $filters['outlet_id']);
-        }
-
-        if (array_key_exists('active', $filters)) {
-            $zonesQuery->where('active', (bool) $filters['active']);
-        }
-
-        if (! empty($filters['search'])) {
-            $zonesQuery->where('name', 'like', '%'.$filters['search'].'%');
-        }
-
-        $rows = $zonesQuery->get();
-        $activeRows = $rows->where('active', true)->values();
-        $inactiveRows = $rows->where('active', false)->values();
-
-        return view('web.management.shipping-zones', [
-            'tenant' => $tenant,
-            'user' => $user,
-            'ownerMode' => $ownerMode,
-            'filters' => $filters,
-            'outlets' => $outlets,
-            'rows' => $rows,
-            'activeRows' => $activeRows,
-            'inactiveRows' => $inactiveRows,
-        ]);
+        return $this->redirectToOutletServicesIndex('Outlet service override berhasil diperbarui.');
     }
 
     public function storeShippingZone(Request $request, Tenant $tenant): RedirectResponse
@@ -782,9 +515,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.shipping-zones.index')
-            ->with('status', 'Shipping zone berhasil dibuat.');
+        return $this->redirectToShippingZonesIndex('Shipping zone berhasil dibuat.');
     }
 
     public function updateShippingZone(Request $request, Tenant $tenant, string $zone): RedirectResponse
@@ -855,9 +586,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.shipping-zones.index')
-            ->with('status', 'Shipping zone berhasil diperbarui.');
+        return $this->redirectToShippingZonesIndex('Shipping zone berhasil diperbarui.');
     }
 
     public function deactivateShippingZone(Request $request, Tenant $tenant, string $zone): RedirectResponse
@@ -892,9 +621,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.shipping-zones.index')
-            ->with('status', 'Shipping zone berhasil dinonaktifkan.');
+        return $this->redirectToShippingZonesIndex('Shipping zone berhasil dinonaktifkan.');
     }
 
     public function activateShippingZone(Request $request, Tenant $tenant, string $zone): RedirectResponse
@@ -929,9 +656,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.shipping-zones.index')
-            ->with('status', 'Shipping zone berhasil diaktifkan.');
+        return $this->redirectToShippingZonesIndex('Shipping zone berhasil diaktifkan.');
     }
 
     public function archiveUser(Request $request, Tenant $tenant, string $managedUser): RedirectResponse
@@ -984,9 +709,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.users.index')
-            ->with('status', 'User berhasil diarsipkan.');
+        return $this->redirectToUsersIndex('User berhasil diarsipkan.');
     }
 
     public function restoreUser(Request $request, Tenant $tenant, string $managedUser): RedirectResponse
@@ -1025,9 +748,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.users.index')
-            ->with('status', 'User berhasil dipulihkan.');
+        return $this->redirectToUsersIndex('User berhasil dipulihkan.');
     }
 
     public function archiveCustomer(Request $request, Tenant $tenant, string $customer): RedirectResponse
@@ -1061,9 +782,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.customers.index')
-            ->with('status', 'Customer berhasil diarsipkan.');
+        return $this->redirectToCustomersIndex('Customer berhasil diarsipkan.');
     }
 
     public function restoreCustomer(Request $request, Tenant $tenant, string $customer): RedirectResponse
@@ -1101,9 +820,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.customers.index')
-            ->with('status', 'Customer berhasil dipulihkan.');
+        return $this->redirectToCustomersIndex('Customer berhasil dipulihkan.');
     }
 
     public function archiveService(Request $request, Tenant $tenant, string $service): RedirectResponse
@@ -1137,9 +854,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.services.index')
-            ->with('status', 'Service berhasil diarsipkan.');
+        return $this->redirectToServicesIndex('Service berhasil diarsipkan.');
     }
 
     public function restoreService(Request $request, Tenant $tenant, string $service): RedirectResponse
@@ -1177,9 +892,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.services.index')
-            ->with('status', 'Service berhasil dipulihkan.');
+        return $this->redirectToServicesIndex('Service berhasil dipulihkan.');
     }
 
     public function archiveOutlet(Request $request, Tenant $tenant, string $outlet): RedirectResponse
@@ -1222,9 +935,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.outlets.index')
-            ->with('status', 'Outlet berhasil diarsipkan.');
+        return $this->redirectToOutletsIndex('Outlet berhasil diarsipkan.');
     }
 
     public function restoreOutlet(Request $request, Tenant $tenant, string $outlet): RedirectResponse
@@ -1263,9 +974,7 @@ class ManagementController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.outlets.index')
-            ->with('status', 'Outlet berhasil dipulihkan.');
+        return $this->redirectToOutletsIndex('Outlet berhasil dipulihkan.');
     }
 
     private function findOutletInScope(User $user, Tenant $tenant, string $outletId): ?Outlet
@@ -1399,27 +1108,40 @@ class ManagementController extends Controller
         }
     }
 
-    /**
-     * @param \Illuminate\Database\Eloquent\Builder<Customer> $query
-     */
-    private function applyCustomerSearch($query, string $search): void
+    private function redirectToUsersIndex(string $status): RedirectResponse
     {
-        $query->where(function ($customerQuery) use ($search): void {
-            $customerQuery->where('name', 'like', "%{$search}%")
-                ->orWhere('phone_normalized', 'like', "%{$search}%")
-                ->orWhere('notes', 'like', "%{$search}%");
-        });
+        return redirect(UserResource::getUrl(name: 'index', panel: 'tenant'))
+            ->with('status', $status);
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function customerFilterParams(Request $request): array
+    private function redirectToCustomersIndex(string $status): RedirectResponse
     {
-        return array_filter([
-            'search' => $request->query('search'),
-            'limit' => $request->query('limit'),
-        ], fn ($value): bool => filled($value));
+        return redirect(CustomerResource::getUrl(name: 'index', panel: 'tenant'))
+            ->with('status', $status);
+    }
+
+    private function redirectToServicesIndex(string $status): RedirectResponse
+    {
+        return redirect(ServiceResource::getUrl(name: 'index', panel: 'tenant'))
+            ->with('status', $status);
+    }
+
+    private function redirectToOutletServicesIndex(string $status): RedirectResponse
+    {
+        return redirect(OutletServiceResource::getUrl(name: 'index', panel: 'tenant'))
+            ->with('status', $status);
+    }
+
+    private function redirectToOutletsIndex(string $status): RedirectResponse
+    {
+        return redirect(OutletResource::getUrl(name: 'index', panel: 'tenant'))
+            ->with('status', $status);
+    }
+
+    private function redirectToShippingZonesIndex(string $status): RedirectResponse
+    {
+        return redirect(ShippingZoneResource::getUrl(name: 'index', panel: 'tenant'))
+            ->with('status', $status);
     }
 
     private function normalizePhone(string $phone): ?string

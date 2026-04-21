@@ -112,6 +112,9 @@ class User extends Authenticatable implements FilamentUser
             'tenant' => filled($this->tenant_id)
                 && $this->status === 'active'
                 && $this->hasAnyRole(['owner', 'admin']),
+            'platform' => blank($this->tenant_id)
+                && $this->status === 'active'
+                && $this->hasAnyRole(['platform_owner', 'platform_billing']),
             default => false,
         };
     }

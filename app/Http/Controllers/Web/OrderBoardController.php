@@ -8,18 +8,20 @@ use App\Domain\Billing\QuotaExceededException;
 use App\Domain\Billing\QuotaService;
 use App\Domain\Billing\TenantWriteAccessException;
 use App\Domain\Messaging\WaDispatchService;
+use App\Domain\Orders\OrderExportService;
+use App\Domain\Orders\OrderWorkflowService;
 use App\Domain\Orders\OrderStatusTransitionValidator;
+use App\Filament\Resources\Orders\OrderResource;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Web\Concerns\EnsuresWebPanelAccess;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
-use App\Models\Outlet;
 use App\Models\OutletService;
-use App\Models\Payment;
 use App\Models\Service;
 use App\Models\Tenant;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -34,106 +36,13 @@ class OrderBoardController extends Controller
     use EnsuresWebPanelAccess;
 
     public function __construct(
+        private readonly OrderExportService $orderExport,
         private readonly OrderStatusTransitionValidator $statusValidator,
         private readonly QuotaService $quotaService,
         private readonly WaDispatchService $waDispatchService,
         private readonly AuditTrailService $auditTrail,
+        private readonly OrderWorkflowService $orderWorkflow,
     ) {
-    }
-
-    public function index(Request $request, Tenant $tenant): View
-    {
-        /** @var User $user */
-        $user = $request->user();
-        $this->ensurePanelAccess($user, $tenant);
-
-        $validated = $request->validate([
-            'outlet_id' => ['nullable', 'uuid'],
-            'laundry_status' => ['nullable', 'string', 'max:32'],
-            'courier_status' => ['nullable', 'string', 'max:32'],
-            'search' => ['nullable', 'string', 'max:60'],
-            'limit' => ['nullable', 'integer', 'min:10', 'max:100'],
-        ]);
-
-        $ownerMode = $this->isOwner($user);
-        $allowedOutletIds = $this->allowedOutletIds($user, $tenant->id);
-
-        $outletsQuery = Outlet::query()->where('tenant_id', $tenant->id)->orderBy('name');
-
-        if (! $ownerMode) {
-            $outletsQuery->whereIn('id', $allowedOutletIds);
-        }
-
-        $outlets = $outletsQuery->get(['id', 'name', 'code']);
-
-        $couriersQuery = User::query()
-            ->where('tenant_id', $tenant->id)
-            ->where('status', 'active')
-            ->whereHas('roles', fn ($q) => $q->where('key', 'courier'))
-            ->orderBy('name');
-
-        if (! $ownerMode) {
-            $couriersQuery->whereHas('outlets', fn ($q) => $q->whereIn('outlets.id', $allowedOutletIds));
-        }
-
-        $couriers = $couriersQuery->get(['id', 'name']);
-
-        $query = Order::query()
-            ->where('tenant_id', $tenant->id)
-            ->with(['customer:id,name,phone_normalized', 'outlet:id,name,code', 'courier:id,name'])
-            ->latest('created_at');
-
-        if (! $ownerMode) {
-            $query->whereIn('outlet_id', $allowedOutletIds);
-        }
-
-        if (! empty($validated['outlet_id'])) {
-            $query->where('outlet_id', $validated['outlet_id']);
-        }
-
-        if (! empty($validated['laundry_status'])) {
-            $query->where('laundry_status', $validated['laundry_status']);
-        }
-
-        if (! empty($validated['courier_status'])) {
-            $query->where('courier_status', $validated['courier_status']);
-        }
-
-        if (! empty($validated['search'])) {
-            $search = $validated['search'];
-
-            $query->where(function ($q) use ($search): void {
-                $q->where('order_code', 'like', "%{$search}%")
-                    ->orWhere('invoice_no', 'like', "%{$search}%")
-                    ->orWhereHas('customer', function ($qc) use ($search): void {
-                        $qc->where('name', 'like', "%{$search}%")
-                            ->orWhere('phone_normalized', 'like', "%{$search}%");
-                    });
-            });
-        }
-
-        $summary = [
-            'total' => (clone $query)->count(),
-            'outstanding_count' => (clone $query)->where('due_amount', '>', 0)->count(),
-            'due_amount' => (int) (clone $query)->sum('due_amount'),
-            'ready_count' => (clone $query)->where('laundry_status', 'ready')->count(),
-            'completed_count' => (clone $query)->where('laundry_status', 'completed')->count(),
-            'pickup_delivery_count' => (clone $query)->where('is_pickup_delivery', true)->count(),
-        ];
-
-        $limit = (int) ($validated['limit'] ?? 20);
-        $orders = $query->paginate($limit)->withQueryString();
-
-        return view('web.orders.index', [
-            'tenant' => $tenant,
-            'user' => $user,
-            'ownerMode' => $ownerMode,
-            'filters' => $validated,
-            'outlets' => $outlets,
-            'couriers' => $couriers,
-            'orders' => $orders,
-            'summary' => $summary,
-        ]);
     }
 
     public function export(Request $request, Tenant $tenant): StreamedResponse
@@ -149,172 +58,7 @@ class OrderBoardController extends Controller
             'search' => ['nullable', 'string', 'max:60'],
         ]);
 
-        $ownerMode = $this->isOwner($user);
-        $allowedOutletIds = $this->allowedOutletIds($user, $tenant->id);
-
-        $query = Order::query()
-            ->where('tenant_id', $tenant->id)
-            ->with(['customer:id,name,phone_normalized', 'outlet:id,name,code', 'courier:id,name'])
-            ->latest('created_at');
-
-        if (! $ownerMode) {
-            $query->whereIn('outlet_id', $allowedOutletIds);
-        }
-
-        if (! empty($validated['outlet_id'])) {
-            $query->where('outlet_id', $validated['outlet_id']);
-        }
-
-        if (! empty($validated['laundry_status'])) {
-            $query->where('laundry_status', $validated['laundry_status']);
-        }
-
-        if (! empty($validated['courier_status'])) {
-            $query->where('courier_status', $validated['courier_status']);
-        }
-
-        if (! empty($validated['search'])) {
-            $search = $validated['search'];
-
-            $query->where(function ($q) use ($search): void {
-                $q->where('order_code', 'like', "%{$search}%")
-                    ->orWhere('invoice_no', 'like', "%{$search}%")
-                    ->orWhereHas('customer', function ($qc) use ($search): void {
-                        $qc->where('name', 'like', "%{$search}%")
-                            ->orWhere('phone_normalized', 'like', "%{$search}%");
-                    });
-            });
-        }
-
-        $filename = sprintf('orders-%s-%s.csv', $tenant->id, now()->format('Ymd-His'));
-
-        return response()->streamDownload(function () use ($query): void {
-            $handle = fopen('php://output', 'wb');
-
-            if ($handle === false) {
-                return;
-            }
-
-            fwrite($handle, "\xEF\xBB\xBF");
-            fputcsv($handle, [
-                'invoice_or_order_code',
-                'order_code',
-                'outlet_code',
-                'outlet_name',
-                'customer_name',
-                'customer_phone',
-                'laundry_status',
-                'courier_status',
-                'courier_name',
-                'is_pickup_delivery',
-                'total_amount',
-                'paid_amount',
-                'due_amount',
-                'created_at',
-            ]);
-
-            $query
-                ->chunk(200, function ($orders) use ($handle): void {
-                    foreach ($orders as $order) {
-                        fputcsv($handle, [
-                            $order->invoice_no ?: $order->order_code,
-                            $order->order_code,
-                            (string) ($order->outlet?->code ?? ''),
-                            (string) ($order->outlet?->name ?? ''),
-                            (string) ($order->customer?->name ?? ''),
-                            (string) ($order->customer?->phone_normalized ?? ''),
-                            (string) ($order->laundry_status ?? ''),
-                            (string) ($order->courier_status ?? ''),
-                            (string) ($order->courier?->name ?? ''),
-                            $order->is_pickup_delivery ? '1' : '0',
-                            (string) (int) $order->total_amount,
-                            (string) (int) $order->paid_amount,
-                            (string) (int) $order->due_amount,
-                            (string) optional($order->created_at)->format('Y-m-d H:i:s'),
-                        ]);
-                    }
-                });
-
-            fclose($handle);
-        }, $filename, [
-            'Content-Type' => 'text/csv; charset=UTF-8',
-            'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
-        ]);
-    }
-
-    public function create(Request $request, Tenant $tenant): View
-    {
-        /** @var User $user */
-        $user = $request->user();
-        $this->ensurePanelAccess($user, $tenant);
-
-        $ownerMode = $this->isOwner($user);
-        $allowedOutletIds = $this->allowedOutletIds($user, $tenant->id);
-
-        $outletsQuery = Outlet::query()
-            ->where('tenant_id', $tenant->id)
-            ->orderBy('name');
-
-        if (! $ownerMode) {
-            $outletsQuery->whereIn('id', $allowedOutletIds);
-        }
-
-        $outlets = $outletsQuery->get(['id', 'name', 'code']);
-
-        $services = Service::query()
-            ->where('tenant_id', $tenant->id)
-            ->where('active', true)
-            ->orderBy('name')
-            ->get(['id', 'name', 'unit_type', 'base_price_amount']);
-
-        $outletIds = $outlets->pluck('id')->values()->all();
-        $serviceIds = $services->pluck('id')->values()->all();
-
-        $outletServicePriceMap = OutletService::query()
-            ->whereIn('outlet_id', $outletIds)
-            ->whereIn('service_id', $serviceIds)
-            ->where('active', true)
-            ->whereNotNull('price_override_amount')
-            ->get(['outlet_id', 'service_id', 'price_override_amount'])
-            ->groupBy('outlet_id')
-            ->map(function ($rows): array {
-                return collect($rows)->mapWithKeys(function ($row): array {
-                    return [
-                        (string) $row->service_id => (int) $row->price_override_amount,
-                    ];
-                })->all();
-            })
-            ->all();
-
-        $customerSeeds = Customer::query()
-            ->where('tenant_id', $tenant->id)
-            ->orderByDesc('updated_at')
-            ->limit(200)
-            ->get(['id', 'name', 'phone_normalized', 'notes']);
-
-        $couriersQuery = User::query()
-            ->where('tenant_id', $tenant->id)
-            ->where('status', 'active')
-            ->whereHas('roles', fn ($q) => $q->where('key', 'courier'))
-            ->orderBy('name');
-
-        if (! $ownerMode) {
-            $couriersQuery->whereHas('outlets', fn ($q) => $q->whereIn('outlets.id', $allowedOutletIds));
-        }
-
-        $couriers = $couriersQuery->get(['id', 'name']);
-
-        return view('web.orders.create', [
-            'tenant' => $tenant,
-            'user' => $user,
-            'ownerMode' => $ownerMode,
-            'outlets' => $outlets,
-            'services' => $services,
-            'outletServicePriceMap' => $outletServicePriceMap,
-            'customerSeeds' => $customerSeeds,
-            'couriers' => $couriers,
-            'quota' => $this->quotaService->snapshot($tenant->id),
-        ]);
+        return $this->orderExport->streamCsv($tenant, $user, $validated);
     }
 
     public function store(Request $request, Tenant $tenant): RedirectResponse
@@ -597,82 +341,7 @@ class OrderBoardController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.orders.show', ['order' => $order->id])
-            ->with('status', 'Transaksi baru berhasil dibuat.');
-    }
-
-    public function show(Request $request, Tenant $tenant, string $order): View
-    {
-        /** @var User $user */
-        $user = $request->user();
-        $this->ensurePanelAccess($user, $tenant);
-
-        $ownerMode = $this->isOwner($user);
-        $allowedOutletIds = $this->allowedOutletIds($user, $tenant->id);
-
-        $query = Order::query()
-            ->where('tenant_id', $tenant->id)
-            ->with([
-                'customer:id,name,phone_normalized',
-                'outlet:id,name,code,timezone,address',
-                'courier:id,name,phone',
-                'items:id,order_id,service_id,service_name_snapshot,unit_type_snapshot,qty,weight_kg,unit_price_amount,subtotal_amount',
-                'payments:id,order_id,amount,method,paid_at,notes',
-            ]);
-
-        if (! $ownerMode) {
-            $query->whereIn('outlet_id', $allowedOutletIds);
-        }
-
-        $orderRow = $query->where('id', $order)->firstOrFail();
-
-        $orderRow->setRelation(
-            'payments',
-            $orderRow->payments->sortByDesc('paid_at')->values(),
-        );
-
-        $laundryTimeline = $this->buildTimeline(
-            ['received', 'washing', 'drying', 'ironing', 'ready', 'completed'],
-            $orderRow->laundry_status,
-        );
-
-        $requiresPickup = (bool) ($orderRow->requires_pickup ?? false);
-        $requiresDelivery = (bool) ($orderRow->requires_delivery ?? false);
-        $initialCourierStatus = $this->resolveInitialCourierStatus($requiresPickup, $requiresDelivery);
-
-        $courierTimeline = $this->buildTimeline(
-            $this->courierSteps($requiresPickup, $requiresDelivery),
-            $orderRow->courier_status,
-        );
-
-        $allowedLaundryStatuses = $this->allowedLaundryStatusesForCurrent((string) $orderRow->laundry_status);
-        $allowedCourierStatuses = $this->allowedCourierStatusesForCurrent(
-            currentStatus: (string) ($orderRow->courier_status ?: $initialCourierStatus),
-            laundryStatus: (string) $orderRow->laundry_status,
-            requiresPickup: $requiresPickup,
-            requiresDelivery: $requiresDelivery,
-        );
-
-        $couriers = User::query()
-            ->where('tenant_id', $tenant->id)
-            ->where('status', 'active')
-            ->whereHas('roles', fn ($q) => $q->where('key', 'courier'))
-            ->whereHas('outlets', fn ($q) => $q->where('outlets.id', $orderRow->outlet_id))
-            ->orderBy('name')
-            ->get(['id', 'name']);
-
-        return view('web.orders.show', [
-            'tenant' => $tenant,
-            'user' => $user,
-            'ownerMode' => $ownerMode,
-            'orderRow' => $orderRow,
-            'laundryTimeline' => $laundryTimeline,
-            'courierTimeline' => $courierTimeline,
-            'allowedLaundryStatuses' => $allowedLaundryStatuses,
-            'allowedCourierStatuses' => $allowedCourierStatuses,
-            'couriers' => $couriers,
-        ]);
+        return $this->redirectToFilamentOrderView($order, 'Transaksi baru berhasil dibuat.');
     }
 
     public function receipt(Request $request, Tenant $tenant, string $order): View
@@ -680,24 +349,12 @@ class OrderBoardController extends Controller
         /** @var User $user */
         $user = $request->user();
         $this->ensurePanelAccess($user, $tenant);
-
-        $ownerMode = $this->isOwner($user);
-        $allowedOutletIds = $this->allowedOutletIds($user, $tenant->id);
-
-        $query = Order::query()
-            ->where('tenant_id', $tenant->id)
-            ->with([
-                'customer:id,name,phone_normalized',
-                'outlet:id,name,code,address,timezone',
-                'items:id,order_id,service_name_snapshot,unit_type_snapshot,qty,weight_kg,unit_price_amount,subtotal_amount',
-                'payments:id,order_id,amount,method,paid_at,notes',
-            ]);
-
-        if (! $ownerMode) {
-            $query->whereIn('outlet_id', $allowedOutletIds);
-        }
-
-        $orderRow = $query->where('id', $order)->firstOrFail();
+        $orderRow = $this->findScopedOrder($user, $tenant, $order, [
+            'customer:id,name,phone_normalized',
+            'outlet:id,name,code,address,timezone',
+            'items:id,order_id,service_name_snapshot,unit_type_snapshot,qty,weight_kg,unit_price_amount,subtotal_amount',
+            'payments:id,order_id,amount,method,paid_at,notes',
+        ]);
         $orderRow->setRelation('payments', $orderRow->payments->sortBy('paid_at')->values());
 
         return view('web.orders.receipt', [
@@ -712,32 +369,20 @@ class OrderBoardController extends Controller
         /** @var User $user */
         $user = $request->user();
         $this->ensurePanelAccess($user, $tenant);
-        $this->ensureOperationalWriteAccess($tenant->id);
 
         $validated = $request->validate([
             'laundry_status' => ['required', 'string', 'in:received,washing,drying,ironing,ready,completed'],
         ]);
-
-        $ownerMode = $this->isOwner($user);
-        $allowedOutletIds = $this->allowedOutletIds($user, $tenant->id);
-
-        $query = Order::query()->where('tenant_id', $tenant->id);
-
-        if (! $ownerMode) {
-            $query->whereIn('outlet_id', $allowedOutletIds);
-        }
-
-        $orderRow = $query->where('id', $order)->firstOrFail();
+        $orderRow = $this->findScopedOrder($user, $tenant, $order);
         $targetStatus = (string) $validated['laundry_status'];
 
-        $result = $this->applyLaundryTransition(
+        $result = $this->orderWorkflow->updateLaundryStatus(
             order: $orderRow,
             user: $user,
             tenant: $tenant,
-            request: $request,
             targetStatus: $targetStatus,
+            request: $request,
             actionKey: 'single-laundry-update',
-            isBulkAction: false,
         );
 
         if (! $result['updated']) {
@@ -746,9 +391,7 @@ class OrderBoardController extends Controller
             ]);
         }
 
-        return redirect()
-            ->route('tenant.orders.show', ['order' => $orderRow->id])
-            ->with('status', 'Status laundry berhasil diperbarui.');
+        return $this->redirectToFilamentOrderView($orderRow, 'Status laundry berhasil diperbarui.');
     }
 
     public function updateCourierStatus(Request $request, Tenant $tenant, string $order): RedirectResponse
@@ -756,32 +399,20 @@ class OrderBoardController extends Controller
         /** @var User $user */
         $user = $request->user();
         $this->ensurePanelAccess($user, $tenant);
-        $this->ensureOperationalWriteAccess($tenant->id);
 
         $validated = $request->validate([
             'courier_status' => ['required', 'string', 'in:pickup_pending,pickup_on_the_way,picked_up,at_outlet,delivery_pending,delivery_on_the_way,delivered'],
         ]);
-
-        $ownerMode = $this->isOwner($user);
-        $allowedOutletIds = $this->allowedOutletIds($user, $tenant->id);
-
-        $query = Order::query()->where('tenant_id', $tenant->id);
-
-        if (! $ownerMode) {
-            $query->whereIn('outlet_id', $allowedOutletIds);
-        }
-
-        $orderRow = $query->where('id', $order)->firstOrFail();
+        $orderRow = $this->findScopedOrder($user, $tenant, $order);
         $targetStatus = (string) $validated['courier_status'];
 
-        $result = $this->applyCourierTransition(
+        $result = $this->orderWorkflow->updateCourierStatus(
             order: $orderRow,
             user: $user,
             tenant: $tenant,
-            request: $request,
             targetStatus: $targetStatus,
+            request: $request,
             actionKey: 'single-courier-update',
-            isBulkAction: false,
         );
 
         if (! $result['updated']) {
@@ -790,9 +421,7 @@ class OrderBoardController extends Controller
             ]);
         }
 
-        return redirect()
-            ->route('tenant.orders.show', ['order' => $orderRow->id])
-            ->with('status', 'Status kurir berhasil diperbarui.');
+        return $this->redirectToFilamentOrderView($orderRow, 'Status kurir berhasil diperbarui.');
     }
 
     public function assignCourier(Request $request, Tenant $tenant, string $order): RedirectResponse
@@ -800,40 +429,24 @@ class OrderBoardController extends Controller
         /** @var User $user */
         $user = $request->user();
         $this->ensurePanelAccess($user, $tenant);
-        $this->ensureOperationalWriteAccess($tenant->id);
 
         $validated = $request->validate([
             'courier_user_id' => ['required', 'integer', 'min:1'],
         ]);
-
-        $ownerMode = $this->isOwner($user);
-        $allowedOutletIds = $this->allowedOutletIds($user, $tenant->id);
-
-        $query = Order::query()->where('tenant_id', $tenant->id);
-
-        if (! $ownerMode) {
-            $query->whereIn('outlet_id', $allowedOutletIds);
-        }
-
-        $orderRow = $query->where('id', $order)->firstOrFail();
+        $orderRow = $this->findScopedOrder($user, $tenant, $order);
         $courierUserId = (int) $validated['courier_user_id'];
-
-        $targetCourier = User::query()
-            ->with('roles:id,key')
-            ->where('tenant_id', $tenant->id)
-            ->where('status', 'active')
+        $targetCourier = $this->scopedCourierQuery($user, $tenant, (string) $orderRow->outlet_id)
             ->where('id', $courierUserId)
             ->first();
 
-        $result = $this->applyCourierAssignment(
+        $result = $this->orderWorkflow->assignCourier(
             order: $orderRow,
             user: $user,
             tenant: $tenant,
-            request: $request,
             targetCourier: $targetCourier,
             courierUserId: $courierUserId,
+            request: $request,
             actionKey: 'single-courier-assign',
-            isBulkAction: false,
         );
 
         if (! $result['updated']) {
@@ -842,9 +455,7 @@ class OrderBoardController extends Controller
             ]);
         }
 
-        return redirect()
-            ->route('tenant.orders.show', ['order' => $orderRow->id])
-            ->with('status', 'Kurir berhasil ditetapkan ke pesanan.');
+        return $this->redirectToFilamentOrderView($orderRow, 'Kurir berhasil ditetapkan ke pesanan.');
     }
 
     public function addPayment(Request $request, Tenant $tenant, string $order): RedirectResponse
@@ -852,7 +463,6 @@ class OrderBoardController extends Controller
         /** @var User $user */
         $user = $request->user();
         $this->ensurePanelAccess($user, $tenant);
-        $this->ensureOperationalWriteAccess($tenant->id);
 
         $validated = $request->validate([
             'amount' => ['nullable', 'integer', 'min:1'],
@@ -862,96 +472,16 @@ class OrderBoardController extends Controller
             'quick_action' => ['nullable', 'string', 'in:full,half,fixed_10000'],
         ]);
 
-        $ownerMode = $this->isOwner($user);
-        $allowedOutletIds = $this->allowedOutletIds($user, $tenant->id);
-
-        $query = Order::query()->where('tenant_id', $tenant->id);
-
-        if (! $ownerMode) {
-            $query->whereIn('outlet_id', $allowedOutletIds);
-        }
-
-        $orderRow = $query->where('id', $order)->firstOrFail();
-        $quickAction = (string) ($validated['quick_action'] ?? '');
-        $amountInput = $validated['amount'] ?? null;
-        $amountToPay = null;
-
-        if ($quickAction !== '') {
-            $dueAmount = (int) $orderRow->due_amount;
-
-            if ($dueAmount <= 0) {
-                throw ValidationException::withMessages([
-                    'payment' => ['Pesanan sudah lunas, tidak perlu quick payment tambahan.'],
-                ]);
-            }
-
-            $amountToPay = match ($quickAction) {
-                'full' => $dueAmount,
-                'half' => max((int) ceil($dueAmount / 2), 1),
-                'fixed_10000' => min(10000, $dueAmount),
-                default => null,
-            };
-        }
-
-        if (! is_int($amountToPay)) {
-            if (! is_numeric($amountInput)) {
-                throw ValidationException::withMessages([
-                    'amount' => ['Jumlah pembayaran wajib diisi.'],
-                ]);
-            }
-
-            $amountToPay = (int) $amountInput;
-        }
-
-        $payment = DB::transaction(function () use ($validated, $orderRow, $user, $amountToPay): Payment {
-            $payment = Payment::query()->create([
-                'order_id' => $orderRow->id,
-                'amount' => $amountToPay,
-                'method' => trim((string) $validated['method']),
-                'paid_at' => filled($validated['paid_at'] ?? null)
-                    ? Carbon::parse((string) $validated['paid_at'])
-                    : now(),
-                'notes' => filled($validated['notes'] ?? null)
-                    ? trim((string) $validated['notes'])
-                    : null,
-                'created_by' => $user->id,
-                'updated_by' => $user->id,
-                'source_channel' => 'web',
-            ]);
-
-            $paidAmount = (int) Payment::query()
-                ->where('order_id', $orderRow->id)
-                ->sum('amount');
-
-            $orderRow->forceFill([
-                'paid_amount' => $paidAmount,
-                'due_amount' => max((int) $orderRow->total_amount - $paidAmount, 0),
-                'updated_by' => $user->id,
-                'source_channel' => 'web',
-            ])->save();
-
-            return $payment;
-        });
-
-        $this->auditTrail->record(
-            eventKey: AuditEventKeys::PAYMENT_ADDED,
-            actor: $user,
-            tenantId: $tenant->id,
-            outletId: $orderRow->outlet_id,
-            entityType: 'payment',
-            entityId: $payment->id,
-            metadata: [
-                'order_id' => $orderRow->id,
-                'amount' => $payment->amount,
-                'method' => $payment->method,
-            ],
-            channel: 'web',
+        $orderRow = $this->findScopedOrder($user, $tenant, $order);
+        $this->orderWorkflow->addPayment(
+            order: $orderRow,
+            user: $user,
+            tenant: $tenant,
+            validated: $validated,
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.orders.show', ['order' => $orderRow->id])
-            ->with('status', 'Pembayaran berhasil ditambahkan ke transaksi.');
+        return $this->redirectToFilamentOrderView($orderRow, 'Pembayaran berhasil ditambahkan ke transaksi.');
     }
 
     public function bulkUpdate(Request $request, Tenant $tenant): RedirectResponse
@@ -1158,9 +688,7 @@ class OrderBoardController extends Controller
             ];
         }
 
-        return redirect()
-            ->route('tenant.orders.index')
-            ->with('status', sprintf(
+        return $this->redirectToFilamentOrderIndex(sprintf(
                 'Bulk %s selesai: %d updated, %d skipped.',
                 $validated['action'],
                 $updated,
@@ -1548,97 +1076,6 @@ class OrderBoardController extends Controller
     }
 
     /**
-     * @param  array<int, string>  $steps
-     * @return array<int, array{key: string, label: string, state: string}>
-     */
-    private function buildTimeline(array $steps, ?string $current): array
-    {
-        $currentIndex = array_search((string) $current, $steps, true);
-        $hasCurrent = $currentIndex !== false;
-
-        return collect($steps)
-            ->map(function (string $step, int $index) use ($hasCurrent, $currentIndex): array {
-                $state = 'todo';
-
-                if ($hasCurrent) {
-                    if ($index < $currentIndex) {
-                        $state = 'done';
-                    } elseif ($index === $currentIndex) {
-                        $state = 'current';
-                    }
-                }
-
-                return [
-                    'key' => $step,
-                    'label' => str_replace('_', ' ', ucfirst($step)),
-                    'state' => $state,
-                ];
-            })
-            ->all();
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function allowedLaundryStatusesForCurrent(string $currentStatus): array
-    {
-        return match ($currentStatus) {
-            'received' => ['received', 'washing'],
-            'washing' => ['washing', 'drying'],
-            'drying' => ['drying', 'ironing'],
-            'ironing' => ['ironing', 'ready'],
-            'ready' => ['ready', 'completed'],
-            'completed' => ['completed'],
-            default => ['received'],
-        };
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function allowedCourierStatusesForCurrent(string $currentStatus, string $laundryStatus, bool $requiresPickup, bool $requiresDelivery): array
-    {
-        if (! $requiresPickup && ! $requiresDelivery) {
-            return [];
-        }
-
-        if ($currentStatus === 'at_outlet' && $requiresDelivery && ! in_array($laundryStatus, ['ready', 'completed'], true)) {
-            return ['at_outlet'];
-        }
-
-        if ($requiresPickup && $requiresDelivery) {
-            return match ($currentStatus) {
-                'pickup_pending' => ['pickup_pending', 'pickup_on_the_way'],
-                'pickup_on_the_way' => ['pickup_on_the_way', 'picked_up'],
-                'picked_up' => in_array($laundryStatus, ['ready', 'completed'], true) ? ['picked_up', 'delivery_pending'] : ['picked_up'],
-                'at_outlet' => in_array($laundryStatus, ['ready', 'completed'], true) ? ['at_outlet', 'delivery_pending'] : ['at_outlet'],
-                'delivery_pending' => ['delivery_pending', 'delivery_on_the_way'],
-                'delivery_on_the_way' => ['delivery_on_the_way', 'delivered'],
-                'delivered' => ['delivered'],
-                default => ['pickup_pending'],
-            };
-        }
-
-        if ($requiresPickup) {
-            return match ($currentStatus) {
-                'pickup_pending' => ['pickup_pending', 'pickup_on_the_way'],
-                'pickup_on_the_way' => ['pickup_on_the_way', 'picked_up'],
-                'picked_up' => ['picked_up'],
-                'at_outlet' => ['at_outlet'],
-                default => ['pickup_pending'],
-            };
-        }
-
-        return match ($currentStatus) {
-            'at_outlet' => in_array($laundryStatus, ['ready', 'completed'], true) ? ['at_outlet', 'delivery_pending'] : ['at_outlet'],
-            'delivery_pending' => ['delivery_pending', 'delivery_on_the_way'],
-            'delivery_on_the_way' => ['delivery_on_the_way', 'delivered'],
-            'delivered' => ['delivered'],
-            default => ['at_outlet'],
-        };
-    }
-
-    /**
      * @param  array<string, mixed>  $validated
      * @return array{0: bool, 1: bool, 2: bool}
      */
@@ -1828,5 +1265,54 @@ class OrderBoardController extends Controller
     private function generateOrderCode(): string
     {
         return 'ORD-'.strtoupper(Str::random(8));
+    }
+
+    protected function scopedOrdersQuery(User $user, Tenant $tenant, array $with = []): Builder
+    {
+        $query = Order::query()
+            ->where('tenant_id', $tenant->id);
+
+        if ($with !== []) {
+            $query->with($with);
+        }
+
+        if (! $this->isOwner($user)) {
+            $query->whereIn('outlet_id', $this->allowedOutletIds($user, $tenant->id));
+        }
+
+        return $query;
+    }
+
+    protected function findScopedOrder(User $user, Tenant $tenant, string $orderId, array $with = []): Order
+    {
+        return $this->scopedOrdersQuery($user, $tenant, $with)
+            ->where('id', $orderId)
+            ->firstOrFail();
+    }
+
+    protected function scopedCourierQuery(User $user, Tenant $tenant, ?string $outletId = null): Builder
+    {
+        $query = User::query()
+            ->with('roles:id,key')
+            ->where('tenant_id', $tenant->id)
+            ->where('status', 'active');
+
+        if (! $this->isOwner($user) && filled($outletId)) {
+            $query->whereHas('outlets', fn (Builder $builder) => $builder->where('outlets.id', $outletId));
+        }
+
+        return $query;
+    }
+
+    private function redirectToFilamentOrderView(Order $order, string $status): RedirectResponse
+    {
+        return redirect(OrderResource::getUrl(name: 'view', parameters: ['record' => $order], panel: 'tenant'))
+            ->with('status', $status);
+    }
+
+    private function redirectToFilamentOrderIndex(string $status): RedirectResponse
+    {
+        return redirect(OrderResource::getUrl(name: 'index', panel: 'tenant'))
+            ->with('status', $status);
     }
 }

@@ -9,7 +9,6 @@ use App\Domain\Billing\PlanFeatureGateService;
 use App\Domain\Messaging\Contracts\WaProviderDriver;
 use App\Domain\Messaging\WaProviderException;
 use App\Domain\Messaging\WaProviderRegistry;
-use App\Filament\Pages\WhatsApp as WhatsAppPage;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Web\Concerns\EnsuresWebPanelAccess;
 use App\Models\Tenant;
@@ -29,16 +28,6 @@ class WaSettingsController extends Controller
         private readonly WaProviderRegistry $providerRegistry,
         private readonly AuditTrailService $auditTrail,
     ) {
-    }
-
-    public function index(Request $request, Tenant $tenant): RedirectResponse
-    {
-        /** @var User $user */
-        $user = $request->user();
-        $this->ensurePanelAccess($user, $tenant);
-        $this->ensureWaEnabled($tenant);
-
-        return redirect(WhatsAppPage::getUrl(panel: 'tenant'));
     }
 
     public function upsertProviderConfig(Request $request, Tenant $tenant): RedirectResponse

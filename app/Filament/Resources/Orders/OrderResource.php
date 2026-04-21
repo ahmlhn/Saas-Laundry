@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Orders;
 
+use App\Domain\Orders\OrderWorkflowService;
 use App\Filament\Resources\Orders\Pages\EditOrder;
 use App\Filament\Resources\Orders\Pages\ListOrders;
 use App\Filament\Resources\Orders\Pages\ViewOrder;
@@ -9,11 +10,14 @@ use App\Filament\Support\TenantPanelAccess;
 use App\Models\Order;
 use App\Models\User;
 use BackedEnum;
+use Filament\Actions\BulkAction;
+use Filament\Actions\BulkActionGroup;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
+use Filament\Notifications\Notification;
 use Filament\Infolists\Components\KeyValueEntry;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
@@ -25,6 +29,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use UnitEnum;
 
@@ -320,6 +325,44 @@ class OrderResource extends Resource
                 ViewAction::make(),
                 EditAction::make(),
             ])
+            ->toolbarActions([
+                BulkActionGroup::make([
+                    static::makeLaundryBulkAction(
+                        name: 'markReady',
+                        label: 'Bulk Ready',
+                        targetStatus: 'ready',
+                        actionKey: 'filament-bulk-mark-ready',
+                        color: 'warning',
+                    ),
+                    static::makeLaundryBulkAction(
+                        name: 'markCompleted',
+                        label: 'Bulk Completed',
+                        targetStatus: 'completed',
+                        actionKey: 'filament-bulk-mark-completed',
+                        color: 'success',
+                    ),
+                    static::makeCourierBulkAction(
+                        name: 'bulkDeliveryPending',
+                        label: 'Bulk Delivery Pending',
+                        targetStatus: 'delivery_pending',
+                        actionKey: 'filament-bulk-delivery-pending',
+                    ),
+                    static::makeCourierBulkAction(
+                        name: 'bulkDeliveryOtw',
+                        label: 'Bulk Delivery OTW',
+                        targetStatus: 'delivery_on_the_way',
+                        actionKey: 'filament-bulk-delivery-otw',
+                    ),
+                    static::makeCourierBulkAction(
+                        name: 'bulkDelivered',
+                        label: 'Bulk Delivered',
+                        targetStatus: 'delivered',
+                        actionKey: 'filament-bulk-delivered',
+                        color: 'success',
+                    ),
+                    static::makeAssignCourierBulkAction(),
+                ]),
+            ])
             ->defaultSort('created_at', 'desc');
     }
 
@@ -364,5 +407,208 @@ class OrderResource extends Resource
         }
 
         return $query;
+    }
+
+    protected static function makeLaundryBulkAction(
+        string $name,
+        string $label,
+        string $targetStatus,
+        string $actionKey,
+        string $color = 'gray',
+    ): BulkAction {
+        return BulkAction::make($name)
+            ->label($label)
+            ->color($color)
+            ->requiresConfirmation()
+            ->action(function (EloquentCollection $records) use ($label, $targetStatus, $actionKey): void {
+                [$tenant, $user] = static::tenantContext();
+                $service = app(OrderWorkflowService::class);
+                $updated = 0;
+                $skipped = 0;
+                $messages = [];
+
+                foreach ($records as $record) {
+                    /** @var Order $record */
+                    $result = $service->updateLaundryStatus(
+                        order: $record,
+                        user: $user,
+                        tenant: $tenant,
+                        targetStatus: $targetStatus,
+                        request: request(),
+                        actionKey: $actionKey,
+                        isBulkAction: true,
+                    );
+
+                    if ($result['updated']) {
+                        $updated++;
+                        continue;
+                    }
+
+                    $skipped++;
+                    if (count($messages) < 3) {
+                        $messages[] = static::bulkRecordLabel($record).': '.$result['reason_label'];
+                    }
+                }
+
+                static::notifyBulkResult($label, $updated, $skipped, $messages);
+            });
+    }
+
+    protected static function makeCourierBulkAction(
+        string $name,
+        string $label,
+        string $targetStatus,
+        string $actionKey,
+        string $color = 'info',
+    ): BulkAction {
+        return BulkAction::make($name)
+            ->label($label)
+            ->color($color)
+            ->requiresConfirmation()
+            ->action(function (EloquentCollection $records) use ($label, $targetStatus, $actionKey): void {
+                [$tenant, $user] = static::tenantContext();
+                $service = app(OrderWorkflowService::class);
+                $updated = 0;
+                $skipped = 0;
+                $messages = [];
+
+                foreach ($records as $record) {
+                    /** @var Order $record */
+                    $result = $service->updateCourierStatus(
+                        order: $record,
+                        user: $user,
+                        tenant: $tenant,
+                        targetStatus: $targetStatus,
+                        request: request(),
+                        actionKey: $actionKey,
+                        isBulkAction: true,
+                    );
+
+                    if ($result['updated']) {
+                        $updated++;
+                        continue;
+                    }
+
+                    $skipped++;
+                    if (count($messages) < 3) {
+                        $messages[] = static::bulkRecordLabel($record).': '.$result['reason_label'];
+                    }
+                }
+
+                static::notifyBulkResult($label, $updated, $skipped, $messages);
+            });
+    }
+
+    protected static function makeAssignCourierBulkAction(): BulkAction
+    {
+        return BulkAction::make('assignCourier')
+            ->label('Bulk Assign Courier')
+            ->color('gray')
+            ->requiresConfirmation()
+            ->form([
+                Select::make('courier_user_id')
+                    ->label('Kurir')
+                    ->options(static::courierBulkOptions())
+                    ->required()
+                    ->native(false)
+                    ->searchable(),
+            ])
+            ->action(function (EloquentCollection $records, array $data): void {
+                [$tenant, $user] = static::tenantContext();
+                $service = app(OrderWorkflowService::class);
+                $courierUserId = (int) $data['courier_user_id'];
+                $courier = User::query()
+                    ->with('roles:id,key')
+                    ->where('tenant_id', $tenant->id)
+                    ->where('status', 'active')
+                    ->where('id', $courierUserId)
+                    ->first();
+
+                $updated = 0;
+                $skipped = 0;
+                $messages = [];
+
+                foreach ($records as $record) {
+                    /** @var Order $record */
+                    $result = $service->assignCourier(
+                        order: $record,
+                        user: $user,
+                        tenant: $tenant,
+                        targetCourier: $courier,
+                        courierUserId: $courierUserId,
+                        request: request(),
+                        actionKey: 'filament-bulk-assign-courier',
+                        isBulkAction: true,
+                    );
+
+                    if ($result['updated']) {
+                        $updated++;
+                        continue;
+                    }
+
+                    $skipped++;
+                    if (count($messages) < 3) {
+                        $messages[] = static::bulkRecordLabel($record).': '.$result['reason_label'];
+                    }
+                }
+
+                static::notifyBulkResult('Bulk Assign Courier', $updated, $skipped, $messages);
+            });
+    }
+
+    /**
+     * @return array{0: \App\Models\Tenant, 1: \App\Models\User}
+     */
+    protected static function tenantContext(): array
+    {
+        $tenant = TenantPanelAccess::tenant();
+        $user = TenantPanelAccess::user();
+
+        abort_unless($tenant && $user instanceof User, 403);
+
+        return [$tenant, $user];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected static function courierBulkOptions(): array
+    {
+        [$tenant, $user] = static::tenantContext();
+
+        return collect(app(OrderWorkflowService::class)->courierOptionsFor($user, $tenant))
+            ->mapWithKeys(fn (array $courier): array => [
+                $courier['id'] => $courier['name'],
+            ])
+            ->all();
+    }
+
+    protected static function bulkRecordLabel(Order $record): string
+    {
+        return (string) ($record->invoice_no ?: $record->order_code ?: $record->id);
+    }
+
+    /**
+     * @param  array<int, string>  $messages
+     */
+    protected static function notifyBulkResult(string $label, int $updated, int $skipped, array $messages = []): void
+    {
+        $body = sprintf('Updated: %d. Skipped: %d.', $updated, $skipped);
+
+        if ($messages !== []) {
+            $body .= "\n".implode("\n", $messages);
+        }
+
+        $notification = Notification::make()
+            ->title($label)
+            ->body($body);
+
+        if ($skipped === 0) {
+            $notification->success();
+        } else {
+            $notification->warning();
+        }
+
+        $notification->send();
     }
 }

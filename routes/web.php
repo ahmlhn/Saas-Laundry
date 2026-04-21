@@ -1,9 +1,17 @@
 <?php
 
 use App\Filament\Pages\Billing as BillingPage;
+use App\Filament\Pages\OrderCreate;
 use App\Filament\Pages\Subscription as SubscriptionPage;
 use App\Filament\Pages\WhatsApp as WhatsAppPage;
+use App\Filament\Platform\Pages\PlatformSubscriptions;
+use App\Filament\Resources\Customers\CustomerResource;
+use App\Filament\Resources\Orders\OrderResource;
 use App\Filament\Resources\OutletServices\OutletServiceResource;
+use App\Filament\Resources\Outlets\OutletResource;
+use App\Filament\Resources\Services\ServiceResource;
+use App\Filament\Resources\ShippingZones\ShippingZoneResource;
+use App\Filament\Resources\Users\UserResource;
 use App\Http\Controllers\Web\AuthController as WebAuthController;
 use App\Http\Controllers\Web\BillingController;
 use App\Http\Controllers\Web\CustomerTrackingController;
@@ -11,7 +19,6 @@ use App\Http\Controllers\Web\ManagementController;
 use App\Http\Controllers\Web\MobileReleaseController as WebMobileReleaseController;
 use App\Http\Controllers\Web\OrderBoardController;
 use App\Http\Controllers\Web\SubscriptionController;
-use App\Http\Controllers\Web\Platform\AuthController as PlatformAuthController;
 use App\Http\Controllers\Web\Platform\MobileReleaseController as PlatformMobileReleaseController;
 use App\Http\Controllers\Web\Platform\SubscriptionController as PlatformSubscriptionController;
 use App\Http\Controllers\Web\WaSettingsController;
@@ -47,9 +54,9 @@ Route::middleware(['auth', 'tenant.path'])->group(function (): void {
     Route::delete('/subscription/change-request/{changeRequestId}', [SubscriptionController::class, 'cancelChangeRequest'])->name('tenant.subscription.change-request.cancel');
     Route::post('/subscription/invoices/{invoiceId}/qris-intent', [SubscriptionController::class, 'createQrisIntent'])->name('tenant.subscription.invoices.qris-intent');
     Route::post('/subscription/invoices/{invoiceId}/proof', [SubscriptionController::class, 'uploadProof'])->name('tenant.subscription.invoices.proof.upload');
-    Route::get('/orders', [OrderBoardController::class, 'index'])->name('tenant.orders.index');
+    Route::get('/orders', fn () => redirect(OrderResource::getUrl(name: 'index', panel: 'tenant')))->name('tenant.orders.index');
     Route::get('/orders/export', [OrderBoardController::class, 'export'])->name('tenant.orders.export');
-    Route::get('/orders/create', [OrderBoardController::class, 'create'])->name('tenant.orders.create');
+    Route::get('/orders/create', fn () => redirect(OrderCreate::getUrl(panel: 'tenant')))->name('tenant.orders.create');
     Route::post('/orders', [OrderBoardController::class, 'store'])->name('tenant.orders.store');
     Route::post('/orders/bulk-update', [OrderBoardController::class, 'bulkUpdate'])->name('tenant.orders.bulk-update');
     Route::post('/orders/{order}/payments', [OrderBoardController::class, 'addPayment'])->name('tenant.orders.payments.store');
@@ -57,27 +64,27 @@ Route::middleware(['auth', 'tenant.path'])->group(function (): void {
     Route::post('/orders/{order}/status/courier', [OrderBoardController::class, 'updateCourierStatus'])->name('tenant.orders.status.courier');
     Route::post('/orders/{order}/assign-courier', [OrderBoardController::class, 'assignCourier'])->name('tenant.orders.assign-courier');
     Route::get('/orders/{order}/receipt', [OrderBoardController::class, 'receipt'])->name('tenant.orders.receipt');
-    Route::get('/orders/{order}', [OrderBoardController::class, 'show'])->name('tenant.orders.show');
-    Route::get('/users', [ManagementController::class, 'users'])->name('tenant.users.index');
+    Route::get('/orders/{order}', fn (string $order) => redirect(OrderResource::getUrl(name: 'view', parameters: ['record' => $order], panel: 'tenant')))->name('tenant.orders.show');
+    Route::get('/users', fn () => redirect(UserResource::getUrl(name: 'index', panel: 'tenant')))->name('tenant.users.index');
     Route::post('/users/invite', [ManagementController::class, 'storeUser'])->name('tenant.users.store');
     Route::post('/users/{managedUser}/assignment', [ManagementController::class, 'updateUserAssignment'])->name('tenant.users.assignment');
     Route::post('/users/{managedUser}/archive', [ManagementController::class, 'archiveUser'])->name('tenant.users.archive');
     Route::post('/users/{managedUser}/restore', [ManagementController::class, 'restoreUser'])->name('tenant.users.restore');
-    Route::get('/customers', [ManagementController::class, 'customers'])->name('tenant.customers.index');
+    Route::get('/customers', fn () => redirect(CustomerResource::getUrl(name: 'index', panel: 'tenant')))->name('tenant.customers.index');
     Route::post('/customers', [ManagementController::class, 'storeCustomer'])->name('tenant.customers.store');
     Route::post('/customers/{customer}/update', [ManagementController::class, 'updateCustomer'])->name('tenant.customers.update');
     Route::post('/customers/{customer}/archive', [ManagementController::class, 'archiveCustomer'])->name('tenant.customers.archive');
     Route::post('/customers/{customer}/restore', [ManagementController::class, 'restoreCustomer'])->name('tenant.customers.restore');
-    Route::get('/services', [ManagementController::class, 'services'])->name('tenant.services.index');
+    Route::get('/services', fn () => redirect(ServiceResource::getUrl(name: 'index', panel: 'tenant')))->name('tenant.services.index');
     Route::post('/services/{service}/archive', [ManagementController::class, 'archiveService'])->name('tenant.services.archive');
     Route::post('/services/{service}/restore', [ManagementController::class, 'restoreService'])->name('tenant.services.restore');
     Route::get('/outlet-services', fn () => redirect(OutletServiceResource::getUrl(name: 'index', panel: 'tenant')))->name('tenant.outlet-services.index');
     Route::post('/outlet-services/upsert', [ManagementController::class, 'upsertOutletService'])->name('tenant.outlet-services.upsert');
     Route::post('/outlet-services/{outletService}/update', [ManagementController::class, 'updateOutletService'])->name('tenant.outlet-services.update');
-    Route::get('/outlets', [ManagementController::class, 'outlets'])->name('tenant.outlets.index');
+    Route::get('/outlets', fn () => redirect(OutletResource::getUrl(name: 'index', panel: 'tenant')))->name('tenant.outlets.index');
     Route::post('/outlets/{outlet}/archive', [ManagementController::class, 'archiveOutlet'])->name('tenant.outlets.archive');
     Route::post('/outlets/{outlet}/restore', [ManagementController::class, 'restoreOutlet'])->name('tenant.outlets.restore');
-    Route::get('/shipping-zones', [ManagementController::class, 'shippingZones'])->name('tenant.shipping-zones.index');
+    Route::get('/shipping-zones', fn () => redirect(ShippingZoneResource::getUrl(name: 'index', panel: 'tenant')))->name('tenant.shipping-zones.index');
     Route::post('/shipping-zones', [ManagementController::class, 'storeShippingZone'])->name('tenant.shipping-zones.store');
     Route::post('/shipping-zones/{zone}/update', [ManagementController::class, 'updateShippingZone'])->name('tenant.shipping-zones.update');
     Route::post('/shipping-zones/{zone}/deactivate', [ManagementController::class, 'deactivateShippingZone'])->name('tenant.shipping-zones.deactivate');
@@ -88,20 +95,21 @@ Route::middleware(['auth', 'tenant.path'])->group(function (): void {
 });
 
 Route::prefix('platform')->group(function (): void {
-    Route::middleware('guest')->group(function (): void {
-        Route::get('/login', [PlatformAuthController::class, 'create'])->name('platform.login');
-        Route::post('/login', [PlatformAuthController::class, 'store'])->name('platform.login.store');
-    });
+    Route::get('/', function () {
+        $user = request()->user();
+
+        if ($user && $user->tenant_id === null && $user->hasAnyRole(['platform_owner', 'platform_billing'])) {
+            return redirect(PlatformSubscriptions::getUrl(panel: 'platform'));
+        }
+
+        return redirect('/platform/login');
+    })->name('platform.index');
 
     Route::middleware(['auth', 'platform.web'])->group(function (): void {
-        Route::post('/logout', [PlatformAuthController::class, 'destroy'])->name('platform.logout');
-
-        Route::get('/subscriptions', [PlatformSubscriptionController::class, 'index'])->name('platform.subscriptions.index');
-        Route::get('/subscriptions/tenants/{tenant}', [PlatformSubscriptionController::class, 'show'])->name('platform.subscriptions.show');
+        // Compatibility adapters for legacy POST integrations while the platform UI lives in Filament.
         Route::post('/subscriptions/invoices/{invoiceId}/verify', [PlatformSubscriptionController::class, 'verifyInvoice'])->name('platform.subscriptions.invoices.verify');
         Route::post('/subscriptions/tenants/{tenant}/suspend', [PlatformSubscriptionController::class, 'suspendTenant'])->name('platform.subscriptions.tenants.suspend');
         Route::post('/subscriptions/tenants/{tenant}/activate', [PlatformSubscriptionController::class, 'activateTenant'])->name('platform.subscriptions.tenants.activate');
-        Route::get('/mobile-release', [PlatformMobileReleaseController::class, 'edit'])->name('platform.mobile-release.edit');
         Route::post('/mobile-release', [PlatformMobileReleaseController::class, 'update'])->name('platform.mobile-release.update');
     });
 });

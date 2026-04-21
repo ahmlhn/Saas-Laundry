@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Web;
 use App\Domain\Audit\AuditEventKeys;
 use App\Domain\Audit\AuditTrailService;
 use App\Domain\Billing\QuotaService;
-use App\Filament\Pages\Billing as BillingPage;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Web\Concerns\EnsuresWebPanelAccess;
 use App\Models\Order;
@@ -41,15 +40,6 @@ class BillingController extends Controller
         private readonly QuotaService $quotaService,
         private readonly AuditTrailService $auditTrailService,
     ) {
-    }
-
-    public function index(Request $request, Tenant $tenant): RedirectResponse
-    {
-        /** @var User $user */
-        $user = $request->user();
-        $this->ensurePanelAccess($user, $tenant);
-
-        return redirect(BillingPage::getUrl(panel: 'tenant'));
     }
 
     public function export(Request $request, Tenant $tenant): StreamedResponse

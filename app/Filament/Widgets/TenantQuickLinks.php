@@ -3,6 +3,7 @@
 namespace App\Filament\Widgets;
 
 use App\Filament\Pages\Billing;
+use App\Filament\Pages\OrderCreate;
 use App\Filament\Pages\Subscription;
 use App\Filament\Pages\WhatsApp;
 use App\Filament\Resources\OutletServices\OutletServiceResource;
@@ -19,8 +20,8 @@ class TenantQuickLinks extends Widget
         $links = [
             [
                 'title' => 'Buat Order Baru',
-                'description' => 'Masuk ke flow order detail yang lama untuk input item dan pickup/delivery.',
-                'url' => route('tenant.orders.create'),
+                'description' => 'Input transaksi baru lewat panel Filament.',
+                'url' => OrderCreate::getUrl(panel: 'tenant'),
             ],
             [
                 'title' => 'Billing',

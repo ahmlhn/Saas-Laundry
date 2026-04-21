@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Filament\Platform\Pages\PlatformMobileRelease;
 use App\Models\MobileReleaseSetting;
 use App\Models\Role;
 use App\Models\User;
@@ -53,7 +54,7 @@ class PlatformMobileReleaseWebTest extends TestCase
                 'file_size_bytes' => '18432000',
                 'release_notes' => "Perbaikan startup\nOptimasi customer list",
             ])
-            ->assertRedirect(route('platform.mobile-release.edit'));
+            ->assertRedirect(PlatformMobileRelease::getUrl(panel: 'platform'));
 
         $this->assertDatabaseHas('mobile_release_settings', [
             'platform' => 'android',
@@ -83,7 +84,7 @@ class PlatformMobileReleaseWebTest extends TestCase
                 'apk_file' => UploadedFile::fake()->create('cuci-1.5.0.apk', 20480, 'application/vnd.android.package-archive'),
                 'release_notes' => "Upload APK otomatis",
             ])
-            ->assertRedirect(route('platform.mobile-release.edit'));
+            ->assertRedirect(PlatformMobileRelease::getUrl(panel: 'platform'));
 
         $setting = MobileReleaseSetting::query()->where('platform', 'android')->firstOrFail();
 
@@ -93,6 +94,71 @@ class PlatformMobileReleaseWebTest extends TestCase
         $this->assertStringContainsString('/storage/mobile-releases/android/', (string) $setting->download_url);
 
         Storage::disk('public')->assertExists($setting->uploaded_file_path);
+    }
+
+    public function test_platform_owner_can_replace_existing_managed_apk_upload(): void
+    {
+        $this->actingAs($this->platformOwner, 'web')
+            ->post('/platform/mobile-release', [
+                'version' => '1.5.0',
+                'build' => '15',
+                'apk_file' => UploadedFile::fake()->create('cuci-1.5.0.apk', 10240, 'application/vnd.android.package-archive'),
+                'release_notes' => "Rilis pertama",
+            ])
+            ->assertRedirect(PlatformMobileRelease::getUrl(panel: 'platform'));
+
+        $firstSetting = MobileReleaseSetting::query()->where('platform', 'android')->firstOrFail();
+        $firstPath = (string) $firstSetting->uploaded_file_path;
+        Storage::disk('public')->assertExists($firstPath);
+
+        $this->actingAs($this->platformOwner, 'web')
+            ->post('/platform/mobile-release', [
+                'version' => '1.5.1',
+                'build' => '16',
+                'apk_file' => UploadedFile::fake()->create('cuci-1.5.1.apk', 15360, 'application/vnd.android.package-archive'),
+                'release_notes' => "Rilis kedua",
+            ])
+            ->assertRedirect(PlatformMobileRelease::getUrl(panel: 'platform'));
+
+        $secondSetting = MobileReleaseSetting::query()->where('platform', 'android')->firstOrFail();
+        $secondPath = (string) $secondSetting->uploaded_file_path;
+
+        $this->assertNotSame($firstPath, $secondPath);
+        Storage::disk('public')->assertMissing($firstPath);
+        Storage::disk('public')->assertExists($secondPath);
+    }
+
+    public function test_platform_owner_can_switch_managed_upload_to_manual_download_url(): void
+    {
+        $this->actingAs($this->platformOwner, 'web')
+            ->post('/platform/mobile-release', [
+                'version' => '1.6.0',
+                'build' => '17',
+                'apk_file' => UploadedFile::fake()->create('cuci-1.6.0.apk', 18432, 'application/vnd.android.package-archive'),
+                'release_notes' => "Upload terkelola",
+            ])
+            ->assertRedirect(PlatformMobileRelease::getUrl(panel: 'platform'));
+
+        $managedSetting = MobileReleaseSetting::query()->where('platform', 'android')->firstOrFail();
+        $managedPath = (string) $managedSetting->uploaded_file_path;
+        Storage::disk('public')->assertExists($managedPath);
+
+        $this->actingAs($this->platformOwner, 'web')
+            ->post('/platform/mobile-release', [
+                'version' => '1.6.1',
+                'build' => '18',
+                'download_url' => 'https://downloads.example.com/cuci-1.6.1.apk',
+                'release_notes' => "Pindah ke CDN manual",
+            ])
+            ->assertRedirect(PlatformMobileRelease::getUrl(panel: 'platform'));
+
+        $updatedSetting = MobileReleaseSetting::query()->where('platform', 'android')->firstOrFail();
+
+        $this->assertNull($updatedSetting->uploaded_file_path);
+        $this->assertNull($updatedSetting->uploaded_file_disk);
+        $this->assertNull($updatedSetting->uploaded_original_name);
+        $this->assertSame('https://downloads.example.com/cuci-1.6.1.apk', $updatedSetting->download_url);
+        Storage::disk('public')->assertMissing($managedPath);
     }
 
     public function test_platform_billing_can_view_but_cannot_update_mobile_release_settings(): void

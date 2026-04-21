@@ -31,16 +31,6 @@ class SubscriptionController extends Controller
     ) {
     }
 
-    public function index(Request $request, Tenant $tenant): RedirectResponse
-    {
-        /** @var User $user */
-        $user = $request->user();
-        $this->ensurePanelAccess($user, $tenant);
-        $this->ensureOwnerOnly($user);
-
-        return redirect(SubscriptionPage::getUrl(panel: 'tenant'));
-    }
-
     public function storeChangeRequest(Request $request, Tenant $tenant): RedirectResponse
     {
         /** @var User $user */
@@ -112,9 +102,7 @@ class SubscriptionController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.subscription.index')
-            ->with('status', 'Request perubahan paket berhasil dibuat.');
+        return $this->redirectToSubscriptionPage('Request perubahan paket berhasil dibuat.');
     }
 
     public function cancelChangeRequest(Request $request, Tenant $tenant, string $changeRequestId): RedirectResponse
@@ -154,9 +142,7 @@ class SubscriptionController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.subscription.index')
-            ->with('status', 'Request perubahan paket dibatalkan.');
+        return $this->redirectToSubscriptionPage('Request perubahan paket dibatalkan.');
     }
 
     public function createQrisIntent(Request $request, Tenant $tenant, string $invoiceId): RedirectResponse
@@ -191,9 +177,7 @@ class SubscriptionController extends Controller
             ]);
         }
 
-        return redirect()
-            ->route('tenant.subscription.index')
-            ->with('status', 'QRIS intent berhasil dibuat.');
+        return $this->redirectToSubscriptionPage('QRIS intent berhasil dibuat.');
     }
 
     public function uploadProof(Request $request, Tenant $tenant, string $invoiceId): RedirectResponse
@@ -276,9 +260,7 @@ class SubscriptionController extends Controller
             request: $request,
         );
 
-        return redirect()
-            ->route('tenant.subscription.index')
-            ->with('status', 'Bukti bayar berhasil diunggah, menunggu verifikasi platform.');
+        return $this->redirectToSubscriptionPage('Bukti bayar berhasil diunggah, menunggu verifikasi platform.');
     }
 
     private function ensureOwnerOnly(User $user): void
@@ -288,5 +270,11 @@ class SubscriptionController extends Controller
         }
 
         abort(403, 'Only owner can manage tenant subscription.');
+    }
+
+    private function redirectToSubscriptionPage(string $status): RedirectResponse
+    {
+        return redirect(SubscriptionPage::getUrl(panel: 'tenant'))
+            ->with('status', $status);
     }
 }

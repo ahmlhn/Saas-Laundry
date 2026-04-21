@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Filament\Resources\Orders\OrderResource;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Outlet;
@@ -128,35 +129,37 @@ class WebTransactionFlowTest extends TestCase
             ->where('order_code', 'ORD-WEB-FLOW-001')
             ->firstOrFail();
 
-        $createResponse->assertRedirect(route('tenant.orders.show', ['order' => $order->id]));
+        $orderViewUrl = OrderResource::getUrl(name: 'view', parameters: ['record' => $order], panel: 'tenant');
+
+        $createResponse->assertRedirect($orderViewUrl);
 
         $this->actingAs($this->adminA, 'web')
             ->post('/orders/'.$order->id.'/payments', [
                 'method' => 'cash',
                 'quick_action' => 'full',
             ])
-            ->assertRedirect(route('tenant.orders.show', ['order' => $order->id]));
+            ->assertRedirect($orderViewUrl);
 
         foreach (['washing', 'drying', 'ironing', 'ready'] as $status) {
             $this->actingAs($this->adminA, 'web')
                 ->post('/orders/'.$order->id.'/status/laundry', [
                     'laundry_status' => $status,
                 ])
-                ->assertRedirect(route('tenant.orders.show', ['order' => $order->id]));
+                ->assertRedirect($orderViewUrl);
         }
 
         $this->actingAs($this->adminA, 'web')
             ->post('/orders/'.$order->id.'/assign-courier', [
                 'courier_user_id' => $this->courierA->id,
             ])
-            ->assertRedirect(route('tenant.orders.show', ['order' => $order->id]));
+            ->assertRedirect($orderViewUrl);
 
         foreach (['pickup_on_the_way', 'picked_up', 'at_outlet', 'delivery_pending', 'delivery_on_the_way', 'delivered'] as $status) {
             $this->actingAs($this->adminA, 'web')
                 ->post('/orders/'.$order->id.'/status/courier', [
                     'courier_status' => $status,
                 ])
-                ->assertRedirect(route('tenant.orders.show', ['order' => $order->id]));
+                ->assertRedirect($orderViewUrl);
         }
 
         $this->assertDatabaseHas('orders', [
@@ -197,28 +200,30 @@ class WebTransactionFlowTest extends TestCase
             ->where('order_code', 'ORD-WEB-FLOW-INVALID-001')
             ->firstOrFail();
 
-        $createResponse->assertRedirect(route('tenant.orders.show', ['order' => $order->id]));
+        $orderViewUrl = OrderResource::getUrl(name: 'view', parameters: ['record' => $order], panel: 'tenant');
+
+        $createResponse->assertRedirect($orderViewUrl);
 
         $this->actingAs($this->adminA, 'web')
-            ->from('/orders/'.$order->id)
+            ->from($orderViewUrl)
             ->post('/orders/'.$order->id.'/status/laundry', [
                 'laundry_status' => 'completed',
             ])
-            ->assertRedirect('/orders/'.$order->id)
+            ->assertRedirect($orderViewUrl)
             ->assertSessionHasErrors('laundry_status');
 
         $this->actingAs($this->adminA, 'web')
             ->post('/orders/'.$order->id.'/status/laundry', [
                 'laundry_status' => 'washing',
             ])
-            ->assertRedirect(route('tenant.orders.show', ['order' => $order->id]));
+            ->assertRedirect($orderViewUrl);
 
         $this->actingAs($this->adminA, 'web')
-            ->from('/orders/'.$order->id)
+            ->from($orderViewUrl)
             ->post('/orders/'.$order->id.'/status/courier', [
                 'courier_status' => 'delivery_pending',
             ])
-            ->assertRedirect('/orders/'.$order->id)
+            ->assertRedirect($orderViewUrl)
             ->assertSessionHasErrors('courier_status');
     }
 
