@@ -1,5 +1,9 @@
 <?php
 
+use App\Filament\Pages\Billing as BillingPage;
+use App\Filament\Pages\Subscription as SubscriptionPage;
+use App\Filament\Pages\WhatsApp as WhatsAppPage;
+use App\Filament\Resources\OutletServices\OutletServiceResource;
 use App\Http\Controllers\Web\AuthController as WebAuthController;
 use App\Http\Controllers\Web\BillingController;
 use App\Http\Controllers\Web\CustomerTrackingController;
@@ -35,10 +39,10 @@ Route::middleware(['auth', 'tenant.path'])->group(function (): void {
     Route::post('/logout', [WebAuthController::class, 'destroy'])->name('tenant.logout');
 
     Route::get('/dashboard', fn () => redirect()->route('filament.tenant.pages.dashboard'))->name('tenant.dashboard');
-    Route::get('/billing', [BillingController::class, 'index'])->name('tenant.billing.index');
+    Route::get('/billing', fn () => redirect(BillingPage::getUrl(panel: 'tenant')))->name('tenant.billing.index');
     Route::get('/billing/export', [BillingController::class, 'export'])->name('tenant.billing.export');
     Route::post('/billing/collections/{order}', [BillingController::class, 'updateCollection'])->name('tenant.billing.collection.update');
-    Route::get('/subscription', [SubscriptionController::class, 'index'])->name('tenant.subscription.index');
+    Route::get('/subscription', fn () => redirect(SubscriptionPage::getUrl(panel: 'tenant')))->name('tenant.subscription.index');
     Route::post('/subscription/change-request', [SubscriptionController::class, 'storeChangeRequest'])->name('tenant.subscription.change-request.store');
     Route::delete('/subscription/change-request/{changeRequestId}', [SubscriptionController::class, 'cancelChangeRequest'])->name('tenant.subscription.change-request.cancel');
     Route::post('/subscription/invoices/{invoiceId}/qris-intent', [SubscriptionController::class, 'createQrisIntent'])->name('tenant.subscription.invoices.qris-intent');
@@ -67,7 +71,7 @@ Route::middleware(['auth', 'tenant.path'])->group(function (): void {
     Route::get('/services', [ManagementController::class, 'services'])->name('tenant.services.index');
     Route::post('/services/{service}/archive', [ManagementController::class, 'archiveService'])->name('tenant.services.archive');
     Route::post('/services/{service}/restore', [ManagementController::class, 'restoreService'])->name('tenant.services.restore');
-    Route::get('/outlet-services', [ManagementController::class, 'outletServices'])->name('tenant.outlet-services.index');
+    Route::get('/outlet-services', fn () => redirect(OutletServiceResource::getUrl(name: 'index', panel: 'tenant')))->name('tenant.outlet-services.index');
     Route::post('/outlet-services/upsert', [ManagementController::class, 'upsertOutletService'])->name('tenant.outlet-services.upsert');
     Route::post('/outlet-services/{outletService}/update', [ManagementController::class, 'updateOutletService'])->name('tenant.outlet-services.update');
     Route::get('/outlets', [ManagementController::class, 'outlets'])->name('tenant.outlets.index');
@@ -79,7 +83,7 @@ Route::middleware(['auth', 'tenant.path'])->group(function (): void {
     Route::post('/shipping-zones/{zone}/deactivate', [ManagementController::class, 'deactivateShippingZone'])->name('tenant.shipping-zones.deactivate');
     Route::post('/shipping-zones/{zone}/activate', [ManagementController::class, 'activateShippingZone'])->name('tenant.shipping-zones.activate');
 
-    Route::get('/wa', [WaSettingsController::class, 'index'])->name('tenant.wa.index');
+    Route::get('/wa', fn () => redirect(WhatsAppPage::getUrl(panel: 'tenant')))->name('tenant.wa.index');
     Route::post('/wa/provider-config', [WaSettingsController::class, 'upsertProviderConfig'])->name('tenant.wa.provider-config');
 });
 

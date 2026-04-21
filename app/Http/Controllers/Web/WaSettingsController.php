@@ -9,19 +9,16 @@ use App\Domain\Billing\PlanFeatureGateService;
 use App\Domain\Messaging\Contracts\WaProviderDriver;
 use App\Domain\Messaging\WaProviderException;
 use App\Domain\Messaging\WaProviderRegistry;
-use App\Domain\Messaging\WaTemplateResolver;
+use App\Filament\Pages\WhatsApp as WhatsAppPage;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Web\Concerns\EnsuresWebPanelAccess;
-use App\Models\Outlet;
 use App\Models\Tenant;
 use App\Models\User;
-use App\Models\WaMessage;
 use App\Models\WaProvider;
 use App\Models\WaProviderConfig;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\View\View;
 
 class WaSettingsController extends Controller
 {
@@ -30,95 +27,18 @@ class WaSettingsController extends Controller
     public function __construct(
         private readonly PlanFeatureGateService $planFeatureGate,
         private readonly WaProviderRegistry $providerRegistry,
-        private readonly WaTemplateResolver $templateResolver,
         private readonly AuditTrailService $auditTrail,
     ) {
     }
 
-    public function index(Request $request, Tenant $tenant): View
+    public function index(Request $request, Tenant $tenant): RedirectResponse
     {
         /** @var User $user */
         $user = $request->user();
         $this->ensurePanelAccess($user, $tenant);
         $this->ensureWaEnabled($tenant);
 
-        $ownerMode = $this->isOwner($user);
-        $allowedOutletIds = $this->allowedOutletIds($user, $tenant->id);
-
-        $providers = WaProvider::query()->where('active', true)->orderBy('id')->get();
-
-        $configs = WaProviderConfig::query()
-            ->where('tenant_id', $tenant->id)
-            ->get()
-            ->keyBy('provider_id');
-
-        $outletsQuery = Outlet::query()->where('tenant_id', $tenant->id)->orderBy('name');
-
-        if (! $ownerMode) {
-            $outletsQuery->whereIn('id', $allowedOutletIds);
-        }
-
-        $outlets = $outletsQuery->get(['id', 'name', 'code']);
-
-        $selectedOutletId = $request->query('outlet_id');
-
-        $messagesQuery = WaMessage::query()->where('tenant_id', $tenant->id);
-
-        if ($selectedOutletId) {
-            $messagesQuery->where('outlet_id', $selectedOutletId);
-        } elseif (! $ownerMode) {
-            $messagesQuery->whereIn('outlet_id', $allowedOutletIds);
-        }
-
-        $messageSummary = [
-            'total' => (clone $messagesQuery)->count(),
-            'queued' => (clone $messagesQuery)->where('status', 'queued')->count(),
-            'sent' => (clone $messagesQuery)->whereIn('status', ['sent', 'delivered'])->count(),
-            'failed' => (clone $messagesQuery)->where('status', 'failed')->count(),
-            'last_sent_at' => (clone $messagesQuery)
-                ->whereIn('status', ['sent', 'delivered'])
-                ->max('updated_at'),
-        ];
-
-        $messageSummary['failure_rate'] = $messageSummary['total'] > 0
-            ? (int) round(($messageSummary['failed'] / $messageSummary['total']) * 100)
-            : 0;
-
-        $messages = (clone $messagesQuery)
-            ->latest('created_at')
-            ->limit(50)
-            ->get();
-
-        $templateRows = $this->templateResolver->listResolved(
-            tenantId: $tenant->id,
-            outletId: is_string($selectedOutletId) && $selectedOutletId !== '' ? $selectedOutletId : null,
-        );
-
-        $providerSummary = [
-            'configured_count' => $configs->count(),
-            'active_count' => $configs->where('is_active', true)->count(),
-            'active_provider_key' => optional($configs->firstWhere('is_active', true)?->provider)->key,
-        ];
-
-        $templateSummary = [
-            'total' => count($templateRows),
-            'default_count' => collect($templateRows)->where('source', 'default')->count(),
-            'override_count' => collect($templateRows)->where('source', '!=', 'default')->count(),
-        ];
-
-        return view('web.wa.index', [
-            'tenant' => $tenant,
-            'user' => $user,
-            'providers' => $providers,
-            'configs' => $configs,
-            'messages' => $messages,
-            'outlets' => $outlets,
-            'selectedOutletId' => $selectedOutletId,
-            'templateRows' => $templateRows,
-            'messageSummary' => $messageSummary,
-            'providerSummary' => $providerSummary,
-            'templateSummary' => $templateSummary,
-        ]);
+        return redirect(WhatsAppPage::getUrl(panel: 'tenant'));
     }
 
     public function upsertProviderConfig(Request $request, Tenant $tenant): RedirectResponse

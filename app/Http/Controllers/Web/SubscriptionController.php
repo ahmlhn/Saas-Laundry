@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Web;
 
 use App\Domain\Audit\AuditEventKeys;
 use App\Domain\Audit\AuditTrailService;
-use App\Domain\Billing\QuotaService;
 use App\Domain\Subscription\SubscriptionPaymentGatewayService;
+use App\Filament\Pages\Subscription as SubscriptionPage;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Web\Concerns\EnsuresWebPanelAccess;
 use App\Models\Plan;
@@ -20,64 +20,25 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
-use Illuminate\View\View;
 
 class SubscriptionController extends Controller
 {
     use EnsuresWebPanelAccess;
 
     public function __construct(
-        private readonly QuotaService $quotaService,
         private readonly AuditTrailService $auditTrail,
         private readonly SubscriptionPaymentGatewayService $paymentGatewayService,
     ) {
     }
 
-    public function index(Request $request, Tenant $tenant): View
+    public function index(Request $request, Tenant $tenant): RedirectResponse
     {
         /** @var User $user */
         $user = $request->user();
         $this->ensurePanelAccess($user, $tenant);
         $this->ensureOwnerOnly($user);
 
-        $tenant->load([
-            'currentPlan:id,key,name,orders_limit,monthly_price_amount,currency',
-            'currentSubscriptionCycle:id,tenant_id,plan_id,status,orders_limit_snapshot,cycle_start_at,cycle_end_at,auto_renew,activated_at',
-            'currentSubscriptionCycle.plan:id,key,name,orders_limit,monthly_price_amount,currency',
-        ]);
-
-        $plans = Plan::query()
-            ->where('is_active', true)
-            ->orderBy('display_order')
-            ->orderBy('id')
-            ->get(['id', 'key', 'name', 'orders_limit', 'monthly_price_amount', 'currency']);
-
-        $pendingChange = SubscriptionChangeRequest::query()
-            ->with('targetPlan:id,key,name,orders_limit,monthly_price_amount,currency')
-            ->where('tenant_id', $tenant->id)
-            ->where('status', 'pending')
-            ->latest('created_at')
-            ->first();
-
-        $invoices = SubscriptionInvoice::query()
-            ->with([
-                'paymentIntents' => fn ($query) => $query->latest('created_at'),
-                'paymentEvents' => fn ($query) => $query->latest('received_at'),
-            ])
-            ->withCount('proofs')
-            ->where('tenant_id', $tenant->id)
-            ->latest('issued_at')
-            ->limit(20)
-            ->get();
-
-        return view('web.subscription.index', [
-            'tenant' => $tenant,
-            'user' => $user,
-            'quota' => $this->quotaService->snapshot($tenant->id),
-            'plans' => $plans,
-            'pendingChange' => $pendingChange,
-            'invoices' => $invoices,
-        ]);
+        return redirect(SubscriptionPage::getUrl(panel: 'tenant'));
     }
 
     public function storeChangeRequest(Request $request, Tenant $tenant): RedirectResponse

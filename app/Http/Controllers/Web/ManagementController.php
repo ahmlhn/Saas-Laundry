@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Web;
 
 use App\Domain\Audit\AuditEventKeys;
 use App\Domain\Audit\AuditTrailService;
+use App\Filament\Resources\OutletServices\OutletServiceResource;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Web\Concerns\EnsuresWebPanelAccess;
 use App\Models\Customer;
@@ -505,89 +506,13 @@ class ManagementController extends Controller
         ]);
     }
 
-    public function outletServices(Request $request, Tenant $tenant): View
+    public function outletServices(Request $request, Tenant $tenant): RedirectResponse
     {
         /** @var User $user */
         $user = $request->user();
         $this->ensurePanelAccess($user, $tenant);
 
-        $filters = $request->validate([
-            'outlet_id' => ['nullable', 'uuid'],
-            'active' => ['nullable', 'boolean'],
-            'service_active' => ['nullable', 'boolean'],
-            'override_price' => ['nullable', 'string', Rule::in(['has', 'none'])],
-            'search' => ['nullable', 'string', 'max:80'],
-        ]);
-
-        $ownerMode = $this->isOwner($user);
-        $allowedOutletIds = $this->allowedOutletIds($user, $tenant->id);
-
-        $outletsQuery = Outlet::query()
-            ->where('tenant_id', $tenant->id)
-            ->orderBy('name');
-
-        if (! $ownerMode) {
-            $outletsQuery->whereIn('id', $allowedOutletIds);
-        }
-
-        $outlets = $outletsQuery->get(['id', 'name', 'code']);
-
-        $services = Service::query()
-            ->where('tenant_id', $tenant->id)
-            ->orderBy('name')
-            ->get(['id', 'name', 'unit_type', 'base_price_amount', 'active']);
-
-        $query = OutletService::query()
-            ->with([
-                'outlet:id,name,code,tenant_id',
-                'service:id,tenant_id,name,unit_type,base_price_amount,active',
-            ])
-            ->whereHas('outlet', fn ($q) => $q->where('tenant_id', $tenant->id))
-            ->whereHas('service', fn ($q) => $q->where('tenant_id', $tenant->id))
-            ->latest('created_at');
-
-        if (! $ownerMode) {
-            $query->whereIn('outlet_id', $allowedOutletIds);
-        }
-
-        if (! empty($filters['outlet_id'])) {
-            $query->where('outlet_id', $filters['outlet_id']);
-        }
-
-        if (array_key_exists('active', $filters)) {
-            $query->where('active', (bool) $filters['active']);
-        }
-
-        if (! empty($filters['search'])) {
-            $search = $filters['search'];
-            $query->whereHas('service', fn ($q) => $q->where('name', 'like', "%{$search}%"));
-        }
-
-        if (array_key_exists('service_active', $filters)) {
-            $query->whereHas('service', fn ($q) => $q->where('active', (bool) $filters['service_active']));
-        }
-
-        if (($filters['override_price'] ?? null) === 'has') {
-            $query->whereNotNull('price_override_amount');
-        }
-
-        if (($filters['override_price'] ?? null) === 'none') {
-            $query->whereNull('price_override_amount');
-        }
-
-        $rows = $query->get();
-
-        return view('web.management.outlet-services', [
-            'tenant' => $tenant,
-            'user' => $user,
-            'ownerMode' => $ownerMode,
-            'filters' => $filters,
-            'outlets' => $outlets,
-            'services' => $services,
-            'rows' => $rows,
-            'activeRows' => $rows->where('active', true)->values(),
-            'inactiveRows' => $rows->where('active', false)->values(),
-        ]);
+        return redirect(OutletServiceResource::getUrl(name: 'index', panel: 'tenant'));
     }
 
     public function upsertOutletService(Request $request, Tenant $tenant): RedirectResponse

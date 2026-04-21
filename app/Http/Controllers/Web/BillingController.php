@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Web;
 use App\Domain\Audit\AuditEventKeys;
 use App\Domain\Audit\AuditTrailService;
 use App\Domain\Billing\QuotaService;
+use App\Filament\Pages\Billing as BillingPage;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Web\Concerns\EnsuresWebPanelAccess;
 use App\Models\Order;
@@ -19,7 +20,6 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
-use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class BillingController extends Controller
@@ -43,36 +43,13 @@ class BillingController extends Controller
     ) {
     }
 
-    public function index(Request $request, Tenant $tenant): View
+    public function index(Request $request, Tenant $tenant): RedirectResponse
     {
         /** @var User $user */
         $user = $request->user();
         $this->ensurePanelAccess($user, $tenant);
 
-        $validated = $request->validate([
-            'period' => ['nullable', 'date_format:Y-m'],
-            'outlet_id' => ['nullable', 'uuid'],
-            'payment_status' => ['nullable', 'string', 'in:paid,partial,unpaid'],
-            'aging_bucket' => ['nullable', 'string', 'in:d0_7,d8_14,d15_30,d31_plus'],
-            'collection_status' => ['nullable', 'string', 'in:pending,contacted,promise_to_pay,escalated,resolved'],
-            'cash_date' => ['nullable', 'date_format:Y-m-d'],
-        ]);
-
-        $viewData = $this->buildBillingViewData(
-            user: $user,
-            tenant: $tenant,
-            period: $validated['period'] ?? now()->format('Y-m'),
-            selectedOutletId: $validated['outlet_id'] ?? null,
-            selectedPaymentStatus: $validated['payment_status'] ?? null,
-            selectedAgingBucket: $validated['aging_bucket'] ?? null,
-            selectedCollectionStatus: $validated['collection_status'] ?? null,
-            cashDate: $validated['cash_date'] ?? now()->format('Y-m-d'),
-        );
-
-        return view('web.billing.index', array_merge([
-            'tenant' => $tenant,
-            'user' => $user,
-        ], $viewData));
+        return redirect(BillingPage::getUrl(panel: 'tenant'));
     }
 
     public function export(Request $request, Tenant $tenant): StreamedResponse

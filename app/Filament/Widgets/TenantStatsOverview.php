@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use App\Filament\Pages\Billing;
 use App\Filament\Support\TenantPanelAccess;
 use App\Models\Customer;
 use App\Models\Order;
@@ -52,7 +53,7 @@ class TenantStatsOverview extends StatsOverviewWidget
                 ->sum('due_amount'), 0, ',', '.'))
                 ->description('Sisa tagihan dari order yang belum lunas')
                 ->color('warning')
-                ->url(route('tenant.billing.index')),
+                ->url(Billing::getUrl(panel: 'tenant')),
             Stat::make('Pelanggan', (string) Customer::query()
                 ->where('tenant_id', $tenantId)
                 ->count())
