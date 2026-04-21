@@ -115,7 +115,7 @@ class PlatformTenantSubscription extends Page
             ->send();
     }
 
-    protected function getTitle(): string
+    public function getTitle(): string
     {
         return 'Tenant Subscription';
     }
